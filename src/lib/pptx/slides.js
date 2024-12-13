@@ -55,8 +55,9 @@ export async function removeHiddenSlides(zip) {
       const serializer = new XMLSerializer();
       const updatedXml = serializer.serializeToString(xmlDoc);
       console.log('Updating presentation.xml');
-      zip.file(PRESENTATION_PATH, updatedXml);
+      zip.file(PRESENTATION_PATH, updatedXml);  // 直接传入字符串
     }
+
 
   } catch (error) {
     console.error('Error removing hidden slides:', error);
