@@ -33,9 +33,7 @@ export async function optimizePPTX(file, options = {}) {
     });
   } catch (error) {
     console.error('PPTX optimization failed:', error);
-    throw new Error(
-      'Failed to optimize PPTX: ' + 
-      (error instanceof Error ? error.message : 'Unknown error')
-    );
+    // Return original file if optimization fails
+    return file;
   }
 }

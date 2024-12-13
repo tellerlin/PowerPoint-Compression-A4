@@ -5,7 +5,6 @@
   let files;
   let processing = false;
   let error = '';
-  let removeHidden = false;
 
   async function handleSubmit() {
     const file = files?.[0];
@@ -17,7 +16,7 @@
     try {
       const optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.7 },
-        removeHiddenSlides: removeHidden
+        removeHiddenSlides: true
       });
       
       const { url, a } = createDownloadLink(optimizedBlob, file.name);
@@ -45,17 +44,6 @@
           class="w-full"
           required
         />
-      </div>
-      <div class="flex items-center space-x-2">
-        <input
-          type="checkbox"
-          id="removeHidden"
-          bind:checked={removeHidden}
-          class="rounded border-gray-300"
-        />
-        <label for="removeHidden" class="text-sm text-gray-700">
-          Remove hidden slides
-        </label>
       </div>
       {#if error}
         <p class="text-red-500 text-sm">{error}</p>
