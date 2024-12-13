@@ -39,7 +39,15 @@ async function detectFormat(data) {
   return image.complete ? image.naturalWidth > 0 ? image.src.split('.').pop() : 'unknown' : 'unknown';
 }
 
+const imageCache = new Map();
+
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
+  // Check cache first
+  const cacheKey = data.byteLength + quality; // Simple cache key based on size and quality
+  if (imageCache.has(cacheKey)) {
+    return imageCache.get(cacheKey);
+  }
+
   validateImageData(data);
   const blob = new Blob([data]);
 
@@ -74,7 +82,9 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
         : jpegBlob;
     }
 
-    return { data: compressedBlob, format: compressedBlob.type.split('/').pop() };
+    const result = { data: compressedBlob, format: compressedBlob.type.split('/').pop() };
+    imageCache.set(cacheKey, result); // Store in cache
+    return result;
   } catch (error) {
     throw new Error('Image processing failed: ' + error.message);
   }
