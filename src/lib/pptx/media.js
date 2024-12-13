@@ -12,11 +12,12 @@ export function findMediaFiles(zip) {
   );
 }
 
-export async function processMediaFile(zip, mediaPath, compressImage) {
-  const file = zip.file(mediaPath);
-  if (!file) return;
-  
-  const data = await file.async('uint8array');
-  const compressedData = await compressImage(data);
-  zip.file(mediaPath, compressedData);
+export async function processMediaFile(zip, mediaPath, compressor) {  
+  if (zip.files[mediaPath]) {  
+      const originalData = await zip.files[mediaPath].async('arraybuffer');  
+      const compressedResult = await compressor(new Uint8Array(originalData));  
+
+      // Update the zip file with compressed data  
+      zip.file(mediaPath, compressedResult.data, { binary: true });  
+  }  
 }
