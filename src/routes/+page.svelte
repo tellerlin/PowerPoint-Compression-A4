@@ -24,16 +24,18 @@
   $: file = files?.[0];
 
   function handleFileUpload(event) {
-    // 处理文件上传
+    files = event.dataTransfer ? event.dataTransfer.files : event.target.files;
   }
 
-  function compressFiles() {
-    // 触发文件压缩并更新进度
+  async function compressFiles() {
+    if (!file) return;
+    progress = 0; // 重置进度
     const interval = setInterval(() => {
       if (progress < 100) {
         progress += 10; // 模拟进度更新
       } else {
         clearInterval(interval);
+        handleSubmit(); // 进度达到100%后触发文件下载
       }
     }, 1000);
   }
@@ -49,7 +51,10 @@
     <button on:click={() => document.getElementById('file-input').click()}>选择文件</button>
     <input type="file" id="file-input" style="display: none;" on:change={handleFileUpload} />
   </div>
-  <button on:click={compressFiles}>压缩文件</button>
+  {#if error}
+    <p class="text-red-500 text-sm">{error}</p>
+  {/if}
+  <button on:click={compressFiles} disabled={processing || !file} class="compress-button">压缩文件</button>
   <div class="progress-bar">
     <div class="progress" style="width: {progress}%;"></div>
   </div>
@@ -60,12 +65,15 @@
     position: fixed;
     top: 0;
     width: 100%;
-    background-color: #333;
+    background-color: #4A90E2;
     color: white;
-    padding: 10px;
+    padding: 15px;
+    text-align: center;
+    font-size: 24px;
   }
 
   .upload-area {
+    border: 2px dashed #4A90E2;
     border: 2px dashed #ccc;
     padding: 20px;
     text-align: center;
