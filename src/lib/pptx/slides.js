@@ -8,62 +8,40 @@ export async function removeHiddenSlides(zip) {
       console.log('Presentation file not found');
       return;
     }
-    console.log('Loaded presentation.xml');
 
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(presentationXml, 'text/xml');
-    const slideIds = xmlDoc.getElementsByTagName('p:sldId');
-    console.log(`Found ${slideIds.length} slides in presentation`);
+    const slideNodes = xmlDoc.getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'sldId');
+    console.log(`Found ${slideNodes.length} slides`);
 
     const slidesToRemove = [];
-    for (let i = 0; i < slideIds.length; i++) {
-      const slideId = slideIds[i].getAttribute('id');
-      const slideRId = slideIds[i].getAttribute('r:id');
-      console.log(`Processing slide ${i + 1}/${slideIds.length}, ID: ${slideId}, rId: ${slideRId}`);
-
-      if (!slideId || !slideRId) {
-        console.log(`Skipping slide ${i + 1} - missing ID or rId`);
-        continue;
-      }
+    for (let i = 0; i < slideNodes.length; i++) {
+      const slideNode = slideNodes[i];
+      const slideId = slideNode.getAttribute('id');
+      const slideRId = slideNode.getAttribute('r:id');
+      if (!slideId || !slideRId) continue;
 
       const slideInfo = await getSlideInfo(zip, slideRId);
-      if (!slideInfo) {
-        console.log(`Could not get info for slide ${slideId}`);
-        continue;
-      }
-      console.log(`Slide path: ${slideInfo.path}`);
-
-      if (await isSlideHidden(zip, slideInfo.path)) {
-        console.log(`Found hidden slide: ${slideId}`);
-        slidesToRemove.push({ slideId, slideInfo });
+      if (slideInfo && await isSlideHidden(zip, slideInfo.path)) {
+        slidesToRemove.push({ slideNode, slideInfo });
       }
     }
 
-    console.log(`Found ${slidesToRemove.length} hidden slides to remove`);
-    for (const { slideId, slideInfo } of slidesToRemove) {
-      console.log(`Removing slide ${slideId} at path ${slideInfo.path}`);
+    console.log(`Removing ${slidesToRemove.length} slides`);
+    for (const { slideNode, slideInfo } of slidesToRemove) {
+      slideNode.parentNode.removeChild(slideNode);
       await removeSlide(zip, slideInfo);
-
-      const slideElement = xmlDoc.querySelector(`p\\:sldId[id="${slideId}"]`);
-      if (slideElement && slideElement.parentNode) {
-        slideElement.parentNode.removeChild(slideElement);
-        console.log(`Removed slide ${slideId} from presentation.xml`);
-      }
     }
 
-    if (slidesToRemove.length > 0) {
-      const serializer = new XMLSerializer();
-      const updatedXml = serializer.serializeToString(xmlDoc);
-      console.log('Updating presentation.xml');
-      zip.file(PRESENTATION_PATH, updatedXml);  // 直接传入字符串
-    }
-
+    const serializer = new XMLSerializer();
+    const updatedXml = serializer.serializeToString(xmlDoc);
+    zip.file(PRESENTATION_PATH, updatedXml);  // 写入更新后的 XML
 
   } catch (error) {
     console.error('Error removing hidden slides:', error);
-    console.error('Error stack:', error.stack);
   }
 }
+
 
 async function getSlideInfo(zip, slideRId) {
   try {
