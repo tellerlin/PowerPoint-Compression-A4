@@ -41,37 +41,41 @@ async function detectFormat(data) {
 
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
   validateImageData(data);
-  try { const blob = new Blob([data]); const bitmap = await createImageBitmap(blob); }
-  catch (error) { throw new Error('Failed to decode image'); }
-  const originalSize = data.byteLength;
-  const originalFormat = await detectFormat(data);
   const blob = new Blob([data]);
-  const bitmap = await createImageBitmap(blob);
-  const { width, height } = calculateOptimalDimensions(bitmap.width, bitmap.height);
-  const canvas = await resizeImage(bitmap, width, height);
-  const imageData = await getImageData(canvas);
-  const analysis = analyzeImage(imageData);
-  let compressedBlob; let format;
-  if (analysis.hasAlpha) {
-    compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
-    format = 'webp';
-  } else {
-    const [webpBlob, jpegBlob] = await Promise.all([
-      canvas.convertToBlob({ type: 'image/webp', quality }),
-      canvas.convertToBlob({ type: 'image/jpeg', quality })
-    ]);
-    const [webpBuffer, jpegBuffer] = await Promise.all([
-      webpBlob.arrayBuffer(),
-      jpegBlob.arrayBuffer()
-    ]);
-    const webpSize = webpBuffer.byteLength; const jpegSize = jpegBuffer.byteLength;
-    if (webpSize <= jpegSize && webpSize < originalSize) {
-      compressedBlob = webpBlob; format = 'webp';
-    } else if (jpegSize < originalSize) {
-      compressedBlob = jpegBlob; format = 'jpeg';
-    } else {
-      compressedBlob = blob; format = originalFormat;
-    }
+
+  // Validate quality parameter
+  if (quality < 0 || quality > 1) {
+    throw new Error('Quality must be between 0 and 1.');
   }
-  return { data: compressedBlob, format };
+
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const originalSize = data.byteLength;
+    const originalFormat = await detectFormat(data);
+
+    const { width, height } = calculateOptimalDimensions(bitmap.width, bitmap.height);
+    const canvas = await resizeImage(bitmap, width, height);
+    const imageData = await getImageData(canvas);
+    const analysis = analyzeImage(imageData);
+
+    let compressedBlob;
+    if (analysis.hasAlpha) {
+      compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
+    } else {
+      const [webpBlob, jpegBlob] = await Promise.all([
+        canvas.convertToBlob({ type: 'image/webp', quality }),
+        canvas.convertToBlob({ type: 'image/jpeg', quality })
+      ]);
+      const webpBuffer = await webpBlob.arrayBuffer();
+      const jpegBuffer = await jpegBlob.arrayBuffer();
+
+      compressedBlob = (webpBuffer.byteLength < jpegBuffer.byteLength && webpBuffer.byteLength < originalSize)
+        ? webpBlob
+        : jpegBlob;
+    }
+
+    return { data: compressedBlob, format: compressedBlob.type.split('/').pop() };
+  } catch (error) {
+    throw new Error('Image processing failed: ' + error.message);
+  }
 }
