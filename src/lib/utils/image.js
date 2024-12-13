@@ -1,4 +1,5 @@
-import { COMPRESSION_SETTINGS } from '../pptx/constants';import { validateImageData } from './validation';
+import { COMPRESSION_SETTINGS } from '../pptx/constants';
+import { validateImageData } from './validation';
 
 async function getImageData(canvas) {
   return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
@@ -15,16 +16,9 @@ function analyzeImage(imageData) {
 }
 
 function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = 1366, maxHeight = 768) {
-  let width = originalWidth,
-    height = originalHeight;
-  if (width > maxWidth) {
-    height = Math.round((height * maxWidth) / width);
-    width = maxWidth;
-  }
-  if (height > maxHeight) {
-    width = Math.round((width * maxHeight) / height);
-    height = maxHeight;
-  }
+  let width = originalWidth, height = originalHeight;
+  if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
+  if (height > maxHeight) { width = Math.round((width * maxHeight) / height); height = maxHeight; }
   return { width, height };
 }
 
@@ -47,28 +41,17 @@ async function detectFormat(data) {
 
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
   validateImageData(data);
-
-  try {
-    const blob = new Blob([data]);
-    const bitmap = await createImageBitmap(blob);
-  } catch (error) {
-    throw new Error('Failed to decode image');
-  }
-
+  try { const blob = new Blob([data]); const bitmap = await createImageBitmap(blob); }
+  catch (error) { throw new Error('Failed to decode image'); }
   const originalSize = data.byteLength;
   const originalFormat = await detectFormat(data);
-
   const blob = new Blob([data]);
   const bitmap = await createImageBitmap(blob);
   const { width, height } = calculateOptimalDimensions(bitmap.width, bitmap.height);
-
   const canvas = await resizeImage(bitmap, width, height);
   const imageData = await getImageData(canvas);
   const analysis = analyzeImage(imageData);
-
-  let compressedBlob;
-  let format;
-
+  let compressedBlob; let format;
   if (analysis.hasAlpha) {
     compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
     format = 'webp';
@@ -77,26 +60,18 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       canvas.convertToBlob({ type: 'image/webp', quality }),
       canvas.convertToBlob({ type: 'image/jpeg', quality })
     ]);
-
     const [webpBuffer, jpegBuffer] = await Promise.all([
       webpBlob.arrayBuffer(),
       jpegBlob.arrayBuffer()
     ]);
-
-    const webpSize = webpBuffer.byteLength;
-    const jpegSize = jpegBuffer.byteLength;
-
+    const webpSize = webpBuffer.byteLength; const jpegSize = jpegBuffer.byteLength;
     if (webpSize <= jpegSize && webpSize < originalSize) {
-      compressedBlob = webpBlob;
-      format = 'webp';
+      compressedBlob = webpBlob; format = 'webp';
     } else if (jpegSize < originalSize) {
-      compressedBlob = jpegBlob;
-      format = 'jpeg';
+      compressedBlob = jpegBlob; format = 'jpeg';
     } else {
-      compressedBlob = blob;
-      format = originalFormat;
+      compressedBlob = blob; format = originalFormat;
     }
   }
-
   return { data: compressedBlob, format };
 }
