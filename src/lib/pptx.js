@@ -4,19 +4,13 @@ import { parseStringPromise } from 'xml2js';
 export async function optimizePPTX(file, options = {}) {
   const zip = await JSZip.loadAsync(file);
   const mediaFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/media/'));
-
   for (const mediaPath of mediaFiles) {
     const file = zip.file(mediaPath);
     if (!file) continue;
     const data = await file.async('uint8array');
     zip.file(mediaPath, await compressImage(data));
   }
-
-  return await zip.generateAsync({
-    type: 'blob',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 9 }
-  });
+  return await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 9 } });
 }
 
 async function compressImage(data) {
