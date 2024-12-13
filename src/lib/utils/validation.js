@@ -7,9 +7,9 @@ export function validateFile(file) {
     throw new Error('Please select a valid PPTX file');
   }
 
-  const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+  const MAX_SIZE = 300 * 1024 * 1024; // 300MB
   if (file.size > MAX_SIZE) {
-    throw new Error('File size must be less than 100MB');
+    throw new Error('File size must be less than 300MB');
   }
 
   return true;

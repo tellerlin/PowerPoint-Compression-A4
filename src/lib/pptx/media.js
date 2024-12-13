@@ -12,12 +12,16 @@ export function findMediaFiles(zip) {
   );
 }
 
+
 export async function processMediaFile(zip, mediaPath, compressor) {  
   if (zip.files[mediaPath]) {  
-      const originalData = await zip.files[mediaPath].async('arraybuffer');  
-      const compressedResult = await compressor(new Uint8Array(originalData));  
-
-      // Update the zip file with compressed data  
-      zip.file(mediaPath, compressedResult.data, { binary: true });  
+      try {  
+          const originalData = await zip.files[mediaPath].async('arraybuffer');  
+          const compressedResult = await compressor(new Uint8Array(originalData));  
+          zip.file(mediaPath, compressedResult.data, { binary: true });  
+      } catch (error) {  
+          console.error(`Failed to process media file ${mediaPath}:`, error);  
+          // Optionally, log or handle the error  
+      }  
   }  
 }

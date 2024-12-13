@@ -71,6 +71,14 @@ async function detectFormat(data) {
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {  
   validateImageData(data);  
 
+  try {  
+      const blob = new Blob([data]);  
+      const bitmap = await createImageBitmap(blob);  
+  } catch (error) {  
+      console.error('Failed to decode image:', error);  
+      throw new Error('Failed to decode image');  
+  }  
+
   const originalSize = data.byteLength;  
   const originalFormat = await detectFormat(data);  
 
