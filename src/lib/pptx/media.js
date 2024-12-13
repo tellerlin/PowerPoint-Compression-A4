@@ -20,8 +20,7 @@ export async function processMediaFile(zip, mediaPath, compressor) {
           const compressedResult = await compressor(new Uint8Array(originalData));  
           zip.file(mediaPath, compressedResult.data, { binary: true });  
       } catch (error) {  
-          console.error(`Failed to process media file ${mediaPath}:`, error);  
-          // Optionally, log or handle the error  
+          // ... existing code ...
       }  
   }  
 }

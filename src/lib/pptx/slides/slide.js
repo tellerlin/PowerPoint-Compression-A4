@@ -8,7 +8,6 @@ export async function isSlideHidden(zip, slidePath) {
     const slideObj = await parseXml(slideXml);
     return slideObj?.p_sld?.show === '0';
   } catch (error) {
-    console.warn('Error checking if slide is hidden:', error);
     return false;
   }
 }

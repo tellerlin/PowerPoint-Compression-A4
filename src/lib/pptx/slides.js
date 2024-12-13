@@ -2,10 +2,8 @@ import { PRESENTATION_PATH } from './constants';
 
 export async function removeHiddenSlides(zip) {
   try {
-    console.log('Starting removeHiddenSlides...');
     const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
     if (!presentationXml) {
-      console.log('Presentation file not found');
       return;
     }
 
@@ -26,7 +24,6 @@ export async function removeHiddenSlides(zip) {
       }
     }
 
-    console.log(`Removing ${slidesToRemove.length} slides`);
     for (const { slideNode, slideInfo } of slidesToRemove) {
       slideNode.parentNode.removeChild(slideNode);
       await removeSlide(zip, slideInfo);

@@ -18,7 +18,6 @@ export async function getSlideInfo(zip, slideRId) {
       relsPath: `ppt/slides/_rels/${relationship.Target.split('/').pop()}.rels`
     };
   } catch (error) {
-    console.warn('Error getting slide info:', error);
     return null;
   }
 }

@@ -11,12 +11,10 @@ export async function optimizePPTX(file, options = {}) {
     
     const zip = await JSZip.loadAsync(file);
 
-    // Remove hidden slides if option is enabled
     if (options.removeHiddenSlides) {
       await removeHiddenSlides(zip);
     }
 
-    // Process media files
     const mediaFiles = findMediaFiles(zip);
     await Promise.all(mediaFiles.map(mediaPath => 
       processMediaFile(zip, mediaPath, data => 
@@ -32,8 +30,6 @@ export async function optimizePPTX(file, options = {}) {
       }
     });
   } catch (error) {
-    console.error('PPTX optimization failed:', error);
-    // Return original file if optimization fails
     return file;
   }
 }

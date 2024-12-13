@@ -5,7 +5,6 @@ export async function getPresentationSlides(zip) {
   try {
     const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
     if (!presentationXml) {
-      console.warn('Presentation file not found');
       return [];
     }
 
@@ -13,7 +12,6 @@ export async function getPresentationSlides(zip) {
     const slidesList = presentationObj?.p_presentation?.p_sldIdLst?.p_sldId;
     
     if (!slidesList) {
-      console.warn('No slides found in presentation');
       return [];
     }
 
@@ -26,7 +24,6 @@ export async function getPresentationSlides(zip) {
         rId: slide.$.r_id
       }));
   } catch (error) {
-    console.error('Error getting presentation slides:', error);
     return [];
   }
 }
@@ -34,7 +31,6 @@ export async function getPresentationSlides(zip) {
 export async function updatePresentationSlides(zip, presentationObj, remainingSlideIds) {
   try {
     if (!presentationObj?.p_presentation?.p_sldIdLst?.p_sldId) {
-      console.warn('Invalid presentation object structure');
       return;
     }
 
