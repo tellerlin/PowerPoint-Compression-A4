@@ -38,7 +38,7 @@ declare module '$env/static/private' {
 	export const DEFLOGDIR: string;
 	export const DriverData: string;
 	export const EDITOR: string;
-	export const EFC_18868: string;
+	export const EFC_13624: string;
 	export const FPS_BROWSER_APP_PROFILE_STRING: string;
 	export const FPS_BROWSER_USER_PROFILE_STRING: string;
 	export const GIT_INSTALL_ROOT: string;
@@ -155,7 +155,7 @@ declare module '$env/dynamic/private' {
 		DEFLOGDIR: string;
 		DriverData: string;
 		EDITOR: string;
-		EFC_18868: string;
+		EFC_13624: string;
 		FPS_BROWSER_APP_PROFILE_STRING: string;
 		FPS_BROWSER_USER_PROFILE_STRING: string;
 		GIT_INSTALL_ROOT: string;

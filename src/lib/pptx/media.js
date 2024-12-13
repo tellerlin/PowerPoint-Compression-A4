@@ -12,7 +12,6 @@ export function findMediaFiles(zip) {
   );
 }
 
-
 export async function processMediaFile(zip, mediaPath, compressor) {  
   if (zip.files[mediaPath]) {  
       try {  

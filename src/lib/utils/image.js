@@ -4,8 +4,7 @@ import { validateImageData } from './validation';
 // Helper to get image data  
 async function getImageData(canvas) {  
     const ctx = canvas.getContext('2d');  
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);  
-    return imageData;  
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);  
 }  
 
 // Function to check for alpha channel  
@@ -21,9 +20,7 @@ function checkAlphaChannel(imageData) {
 
 // Function to analyze image  
 function analyzeImage(imageData) {  
-    const hasAlpha = checkAlphaChannel(imageData);  
-    const isAnimated = false; // Future enhancement: detect animated images  
-    return { hasAlpha, isAnimated };  
+    return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };  
 }  
 
 // Function to calculate optimal dimensions  
