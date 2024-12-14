@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    /* Updated Primary Colors */
+    --color-primary: 43 58 103;      /* #2B3A67 - New primary color */
+    --color-secondary: 52 73 85;     /* #344955 - New secondary color */
+    --color-accent: 255 126 103;     /* #FF7E67 - Accent color */
+    
+    /* Neutral Colors */
+    --color-background: 250 251 252; /* #FAFBFC */
+    --color-surface: 255 255 255;    /* #FFFFFF */
+    --color-text: 38 50 56;         /* #263238 */
+    
+    /* Font Families */
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-display: 'Plus Jakarta Sans', var(--font-sans);
+  }
+}
+
+/* Rest of the existing styles... */
