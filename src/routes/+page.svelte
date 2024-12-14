@@ -1,9 +1,9 @@
 <script>
   import { optimizePPTX } from '$lib/pptx/optimizer';
   import { createDownloadLink, cleanupDownload } from '$lib/utils/file';
-  import Button from '$lib/components/ui/Button.svelte';
-  import UploadZone from '$lib/components/ui/UploadZone.svelte';
-  import ProgressBar from '$lib/components/ui/ProgressBar.svelte';
+  import { Button } from '$lib/components/ui/Button';
+  import { UploadZone } from '$lib/components/ui/UploadZone';
+  import { ProgressBar } from '$lib/components/ui/ProgressBar';
   
   let files;
   let processing = false;

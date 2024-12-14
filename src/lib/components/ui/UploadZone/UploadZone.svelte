@@ -1,5 +1,6 @@
 <script>
-  import Button from './Button.svelte';
+  import { Button } from '../Button';
+  import { handleKeyDown } from './keyboard';
   
   export let fileName = '';
   export let dragActive = false;
@@ -8,7 +9,10 @@
 </script>
 
 <div
-  class="upload-zone {dragActive ? 'active' : ''}"
+  class="border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out cursor-pointer
+    {dragActive 
+      ? 'border-primary-500 bg-primary-50/30' 
+      : 'border-gray-300 hover:border-primary-500 hover:bg-primary-50/20'}"
   role="button"
   tabindex="0"
   aria-label="Upload file zone. Click or drag and drop files here"
@@ -16,11 +20,7 @@
   on:dragleave
   on:dragover|preventDefault
   on:drop
-  on:keydown={(e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      fileInput.click();
-    }
-  }}
+  on:keydown={(e) => handleKeyDown(e, fileInput)}
 >
   <input
     bind:this={fileInput}
@@ -54,13 +54,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .upload-zone {
-    @apply border-2 border-dashed border-gray-300 rounded-lg p-8 transition-all duration-200 ease-in-out cursor-pointer hover:border-primary-500 hover:bg-primary-50;
-  }
-  
-  .upload-zone.active {
-    @apply border-primary-500 bg-primary-50;
-  }
-</style>
