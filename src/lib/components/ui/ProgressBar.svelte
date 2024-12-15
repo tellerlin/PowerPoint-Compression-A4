@@ -10,7 +10,7 @@
 </div>
 
 {#if progress > 0}
-  <p class="text-center text-gray-700 text-lg mt-2">
+  <p class="text-center text-white text-lg mt-2">
     Compressing... {progress}%
   </p>
 {/if}

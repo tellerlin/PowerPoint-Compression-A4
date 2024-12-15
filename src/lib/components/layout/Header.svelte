@@ -8,7 +8,7 @@
   ];
 </script>
 
-<header class="fixed top-0 w-full bg-white shadow-sm z-50">
+<header class="fixed top-0 w-full bg-dark-surface shadow-sm z-50">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <nav class="flex items-center justify-between h-16">
       <div class="flex items-center">
@@ -17,7 +17,7 @@
             <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-7-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M13 2v7h7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span class="text-xl font-display font-bold text-gray-900">PPTX Compressor</span>
+          <span class="text-xl font-display font-bold text-white">PPTX Compressor</span>
         </a>
       </div>
       

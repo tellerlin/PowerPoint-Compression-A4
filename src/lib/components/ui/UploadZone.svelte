@@ -8,7 +8,7 @@
 </script>
 
 <div
-  class="upload-zone {dragActive ? 'active' : ''}"
+  class="upload-zone {dragActive ? 'active' : ''} bg-surface bg-gray-100 dark:bg-gray-800" 
   role="button"
   tabindex="0"
   aria-label="Upload file zone. Click or drag and drop files here"
