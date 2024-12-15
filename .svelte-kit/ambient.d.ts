@@ -61,7 +61,6 @@ declare module '$env/static/private' {
 	export const npm_config_noproxy: string;
 	export const npm_config_npm_version: string;
 	export const npm_config_prefix: string;
-	export const npm_config_registry: string;
 	export const npm_config_userconfig: string;
 	export const npm_config_user_agent: string;
 	export const npm_execpath: string;
@@ -172,7 +171,6 @@ declare module '$env/dynamic/private' {
 		npm_config_noproxy: string;
 		npm_config_npm_version: string;
 		npm_config_prefix: string;
-		npm_config_registry: string;
 		npm_config_userconfig: string;
 		npm_config_user_agent: string;
 		npm_execpath: string;

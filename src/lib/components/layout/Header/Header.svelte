@@ -5,7 +5,7 @@
   $: currentPath = $page.url.pathname;
 </script>
 
-<header class="fixed top-0 w-full bg-surface/95 backdrop-blur-sm border-b border-gray-800 z-50">
+<header class="fixed top-0 w-full bg-background/95 backdrop-blur-sm border-b border-border z-50">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <nav class="flex items-center justify-between h-16">
       <div class="flex items-center">

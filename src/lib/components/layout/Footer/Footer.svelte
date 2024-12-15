@@ -35,7 +35,7 @@
       <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
         {#each footerSections as section}
           <div>
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100 tracking-wider uppercase">
+            <h3 class="text-sm font-semibold text-text tracking-wider uppercase">
               {section.title}
             </h3>
             <ul class="mt-4 space-y-4">
@@ -43,7 +43,7 @@
                 <li>
                   <a
                     href={link.href}
-                    class="text-base text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors duration-150"
+                    class="text-base text-text/70 hover:text-text transition-colors duration-150"
                   >
                     {link.label}
                   </a>
@@ -54,7 +54,7 @@
         {/each}
       </div>
       <div class="mt-8 pt-8 border-t border-border">
-        <p class="text-base text-gray-400 dark:text-gray-500 text-center">
+        <p class="text-base text-text/50 text-center">
           © {new Date().getFullYear()} PPTX Compressor. All rights reserved.
         </p>
       </div>
