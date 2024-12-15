@@ -29,7 +29,7 @@
   ];
 </script>
 
-<footer class="bg-gray-900 border-t border-gray-800">
+<footer class="bg-surface border-t border-surface">
   <Container>
     <div class="py-12">
       <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -43,7 +43,7 @@
                 <li>
                   <a
                     href={link.href}
-                    class="text-base text-gray-400 hover:text-white transition-colors duration-150"
+                    class="text-base text-text hover:text-primary transition-colors duration-150"
                   >
                     {link.label}
                   </a>
@@ -54,7 +54,7 @@
         {/each}
       </div>
       <div class="mt-8 pt-8 border-t border-border">
-        <p class="text-base text-gray-500 text-center">
+        <p class="text-base text-text text-center">
           © {new Date().getFullYear()} PPTX Compressor. All rights reserved.
         </p>
       </div>

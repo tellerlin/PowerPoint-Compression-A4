@@ -20,5 +20,6 @@
 
 /* Global dark theme styles */
 body {
-  @apply bg-background text-text;
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-text));
 }
