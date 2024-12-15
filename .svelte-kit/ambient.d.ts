@@ -38,9 +38,6 @@ declare module '$env/static/private' {
 	export const DEFLOGDIR: string;
 	export const DriverData: string;
 	export const EDITOR: string;
-	export const EFC_13624: string;
-	export const FPS_BROWSER_APP_PROFILE_STRING: string;
-	export const FPS_BROWSER_USER_PROFILE_STRING: string;
 	export const GIT_INSTALL_ROOT: string;
 	export const HOME: string;
 	export const HOMEDRIVE: string;
@@ -48,7 +45,6 @@ declare module '$env/static/private' {
 	export const INIT_CWD: string;
 	export const JAVA_HOME: string;
 	export const LOCALAPPDATA: string;
-	export const LOCAL_GIT_DIRECTORY: string;
 	export const LOGONSERVER: string;
 	export const NEXTHINK: string;
 	export const NODE: string;
@@ -79,7 +75,6 @@ declare module '$env/static/private' {
 	export const NUMBER_OF_PROCESSORS: string;
 	export const OneDrive: string;
 	export const OneDriveCommercial: string;
-	export const ORIGINAL_XDG_CURRENT_DESKTOP: string;
 	export const OS: string;
 	export const Path: string;
 	export const PATHEXT: string;
@@ -93,7 +88,6 @@ declare module '$env/static/private' {
 	export const PROMPT: string;
 	export const PSModulePath: string;
 	export const PUBLIC: string;
-	export const SESSIONNAME: string;
 	export const SNC_LIB: string;
 	export const SNC_LIB_64: string;
 	export const SSF_LIBRARY_PATH: string;
@@ -155,9 +149,6 @@ declare module '$env/dynamic/private' {
 		DEFLOGDIR: string;
 		DriverData: string;
 		EDITOR: string;
-		EFC_13624: string;
-		FPS_BROWSER_APP_PROFILE_STRING: string;
-		FPS_BROWSER_USER_PROFILE_STRING: string;
 		GIT_INSTALL_ROOT: string;
 		HOME: string;
 		HOMEDRIVE: string;
@@ -165,7 +156,6 @@ declare module '$env/dynamic/private' {
 		INIT_CWD: string;
 		JAVA_HOME: string;
 		LOCALAPPDATA: string;
-		LOCAL_GIT_DIRECTORY: string;
 		LOGONSERVER: string;
 		NEXTHINK: string;
 		NODE: string;
@@ -196,7 +186,6 @@ declare module '$env/dynamic/private' {
 		NUMBER_OF_PROCESSORS: string;
 		OneDrive: string;
 		OneDriveCommercial: string;
-		ORIGINAL_XDG_CURRENT_DESKTOP: string;
 		OS: string;
 		Path: string;
 		PATHEXT: string;
@@ -210,7 +199,6 @@ declare module '$env/dynamic/private' {
 		PROMPT: string;
 		PSModulePath: string;
 		PUBLIC: string;
-		SESSIONNAME: string;
 		SNC_LIB: string;
 		SNC_LIB_64: string;
 		SSF_LIBRARY_PATH: string;

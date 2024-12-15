@@ -1,0 +1,7 @@
+/* Animation System */
+:root {
+  --transition-fast: 200ms;
+  --transition-normal: 300ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+}

@@ -1,0 +1,55 @@
+@import './colors.css';
+@import './spacing.css';
+@import './typography.css';
+@import './animation.css';
+
+/* Theme Application */
+:root {
+  color-scheme: light;
+  --primary: var(--light-primary);
+  --secondary: var(--light-secondary);
+  --accent: var(--light-accent);
+  --background: var(--light-background);
+  --surface: var(--light-surface);
+  --text: var(--light-text);
+  --muted: var(--light-muted);
+  --border: var(--light-border);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --primary: var(--dark-primary);
+  --secondary: var(--dark-secondary);
+  --accent: var(--dark-accent);
+  --background: var(--dark-background);
+  --surface: var(--dark-surface);
+  --text: var(--dark-text);
+  --muted: var(--dark-muted);
+  --border: var(--dark-border);
+}
+
+/* Base Styles */
+body {
+  background-color: rgb(var(--background));
+  color: rgb(var(--text));
+  font-family: var(--font-sans);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--transition-normal) var(--ease-out);
+}
+
+/* Focus Styles */
+:focus-visible {
+  outline: 2px solid rgb(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -47,13 +47,13 @@
   $: fileName = files?.[0]?.name;
 </script>
 
-<div class="pt-24 pb-16 px-4 sm:px-6 lg:px-8">
+<div class="pt-24 pb-16 px-4 sm:px-6 lg:px-8 bg-background">
   <div class="max-w-3xl mx-auto">
     <div class="text-center mb-12 animate-fade-in">
-      <h1 class="text-4xl font-display font-bold text-gray-900 mb-4">
+      <h1 class="text-4xl font-display font-bold text-text mb-4">
         Compress Your Presentations
       </h1>
-      <p class="text-xl text-gray-600">
+      <p class="text-xl text-text/70">
         Optimize your PowerPoint files without compromising quality
       </p>
     </div>
@@ -79,8 +79,8 @@
       />
 
       {#if error}
-        <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-          <p class="text-red-700">{error}</p>
+        <div class="bg-red-900/20 border-l-4 border-red-500 p-4 rounded">
+          <p class="text-red-400">{error}</p>
         </div>
       {/if}
 

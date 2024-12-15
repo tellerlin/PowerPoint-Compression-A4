@@ -4,6 +4,9 @@ export default {
   theme: {
     extend: {
       colors: {
+        background: 'rgb(var(--color-background) / <alpha-value>)',
+        surface: 'rgb(var(--color-surface) / <alpha-value>)',
+        text: 'rgb(var(--color-text) / <alpha-value>)',
         primary: {
           50: 'rgb(var(--color-primary) / 0.05)',
           100: 'rgb(var(--color-primary) / 0.1)',

@@ -1,0 +1,22 @@
+/* Theme Colors */
+:root {
+  /* Light Theme Colors */
+  --light-primary: 59 130 246;    /* #3B82F6 */
+  --light-secondary: 99 102 241;  /* #6366F1 */
+  --light-accent: 236 72 153;     /* #EC4899 */
+  --light-background: 255 255 255; /* #FFFFFF */
+  --light-surface: 249 250 251;   /* #F9FAFB */
+  --light-text: 17 24 39;         /* #111827 */
+  --light-muted: 107 114 128;     /* #6B7280 */
+  --light-border: 229 231 235;    /* #E5E7EB */
+
+  /* Dark Theme Colors */
+  --dark-primary: 96 165 250;     /* #60A5FA */
+  --dark-secondary: 129 140 248;  /* #818CF8 */
+  --dark-accent: 244 114 182;     /* #F472B6 */
+  --dark-background: 17 24 39;    /* #111827 */
+  --dark-surface: 31 41 55;       /* #1F2937 */
+  --dark-text: 243 244 246;       /* #F3F4F6 */
+  --dark-muted: 156 163 175;      /* #9CA3AF */
+  --dark-border: 55 65 81;        /* #374151 */
+}
