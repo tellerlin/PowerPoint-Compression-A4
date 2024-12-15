@@ -18,37 +18,25 @@ const NAMESPACE_PARSE_OPTIONS = {
 };
 
 export async function parseXmlWithNamespaces(xml) {
-  try {
-    return await parseStringPromise(xml, NAMESPACE_PARSE_OPTIONS);
-  } catch (error) {
-    throw new Error('Failed to parse XML document');
-  }
+  return await parseStringPromise(xml, NAMESPACE_PARSE_OPTIONS);
 }
 
 export async function parseXml(xml) {
-  try {
-    return await parseStringPromise(xml, {
-      ...DEFAULT_PARSE_OPTIONS,
-      mergeAttrs: true
-    });
-  } catch (error) {
-    throw new Error('Failed to parse XML document');
-  }
+  return await parseStringPromise(xml, {
+    ...DEFAULT_PARSE_OPTIONS,
+    mergeAttrs: true
+  });
 }
 
 export function buildXml(obj) {
-  try {
-    const builder = new Builder({
-      renderOpts: { pretty: true, indent: '  ' },
-      xmldec: { version: '1.0', encoding: 'UTF-8', standalone: true },
-      cdata: false
-    });
+  const builder = new Builder({
+    renderOpts: { pretty: true, indent: '  ' },
+    xmldec: { version: '1.0', encoding: 'UTF-8', standalone: true },
+    cdata: false
+  });
 
-    return builder.buildObject(obj)
-      .replace(/p_/g, 'p:')
-      .replace(/r_/g, 'r:')
-      .replace(/a_/g, 'a:');
-  } catch (error) {
-    throw new Error('Failed to build XML document');
-  }
+  return builder.buildObject(obj)
+    .replace(/p_/g, 'p:')
+    .replace(/r_/g, 'r:')
+    .replace(/a_/g, 'a:');
 }

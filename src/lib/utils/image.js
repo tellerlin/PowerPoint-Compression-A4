@@ -42,8 +42,7 @@ async function detectFormat(data) {
 const imageCache = new Map();
 
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
-  // Check cache first
-  const cacheKey = data.byteLength + quality; // Simple cache key based on size and quality
+  const cacheKey = data.byteLength + quality;
   if (imageCache.has(cacheKey)) {
     return imageCache.get(cacheKey);
   }
@@ -51,7 +50,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   validateImageData(data);
   const blob = new Blob([data]);
 
-  // Validate quality parameter
   if (quality < 0 || quality > 1) {
     throw new Error('Quality must be between 0 and 1.');
   }
@@ -83,7 +81,7 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     }
 
     const result = { data: compressedBlob, format: compressedBlob.type.split('/').pop() };
-    imageCache.set(cacheKey, result); // Store in cache
+    imageCache.set(cacheKey, result);
     return result;
   } catch (error) {
     throw new Error('Image processing failed: ' + error.message);
