@@ -55,7 +55,7 @@
       </div>
       <div class="mt-8 pt-8 border-t border-border">
         <p class="text-base text-text text-center">
-          {new Date().getFullYear()} PPTX Compressor. All rights reserved.
+          {new Date().getFullYear()} Copyright © ByteSlim. All rights reserved.
         </p>
       </div>
     </div>
