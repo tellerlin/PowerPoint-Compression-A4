@@ -47,7 +47,7 @@
 <div class="py-24">
   <Container>
     <div class="max-w-3xl mx-auto">
-      <h1 class="text-4xl font-display font-bold mb-8">Frequently Asked Questions</h1>
+      <h1 class="text-4xl font-display font-bold mb-8 text-primary">Frequently Asked Questions</h1>
       
       <div class="space-y-12">
         {#each faqs as category}

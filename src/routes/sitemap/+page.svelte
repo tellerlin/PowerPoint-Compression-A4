@@ -31,7 +31,7 @@
 <div class="py-24">
   <Container>
     <div class="max-w-4xl mx-auto">
-      <h1 class="text-4xl font-display font-bold mb-8">Sitemap</h1>
+      <h1 class="text-4xl font-display font-bold mb-8 text-primary">Sitemap</h1>
       
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
         {#each sections as section}
