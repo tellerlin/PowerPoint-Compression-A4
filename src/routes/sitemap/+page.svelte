@@ -33,10 +33,10 @@
     <div class="max-w-4xl mx-auto">
       <h1 class="text-4xl font-display font-bold mb-8 text-primary">Sitemap</h1>
       
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
+      <div class="sitemap-container">
         {#each sections as section}
-          <div>
-            <h2 class="text-xl font-display font-semibold mb-4">{section.title}</h2>
+          <div class="sitemap-item">
+            <h2 class="text-lg font-display font-semibold mb-2">{section.title}</h2>
             <ul class="space-y-2">
               {#each section.links as link}
                 <li>
@@ -52,3 +52,23 @@
     </div>
   </Container>
 </div>
+
+<style>
+  .sitemap-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    padding: 20px;
+  }
+  .sitemap-item {
+    background: #333; /* Deep gray color */
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    transition: transform 0.2s;
+  }
+  .sitemap-item:hover {
+    transform: scale(1.05);
+  }
+</style>
