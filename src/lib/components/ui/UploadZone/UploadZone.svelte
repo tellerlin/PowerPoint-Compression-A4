@@ -51,6 +51,7 @@
       <Button variant="primary" on:click={() => fileInput.click()}>
         Browse Files
       </Button>
+      <p class="text-text/70 text-lg">up to 300MB</p>
     </div>
   {/if}
 </div>
