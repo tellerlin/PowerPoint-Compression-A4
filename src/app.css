@@ -12,9 +12,26 @@
     --color-accent: 236 72 153;       /* #ec4899 - Pink for accent */
     --color-text: 229 231 235;        /* #e5e7eb - Light gray for text */
     
+    /* Light Theme Colors */
+    --color-background-light: 255 255 255; /* #ffffff - Light background */
+    --color-surface-light: 240 240 240;    /* #f0f0f0 - Surface color */
+    --color-text-light: 0 0 0;              /* #000000 - Text color */
+    
     /* Font Families */
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
     --font-display: 'Plus Jakarta Sans', var(--font-sans);
+  }
+
+  /* Dark Theme Styles */
+  [data-theme='dark'] {
+    background-color: rgb(var(--color-background));
+    color: rgb(var(--color-text));
+  }
+
+  /* Light Theme Styles */
+  [data-theme='light'] {
+    background-color: rgb(var(--color-background-light));
+    color: rgb(var(--color-text-light));
   }
 }
 
