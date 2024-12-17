@@ -22,7 +22,6 @@
     progress = 0;
     
     try {
-      // Start compression process
       currentStep = 'Initializing...';
       progress = 5;
 
@@ -31,16 +30,13 @@
         removeHiddenSlides: true
       });
 
-      // Update progress based on completion
       currentStep = 'Finalizing...';
       progress = 95;
 
-      // Create and trigger download
       currentStep = 'Preparing download...';
       const { url, a } = createDownloadLink(optimizedBlob, file.name);
       a.click();
       
-      // Cleanup
       cleanupDownload(url);
       progress = 100;
       currentStep = 'Complete!';
@@ -59,61 +55,69 @@
   $: fileName = files?.[0]?.name;
 </script>
 
-<div class="pt-24 pb-16 px-4 sm:px-6 lg:px-8 bg-background">
-  <div class="max-w-3xl mx-auto">
-    <div class="text-center mb-12 animate-fade-in">
-      <h1 class="text-4xl font-display font-bold text-text mb-4">
-        PowerPoint Compressor
-      </h1>
-      <p class="text-xl text-text/70">
-        Optimize your presentations while maintaining quality
-      </p>
-    </div>
+<div class="min-h-screen">
+  <!-- Hero Section -->
+  <div class="relative bg-surface overflow-hidden">
+    <img
+      src="/images/hero-banner.jpg"
+      alt="PowerPoint Presentation Optimization"
+      class="absolute inset-0 w-full h-full object-cover opacity-10"
+    />
+    <div class="relative pt-24 pb-16 px-4 sm:px-6 lg:px-8">
+      <div class="max-w-3xl mx-auto text-center">
+        <h1 class="text-5xl font-display font-bold text-text mb-6 animate-fade-in">
+          PowerPoint Compressor
+        </h1>
+        <p class="text-xl text-text/70 mb-12 animate-slide-up">
+          Optimize your presentations while maintaining quality
+        </p>
 
-    <div class="space-y-8 animate-slide-up">
-      <UploadZone
-        {fileName}
-        {dragActive}
-        on:change={(e) => files = e.target.files}
-        on:dragenter={(e) => {
-          e.preventDefault();
-          dragActive = true;
-        }}
-        on:dragleave={(e) => {
-          e.preventDefault();
-          dragActive = false;
-        }}
-        on:drop={(e) => {
-          e.preventDefault();
-          dragActive = false;
-          files = e.dataTransfer.files;
-        }}
-      />
+        <div class="space-y-8 animate-slide-up">
+          <UploadZone
+            {fileName}
+            {dragActive}
+            on:change={(e) => files = e.target.files}
+            on:dragenter={(e) => {
+              e.preventDefault();
+              dragActive = true;
+            }}
+            on:dragleave={(e) => {
+              e.preventDefault();
+              dragActive = false;
+            }}
+            on:drop={(e) => {
+              e.preventDefault();
+              dragActive = false;
+              files = e.dataTransfer.files;
+            }}
+          />
 
-      {#if error}
-        <Alert type="error" title="Compression Error">
-          {error}
-        </Alert>
-      {/if}
+          {#if error}
+            <Alert type="error" title="Compression Error">
+              {error}
+            </Alert>
+          {/if}
 
-      {#if processing}
-        <div class="space-y-4">
-          <ProgressBar {progress} />
-          {#if currentStep}
-            <p class="text-center text-text/70">{currentStep}</p>
+          {#if processing}
+            <div class="space-y-4">
+              <ProgressBar {progress} />
+              {#if currentStep}
+                <p class="text-center text-text/70">{currentStep}</p>
+              {/if}
+            </div>
+          {:else if fileName}
+            <div class="text-center">
+              <Button
+                variant="primary"
+                on:click={handleSubmit}
+                disabled={processing}
+              >
+                Start Compression
+              </Button>
+            </div>
           {/if}
         </div>
-      {:else if fileName}
-        <div class="text-center">
-          <Button
-            variant="primary"
-            on:click={handleSubmit}
-            disabled={processing}
-          >
-            Start Compression
-          </Button>
-        </div>
-      {/if}
+      </div>
     </div>
   </div>
 </div>
