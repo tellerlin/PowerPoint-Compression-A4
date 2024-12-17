@@ -1,21 +1,24 @@
 <script>
   import '../app.css';
-  import Header from '$lib/components/layout/Header.svelte';
-  import Footer from '$lib/components/layout/Footer.svelte';
-  import ThemeProvider from '../ThemeProvider.svelte';
-  import { themeStore, toggleTheme } from '../themeStore.js';
+  import { onMount } from 'svelte';
+  import { themeStore } from '$lib/stores/theme';
+  import { Header } from '$lib/components/layout/Header';
+  import { Footer } from '$lib/components/layout/Footer';
+  import { Container } from '$lib/components/ui';
 
-  export let theme = $themeStore;
+  onMount(() => {
+    themeStore.initialize();
+  });
 </script>
 
-<ThemeProvider>
-  <div class="flex flex-col min-h-screen">
-    <Header />
-    <button class="p-2 m-4" on:click={toggleTheme}>Toggle Theme</button>
-    <p>Current Theme: {theme}</p>
-    <main class="flex-grow">
+<div class="min-h-screen flex flex-col bg-background text-text">
+  <Header />
+  
+  <main class="flex-1">
+    <Container>
       <slot />
-    </main>
-    <Footer />
-  </div>
-</ThemeProvider>
+    </Container>
+  </main>
+
+  <Footer />
+</div>

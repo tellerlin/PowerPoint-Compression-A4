@@ -1,91 +1,76 @@
+@import './theme/colors.css';
+@import './theme/spacing.css';
+@import './theme/typography.css';
+@import './theme/animation.css';
+
 /* Theme System */
 :root {
-  /* Light Theme Colors */
-  --light-primary: 59 130 246;    /* #3B82F6 */
-  --light-secondary: 99 102 241;  /* #6366F1 */
-  --light-accent: 236 72 153;     /* #EC4899 */
-  --light-background: 255 255 255; /* #FFFFFF */
-  --light-surface: 249 250 251;   /* #F9FAFB */
-  --light-text: 17 24 39;         /* #111827 */
-  --light-muted: 107 114 128;     /* #6B7280 */
-  --light-border: 229 231 235;    /* #E5E7EB */
-
-  /* Dark Theme Colors */
-  --dark-primary: 96 165 250;     /* #60A5FA */
-  --dark-secondary: 129 140 248;  /* #818CF8 */
-  --dark-accent: 244 114 182;     /* #F472B6 */
-  --dark-background: 17 24 39;    /* #111827 */
-  --dark-surface: 31 41 55;       /* #1F2937 */
-  --dark-text: 243 244 246;       /* #F3F4F6 */
-  --dark-muted: 156 163 175;      /* #9CA3AF */
-  --dark-border: 55 65 81;        /* #374151 */
-
-  /* Spacing System */
-  --space-1: 0.25rem;  /* 4px */
-  --space-2: 0.5rem;   /* 8px */
-  --space-3: 0.75rem;  /* 12px */
-  --space-4: 1rem;     /* 16px */
-  --space-6: 1.5rem;   /* 24px */
-  --space-8: 2rem;     /* 32px */
-  --space-12: 3rem;    /* 48px */
-  --space-16: 4rem;    /* 64px */
+  /* Base Colors */
+  --color-background: var(--light-background);
+  --color-surface: var(--light-surface);
+  --color-primary: var(--light-primary);
+  --color-secondary: var(--light-secondary);
+  --color-accent: var(--light-accent);
+  --color-text: var(--light-text);
+  --color-muted: var(--light-muted);
+  --color-border: var(--light-border);
 
   /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Plus Jakarta Sans', var(--font-sans);
-  
-  /* Animation Timing */
-  --transition-fast: 200ms;
-  --transition-normal: 300ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-}
 
-/* Default Light Theme */
-:root {
-  color-scheme: light;
-  --primary: var(--light-primary);
-  --secondary: var(--light-secondary);
-  --accent: var(--light-accent);
-  --background: var(--light-background);
-  --surface: var(--light-surface);
-  --text: var(--light-text);
-  --muted: var(--light-muted);
-  --border: var(--light-border);
+  /* Animation */
+  --transition-fast: 150ms;
+  --transition-normal: 250ms;
+  --transition-slow: 350ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Dark Theme */
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --primary: var(--dark-primary);
-  --secondary: var(--dark-secondary);
-  --accent: var(--dark-accent);
-  --background: var(--dark-background);
-  --surface: var(--dark-surface);
-  --text: var(--dark-text);
-  --muted: var(--dark-muted);
-  --border: var(--dark-border);
+[data-theme="dark"] {
+  --color-background: var(--dark-background);
+  --color-surface: var(--dark-surface);
+  --color-primary: var(--dark-primary);
+  --color-secondary: var(--dark-secondary);
+  --color-accent: var(--dark-accent);
+  --color-text: var(--dark-text);
+  --color-muted: var(--dark-muted);
+  --color-border: var(--dark-border);
 }
 
 /* Base Styles */
 body {
-  background-color: rgb(var(--background));
-  color: rgb(var(--text));
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-text));
   font-family: var(--font-sans);
-  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  transition: background-color var(--transition-normal) var(--ease-out);
+  transition: background-color var(--transition-normal) var(--ease-out),
+              color var(--transition-normal) var(--ease-out);
+}
+
+/* Smooth Theme Transitions */
+*,
+*::before,
+*::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-timing-function: var(--ease-out);
+  transition-duration: var(--transition-normal);
 }
 
 /* Focus Styles */
 :focus-visible {
-  outline: 2px solid rgb(var(--primary));
+  outline: 2px solid rgb(var(--color-primary));
   outline-offset: 2px;
 }
 
 /* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
