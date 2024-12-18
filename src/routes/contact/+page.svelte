@@ -3,14 +3,6 @@
 </script>
 
 <style>
-  .email-text {
-    font-size: 28px; /* Increased font size */
-  }
-  .email-icon {
-    width: 32px; /* Adjust icon size as needed */
-    height: 32px; /* Adjust icon size as needed */
-    color: white; /* Set icon color to white */
-  }
 </style>
 
 <div class="py-24">
