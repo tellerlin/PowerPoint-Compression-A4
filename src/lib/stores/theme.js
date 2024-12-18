@@ -15,13 +15,6 @@ function createThemeStore() {
         return newTheme;
       });
     },
-    initialize: () => {
-      if (browser) {
-        const theme = browser ? localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : 'light';
-        document.documentElement.setAttribute('data-theme', theme);
-        set(theme);
-      }
-    }
   };
 }
 
