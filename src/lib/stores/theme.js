@@ -2,19 +2,7 @@ import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
 
 function createThemeStore() {
-  // Get initial theme from localStorage or system preference
-  const getInitialTheme = () => {
-    if (!browser) return 'light';
-    
-    const stored = localStorage.getItem('theme');
-    if (stored) return stored;
-    
-    return window.matchMedia('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
-  };
-
-  const { subscribe, set, update } = writable(getInitialTheme());
+  const { subscribe, set, update } = writable(browser ? localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : 'light');
 
   return {
     subscribe,
@@ -29,7 +17,7 @@ function createThemeStore() {
     },
     initialize: () => {
       if (browser) {
-        const theme = getInitialTheme();
+        const theme = browser ? localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : 'light';
         document.documentElement.setAttribute('data-theme', theme);
         set(theme);
       }

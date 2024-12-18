@@ -56,7 +56,6 @@
 </script>
 
 <div class="min-h-screen">
-  <!-- Hero Section -->
   <div class="relative bg-surface overflow-hidden">
     <img
       src="/images/hero-banner.jpg"
