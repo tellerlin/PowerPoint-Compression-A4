@@ -3,9 +3,7 @@
 @import './theme/typography.css';
 @import './theme/animation.css';
 
-/* Theme System */
 :root {
-  /* Base Colors */
   --color-background: var(--light-background);
   --color-surface: var(--light-surface);
   --color-primary: var(--light-primary);
@@ -15,11 +13,9 @@
   --color-muted: var(--light-muted);
   --color-border: var(--light-border);
 
-  /* Typography */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Plus Jakarta Sans', var(--font-sans);
 
-  /* Animation */
   --transition-fast: 150ms;
   --transition-normal: 250ms;
   --transition-slow: 350ms;
@@ -29,7 +25,6 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Dark Theme */
 [data-theme="dark"] {
   --color-background: var(--dark-background);
   --color-surface: var(--dark-surface);
@@ -41,7 +36,6 @@
   --color-border: var(--dark-border);
 }
 
-/* Base Styles */
 body {
   background-color: rgb(var(--color-background));
   color: rgb(var(--color-text));
@@ -51,7 +45,6 @@ body {
               color var(--transition-normal) var(--ease-out);
 }
 
-/* Smooth Theme Transitions */
 *,
 *::before,
 *::after {
@@ -60,13 +53,11 @@ body {
   transition-duration: var(--transition-normal);
 }
 
-/* Focus Styles */
 :focus-visible {
   outline: 2px solid rgb(var(--color-primary));
   outline-offset: 2px;
 }
 
-/* Reduced Motion */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
