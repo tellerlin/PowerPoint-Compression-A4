@@ -19,7 +19,6 @@ export async function processMediaFile(zip, mediaPath, compressor) {
           const compressedResult = await compressor(new Uint8Array(originalData));  
           zip.file(mediaPath, compressedResult.data, { binary: true });  
       } catch (error) {  
-          console.warn(`压缩媒体文件 ${mediaPath} 失败:`, error);  
           // ... existing code ...
       }  
   }  

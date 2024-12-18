@@ -16,4 +16,3 @@ export const COMPRESSION_SETTINGS = {
 export const MEDIA_PATH_PREFIX = 'ppt/media/';
 export const PRESENTATION_PATH = 'ppt/presentation.xml';
 export const SLIDE_PREFIX = 'ppt/slides/slide';
-export const DEFAULT_CONCURRENCY = 5;

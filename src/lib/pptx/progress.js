@@ -1,19 +1,10 @@
-import { writable, derived } from 'svelte/store';
+import { writable } from 'svelte/store';
 
 // Progress store with both percentage and status message
 export const compressionProgress = writable({
   percentage: 0,
   status: '',
   error: null
-});
-
-// 可选：添加进度条基于阶段的衔接更流畅
-export const detailedCompressionProgress = derived(compressionProgress, ($compressionProgress) => {
-  // 自定义计算或转换
-  return {
-    ...$compressionProgress,
-    // 例如，添加预计剩余时间等
-  };
 });
 
 // Progress manager class
@@ -36,20 +27,19 @@ export class ProgressManager {
     this.mediaFilesCount = totalFiles;
     this.processedFiles = 0;
     this.currentPhase = 'media';
-    this.updateProgress(this.phases.init.weight, '开始处理媒体文件...');
+    this.updateProgress(this.phases.init.weight, 'Starting media file processing...');
   }
 
   // Update progress for initialization phase
   updateInitProgress(percentage) {
     const phase = this.phases.init;
     const actualProgress = (percentage / 100) * phase.weight;
-    this.updateProgress(actualProgress, '初始化压缩过程...');
+    this.updateProgress(actualProgress, 'Initializing compression process...');
   }
 
   // Update progress for media processing phase
   updateMediaProgress(processedFile, fileName) {
     if (this.mediaFilesCount === null) {
-      console.warn('Media files count 未初始化');
       return;
     }
     this.processedFiles++;
@@ -60,12 +50,12 @@ export class ProgressManager {
     // 在处理每个文件时更新进度
     this.updateProgress(
       totalProgress,
-      `处理媒体文件 ${this.processedFiles}/${this.mediaFilesCount}: ${fileName}`
+      `Processing media file ${this.processedFiles}/${this.mediaFilesCount}: ${fileName}`
     );
 
     // 如果所有文件都处理完，更新到最终进度
     if (this.processedFiles === this.mediaFilesCount) {
-      this.updateFinalizationProgress('正在完成...');
+      this.updateFinalizationProgress('Finalizing...');
     }
   }
 
@@ -79,7 +69,7 @@ export class ProgressManager {
 
   // Complete the compression process
   completeCompression() {
-    this.updateProgress(100, '压缩成功完成！');
+    this.updateProgress(100, 'Compression completed successfully!');
   }
 
   // Handle error cases

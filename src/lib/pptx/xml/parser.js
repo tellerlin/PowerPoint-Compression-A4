@@ -18,14 +18,24 @@ const NAMESPACE_PARSE_OPTIONS = {
 };
 
 export async function parseXmlWithNamespaces(xml) {
-  return await parseStringPromise(xml, NAMESPACE_PARSE_OPTIONS);
+  try {
+    return await parseStringPromise(xml, NAMESPACE_PARSE_OPTIONS);
+  } catch (error) {
+    console.error('解析 XML 时出错:', error);
+    throw error;
+  }
 }
 
 export async function parseXml(xml) {
-  return await parseStringPromise(xml, {
-    ...DEFAULT_PARSE_OPTIONS,
-    mergeAttrs: true
-  });
+  try {
+    return await parseStringPromise(xml, {
+      ...DEFAULT_PARSE_OPTIONS,
+      mergeAttrs: true
+    });
+  } catch (error) {
+    console.error('解析 XML 时出错:', error);
+    throw error;
+  }
 }
 
 export function buildXml(obj) {
