@@ -29,8 +29,8 @@
 
   <meta property="og:type" content="website">
   <meta property="og:url" content={siteMetadata.url}>
-  <meta property="og:title" content={siteMetadata.title.en}>
-  <meta property="og:description" content={siteMetadata.description.en}>
+  <meta property="og:title" content={siteMetadata.title.zh}>
+  <meta property="og:description" content={siteMetadata.description.zh}>
   <meta property="og:image" content="{siteMetadata.url}{siteMetadata.images.og}">
 
   <meta name="twitter:card" content="summary_large_image">
