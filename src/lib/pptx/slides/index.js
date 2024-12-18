@@ -4,6 +4,10 @@ import { getSlideInfo } from './relationships';
 import { isSlideHidden, removeSlide } from './slide';
 import { PRESENTATION_PATH } from '../constants';
 
+/**
+ * 移除隐藏的幻灯片
+ * @param {JSZip} zip - 处理中的 ZIP 文件
+ */
 export async function removeHiddenSlides(zip) {
   try {
     const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
@@ -18,30 +22,34 @@ export async function removeHiddenSlides(zip) {
       return;
     }
 
-    const remainingSlideIds = [];
-    let slidesRemoved = false;
-
-    for (const slide of slides) {
+    const slideChecks = await Promise.all(slides.map(async (slide) => {
       const slideInfo = await getSlideInfo(zip, slide.rId);
       if (!slideInfo) {
-        remainingSlideIds.push(slide.id);
-        continue;
+        return { id: slide.id, hidden: false };
       }
-
       const hidden = await isSlideHidden(zip, slideInfo.path);
-      if (hidden) {
-        await removeSlide(zip, slideInfo);
-        slidesRemoved = true;
-      } else {
-        remainingSlideIds.push(slide.id);
-      }
-    }
+      return { id: slide.id, hidden, slideInfo };
+    }));
 
-    if (slidesRemoved) {
+    const remainingSlideIds = [];
+    const slidesToRemove = [];
+
+    slideChecks.forEach(check => {
+      if (check.hidden) {
+        slidesToRemove.push(check.slideInfo);
+      } else {
+        remainingSlideIds.push(check.id);
+      }
+    });
+
+    if (slidesToRemove.length > 0) {
+      await Promise.all(slidesToRemove.map(slideInfo => removeSlide(zip, slideInfo)));
       await updatePresentationSlides(zip, presentationObj, remainingSlideIds);
     }
 
   } catch (error) {
-    // ... existing code ...
+    console.error('Error removing hidden slides:', error);
   }
 }
+
+// 如果有其他需要导出的函数，继续在这里导出

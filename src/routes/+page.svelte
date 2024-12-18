@@ -1,5 +1,6 @@
 <script>
   import { optimizePPTX } from '$lib/pptx/optimizer';
+  import { ProgressManager, compressionProgress } from '$lib/pptx/progress';
   import { createDownloadLink, cleanupDownload } from '$lib/utils/file';
   import { Button } from '$lib/components/ui/Button';
   import { UploadZone } from '$lib/components/ui/UploadZone';
@@ -8,51 +9,57 @@
   
   let files;
   let processing = false;
-  let error = '';
-  let progress = 0;
   let dragActive = false;
-  let currentStep = '';
+  let progressManager;
+
+  $: fileName = files?.[0]?.name;
 
   async function handleSubmit() {
     const file = files?.[0];
     if (!file) return;
     
     processing = true;
-    error = '';
-    progress = 0;
+    progressManager = new ProgressManager();
     
     try {
-      currentStep = 'Initializing...';
-      progress = 5;
-
+      // Start optimization with progress callbacks
       const optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.7 },
-        removeHiddenSlides: true
+        removeHiddenSlides: true,
+        onProgress: (phase, detail) => {
+          switch (phase) {
+            case 'init':
+              progressManager.updateInitProgress(detail.percentage);
+              break;
+            case 'mediaCount':
+              progressManager.initializeCompression(detail.count);
+              break;
+            case 'media':
+              progressManager.updateMediaProgress(detail.fileIndex, detail.fileName);
+              break;
+            case 'finalize':
+              progressManager.updateFinalizationProgress(detail.status);
+              break;
+          }
+        }
       });
 
-      currentStep = 'Finalizing...';
-      progress = 95;
-
-      currentStep = 'Preparing download...';
+      // Handle successful completion
+      progressManager.completeCompression();
+      
+      // Create and trigger download
       const { url, a } = createDownloadLink(optimizedBlob, file.name);
       a.click();
-      
       cleanupDownload(url);
-      progress = 100;
-      currentStep = 'Complete!';
       
     } catch (e) {
-      error = e.message;
+      progressManager.handleError(e, $compressionProgress.percentage);
     } finally {
       setTimeout(() => {
         processing = false;
-        currentStep = '';
-        progress = 0;
       }, 2000);
     }
   }
-
-  $: fileName = files?.[0]?.name;
 </script>
 
 <div class="min-h-screen">
@@ -91,18 +98,19 @@
             }}
           />
 
-          {#if error}
+          {#if $compressionProgress.error}
             <Alert type="error" title="Compression Error">
-              {error}
+              {$compressionProgress.error}
             </Alert>
           {/if}
 
           {#if processing}
             <div class="space-y-4">
-              <ProgressBar {progress} />
-              {#if currentStep}
-                <p class="text-center text-text/70">{currentStep}</p>
-              {/if}
+              <ProgressBar 
+                progress={$compressionProgress.percentage}
+                status={$compressionProgress.status}
+                error={$compressionProgress.error}
+              />
             </div>
           {:else if fileName}
             <div class="text-center">
