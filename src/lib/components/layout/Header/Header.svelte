@@ -11,7 +11,7 @@
       <div class="flex items-center">
         <img src="/images/logo.svg" alt="Logo" class="logo" style="max-height: 64px; max-width: auto;" />
         <a href="/" class="flex items-center space-x-2">
-          <span class="text-xl font-display font-bold text-white">ByteSlim Compressor</span>
+          <span class="text-xl font-display font-bold text-white">ByteSlim Compression</span>
         </a>
       </div>
       
