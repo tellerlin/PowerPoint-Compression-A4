@@ -12,7 +12,7 @@
 
 <svelte:element 
   this={as}
-  class="w-full mx-auto px-4 sm:px-6 lg:px-8 {sizes[size]} {class_}"
+  class={`w-full mx-auto px-4 sm:px-6 lg:px-8 ${sizes[size]} ${class_}`}
 >
   <slot />
 </svelte:element>

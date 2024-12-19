@@ -23,6 +23,7 @@
               {currentPath === item.href 
                 ? 'bg-surface/20 text-white' 
                 : 'text-white hover:bg-dark-surface hover:text-gray-300'}"
+            aria-current={currentPath === item.href ? 'page' : undefined}
           >
             {item.label}
           </a>
