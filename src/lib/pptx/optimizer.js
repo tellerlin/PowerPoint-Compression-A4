@@ -11,19 +11,15 @@ export async function optimizePPTX(file, options = {}) {
     
     const { onProgress = () => {} } = options;
     
-    onProgress('init', { percentage: 0, status: 'Loading PPTX file...' });
     const zip = await JSZip.loadAsync(file);
-    onProgress('init', { percentage: 50, status: 'Analyzing file structure...' });
     
     if (options.removeHiddenSlides) {
       onProgress('init', { percentage: 75, status: 'Removing hidden slides...' });
       await removeHiddenSlides(zip);
     }
     
-    onProgress('init', { percentage: 90, status: 'Scanning media files...' });
     const mediaFiles = findMediaFiles(zip);
     onProgress('mediaCount', { count: mediaFiles.length });
-    onProgress('init', { percentage: 100, status: `Found ${mediaFiles.length} media files` });
     
     for (let i = 0; i < mediaFiles.length; i++) {
       const mediaPath = mediaFiles[i];
