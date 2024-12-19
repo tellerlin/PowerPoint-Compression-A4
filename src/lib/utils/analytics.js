@@ -1,15 +1,19 @@
-export function initializeGoogleAnalytics() {
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = `https://www.googletagmanager.com/gtag/js?id=G-M91P9505Z1`;
-    document.head.appendChild(script);
+let gtag;
 
-    window.dataLayer = window.dataLayer || [];
-    function gtag() {
-        window.dataLayer.push(arguments);
+export function initializeGoogleAnalytics() {
+    if (typeof window !== 'undefined') {
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = `https://www.googletagmanager.com/gtag/js?id=G-M91P9505Z1`;
+        document.head.appendChild(script);
+
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = gtag = function() {
+            window.dataLayer.push(arguments);
+        };
+        window.gtag('js', new Date());
+        window.gtag('config', 'G-M91P9505Z1');
     }
-    gtag('js', new Date());
-    gtag('config', 'G-M91P9505Z1');
 }
 
 export function initializeWeChatMetaTags(metadata) {
@@ -39,3 +43,5 @@ export function initializeWeChatMetaTags(metadata) {
     wxScript.async = true;
     document.head.appendChild(wxScript);
 }
+
+export { gtag };

@@ -60,6 +60,12 @@
       }, 2000);
     }
   }
+
+  // 新增的点击处理函数，用于发送 GA4 事件
+  function handleButtonClick() {
+    gtag('event', 'start_compression');
+    handleSubmit();
+  }
 </script>
 
 <div class="min-h-screen">
@@ -116,7 +122,7 @@
             <div class="text-center">
               <Button
                 variant="primary"
-                on:click={handleSubmit}
+                on:click={handleButtonClick}
                 disabled={processing}
               >
                 Start Compression

@@ -1,6 +1,9 @@
 <script>
   import { Button } from '../Button';
   import { handleKeyDown } from './keyboard';
+  import { gtag, initializeGoogleAnalytics } from '$lib/utils/analytics';
+  
+  initializeGoogleAnalytics();
   
   export let fileName = '';
   export let dragActive = false;
@@ -34,7 +37,7 @@
   {#if fileName}
     <div class="text-center">
       <div class="text-text font-medium mb-4 text-lg">{fileName}</div>
-      <Button variant="secondary" on:click={() => fileInput.click()}>
+      <Button variant="secondary" on:click={() => { gtag('event', 'upload'); fileInput.click(); }}>
         Choose Another File
       </Button>
     </div>
@@ -48,7 +51,7 @@
       <p class="text-text/70 text-lg mb-6">
         Drag and drop your PPTX file here, or
       </p>
-      <Button variant="primary" on:click={() => fileInput.click()}>
+      <Button variant="primary" on:click={() => { gtag('event', 'upload'); fileInput.click(); }}>
         Browse Files
       </Button>
       <p class="text-text/70 text-lg">up to 300MB</p>
