@@ -78,6 +78,10 @@
             Keeping this tool free takes work. If it's been a lifesaver, buy me a coffee?
           </p>
 
+          <div style="text-align: center;">
+            <a href="https://buymeacoffee.com/byteslim" target="_blank" style="color: lightblue; text-decoration: underline;">https://buymeacoffee.com/byteslim</a>
+          </div>
+
           <div class="flex justify-center space-x-24 items-start">
             <div id="buy-me-a-coffee-qr" class="w-32 h-40">
               <img 
