@@ -1,4 +1,4 @@
-<script>
+<script defer>
     import { Container } from '$lib/components/ui';
 
     const features = [
@@ -80,13 +80,21 @@
         
       <div class="max-w-3xl mx-auto">
 
+        <h2 class="text-2xl font-bold mb-4 text-text">
+          Features
+        </h2>
+
+        <h2 class="text-xl font-bold mb-4 text-text">
+          Our Key Features
+        </h2>
+
         <div class="box-container">
           {#each features as feature}
               <div class="box bg-surface rounded-lg p-8 shadow-sm">
                 <div class="text-4xl mb-4">{feature.icon}</div>
-                <h2 class="text-2xl font-bold mb-4 text-text">
+                <h3 class="text-2xl font-bold mb-4 text-text">
                   {feature.title}
-                </h2>
+                </h3>
                 <p class="text-text/70 text-lg">
                   {feature.description}
                 </p>
