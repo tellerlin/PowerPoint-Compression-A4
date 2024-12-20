@@ -4,17 +4,17 @@
     const features = [
         {
             title: "Smart Compression",
-            description: "Our advanced algorithms intelligently optimize images and remove unused media to significantly reduce file size while preserving the visual quality of your presentations.",
+            description: "Optimize images and reduce file size.",
             icon: "🚀"
         },
         {
             title: "Privacy First",
-            description: "Security is our priority. All file processing happens directly in your browser - your presentations never leave your device, ensuring complete confidentiality.",
+            description: "Processing happens in your browser.",
             icon: "🔒"
         },
         {
             title: "Quality Preserved",
-            description: "Experience up to 90% file size reduction while maintaining the professional look of your presentations. Perfect for sharing via email or uploading to platforms.",
+            description: "Reduce file size while maintaining quality.",
             icon: "✨"
         }
     ];
@@ -46,6 +46,31 @@
     </script>
 </svelte:head>
 
+<style>
+  .box-container {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .box {
+    flex: 0 1 35%; /* Increase the basis to 35% for wider boxes */
+    margin: 10px;
+    min-width: 250px;
+  }
+  @media (max-width: 768px) {
+    .box-container {
+      flex-direction: column;
+    }
+    a {
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      white-space: normal;
+    }
+  }
+</style>
+
 <div class="py-24">
   <Container>
     <div class="max-w-3xl mx-auto">
@@ -55,9 +80,9 @@
         
       <div class="max-w-3xl mx-auto">
 
-        <div class="grid gap-8 mb-16">
+        <div class="box-container">
           {#each features as feature}
-              <div class="bg-surface rounded-lg p-8 shadow-sm">
+              <div class="box bg-surface rounded-lg p-8 shadow-sm">
                 <div class="text-4xl mb-4">{feature.icon}</div>
                 <h2 class="text-2xl font-bold mb-4 text-text">
                   {feature.title}
