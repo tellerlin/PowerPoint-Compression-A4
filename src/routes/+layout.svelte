@@ -7,6 +7,9 @@
   import { Container } from '$lib/components/ui';
   import { siteMetadata } from '$lib/config/metadata';
   import { initializeGoogleAnalytics, initializeWeChatMetaTags } from '$lib/utils/analytics';
+  import { page } from '$app/stores'; // 导入 page store
+
+  export let data; // 接收 load 函数传递的数据 (external reference only)
 
   onMount(() => {
     themeStore.initialize();
