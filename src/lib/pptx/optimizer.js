@@ -11,6 +11,12 @@ export async function optimizePPTX(file, options = {}) {
     
     const { onProgress = () => {} } = options;
     
+    // Send initial file info
+    onProgress('fileInfo', {
+      name: file.name,
+      size: file.size
+    });
+    
     const zip = await JSZip.loadAsync(file);
     
     if (options.removeHiddenSlides) {
@@ -27,32 +33,31 @@ export async function optimizePPTX(file, options = {}) {
     for (let i = 0; i < mediaFiles.length; i++) {
       const mediaPath = mediaFiles[i];
       try {
-        // 检查是否为图像文件
+        // Check if it's an image file
         const fileExtension = mediaPath.split('.').pop().toLowerCase();
         const isImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
         
         await processMediaFile(zip, mediaPath, async (data) => {
           onProgress('media', {
             fileIndex: i + 1,
-            fileName: mediaPath.split('/').pop(),
             totalFiles: mediaFiles.length
           });
           
-          // 只压缩图像文件
+          // Only compress image files
           if (isImage) {
             totalOriginalSize += data.byteLength;
             
-            // 使用适当的质量设置
+            // Use appropriate quality setting
             let adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
             
             const result = await compressImage(data, adjustedQuality);
             
-            // 更新压缩统计
+            // Update compression statistics
             totalCompressedSize += result.data.byteLength;
             return result.data;
           }
           
-          // 非图像文件直接返回原始数据
+          // Return original data for non-image files
           return data;
         });
       } catch (error) {
@@ -65,16 +70,41 @@ export async function optimizePPTX(file, options = {}) {
     const savedPercentage = totalOriginalSize > 0 ? (savedSize / totalOriginalSize * 100).toFixed(1) : 0;
     
     onProgress('finalize', { 
-      status: `Rebuilding presentation... Saved ${(savedSize / (1024 * 1024)).toFixed(2)}MB (${savedPercentage}%)`
+      status: `Rebuilding presentation...`,
+      stats: {
+        originalSize: file.size,
+        compressedSize: null, // Will be updated after zip generation
+        originalMediaSize: totalOriginalSize,
+        compressedMediaSize: totalCompressedSize,
+        savedMediaSize: savedSize,
+        savedMediaPercentage: savedPercentage
+      }
     });
     
-    return await zip.generateAsync({
+    const compressedBlob = await zip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
       compressionOptions: { 
         level: COMPRESSION_SETTINGS.ZIP_COMPRESSION_LEVEL 
       }
     });
+    
+    // Calculate final statistics
+    const finalStats = {
+      originalSize: file.size,
+      compressedSize: compressedBlob.size,
+      savedSize: file.size - compressedBlob.size,
+      savedPercentage: ((file.size - compressedBlob.size) / file.size * 100).toFixed(1),
+      originalMediaSize: totalOriginalSize,
+      compressedMediaSize: totalCompressedSize,
+      savedMediaSize: savedSize,
+      savedMediaPercentage: savedPercentage
+    };
+    
+    // Report completion with final stats
+    onProgress('complete', { stats: finalStats });
+    
+    return compressedBlob;
     
   } catch (error) {
     console.error('Optimization failed:', error);
