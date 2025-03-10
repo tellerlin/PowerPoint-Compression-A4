@@ -12,7 +12,7 @@
           <ul>
             <li class="flex items-start">
               <span class="text-primary mr-2">•</span>
-              <span><strong class="text-text">Drag and drop your PowerPoint files or click to select them.</strong></span>
+              <span><strong class="text-text">Select PowerPoint files with a simple click.</strong></span>
             </li>
             <li class="flex items-start">
               <span class="text-primary mr-2">•</span>
@@ -30,7 +30,7 @@
           <ul>
             <li class="flex items-start">
               <span class="text-primary mr-2">•</span>
-              <span><strong class="text-text">Upload your PowerPoint file by dragging it into the designated area or using the "Select File" button.</strong></span>
+              <span><strong class="text-text">Click the "Select File" button to choose your PowerPoint file.</strong></span>
             </li>
             <li class="flex items-start">
               <span class="text-primary mr-2">•</span>

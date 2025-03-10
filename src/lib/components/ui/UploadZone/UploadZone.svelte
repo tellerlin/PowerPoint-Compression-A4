@@ -13,16 +13,10 @@
 
 <div
   class="border-2 border-dashed rounded-lg p-8 transition-all duration-200 ease-in-out cursor-pointer
-    {dragActive 
-      ? 'border-primary-500 bg-primary-500/10' 
-      : 'border-gray-600 hover:border-primary-500 hover:bg-primary-500/5'}"
+    border-gray-600 hover:border-primary-500 hover:bg-primary-500/5"
   role="button"
   tabindex="0"
-  aria-label="Upload file zone. Click or drag and drop files here"
-  on:dragenter
-  on:dragleave
-  on:dragover|preventDefault
-  on:drop
+  aria-label="Upload file zone. Click to browse files"
   on:keydown={(e) => handleKeyDown(e, fileInput)}
 >
   <input
@@ -49,7 +43,7 @@
         </svg>
       </div>
       <p class="text-text/70 text-lg mb-6">
-        Drag and drop your PPTX file here, or
+        Click to select a PPTX file
       </p>
       <Button variant="primary" on:click={() => { gtag('event', 'upload'); fileInput.click(); }}>
         Browse Files
