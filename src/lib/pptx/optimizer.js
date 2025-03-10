@@ -42,23 +42,14 @@ export async function optimizePPTX(file, options = {}) {
           if (isImage) {
             totalOriginalSize += data.byteLength;
             
-            // 使用适当的质量设置 - 降低小图像的质量提升阈值
+            // 使用适当的质量设置
             let adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-            if (data.byteLength < 100 * 1024) { // 100KB以下的图像
-              adjustedQuality = Math.min(0.92, adjustedQuality + 0.02); // 降低质量提升幅度
-            }
             
             const result = await compressImage(data, adjustedQuality);
             
-            // 检查压缩是否有效
-            if (result.data.byteLength < data.byteLength) {
-              totalCompressedSize += result.data.byteLength;
-              return result.data;
-            } else {
-              // 如果压缩后更大，保留原始数据
-              totalCompressedSize += data.byteLength;
-              return data;
-            }
+            // 更新压缩统计
+            totalCompressedSize += result.data.byteLength;
+            return result.data;
           }
           
           // 非图像文件直接返回原始数据

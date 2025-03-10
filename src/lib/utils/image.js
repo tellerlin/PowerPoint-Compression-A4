@@ -74,16 +74,15 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     const imageData = await getImageData(canvas);
     const analysis = analyzeImage(imageData);
 
-    let compressedBlob;
     // 对于小图像，使用更高的质量
     if (data.byteLength < 50 * 1024) { // 50KB以下的图像
-      quality = Math.min(0.95, quality + 0.05); // 提高质量但不超过0.95
+      quality = Math.min(0.92, quality + 0.03); // 稍微降低质量提升
     }
     
-    compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
+    let compressedBlob;
     // 对于透明图像，使用更高的质量
     if (analysis.hasAlpha) {
-      compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.95, quality + 0.05) });
+      compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.92, quality + 0.03) });
     } else {
       const [webpBlob, jpegBlob] = await Promise.all([
         canvas.convertToBlob({ type: 'image/webp', quality }),
@@ -97,16 +96,18 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
         : jpegBlob;
     }
 
+    // 如果压缩后的大小大于原始大小，保留原始图像
+    const compressedSize = compressedBlob.size;
+    if (compressedSize > originalSize) {
+      return { data, format: originalFormat || 'original' };
+    }
+
     // 确保返回的是 Uint8Array 而不是 Blob
     const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
-    return { data: compressedData, format: compressedBlob.type.split('/').pop() };
+    const result = { data: compressedData, format: compressedBlob.type.split('/').pop() };
+    imageCache.set(cacheKey, result);
+    return result;
   } catch (error) {
     throw new Error('Image processing failed: ' + error.message);
-  }
-  
-  // 如果压缩后的大小接近原始大小（节省不多），保留原始图像
-  const compressedSize = compressedBlob.size;
-  if (compressedSize > originalSize * 0.9) { // 如果压缩后仍然是原始大小的90%以上
-    return { data, format: originalFormat || 'original' };
   }
 }
