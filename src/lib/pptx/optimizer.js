@@ -10,6 +10,7 @@ export async function optimizePPTX(file, options = {}) {
     validateFile(file);
     
     const { onProgress = () => {} } = options;
+    const startTime = Date.now();
     
     // Send initial file info
     onProgress('fileInfo', {
@@ -30,40 +31,71 @@ export async function optimizePPTX(file, options = {}) {
     let totalOriginalSize = 0;
     let totalCompressedSize = 0;
     
-    for (let i = 0; i < mediaFiles.length; i++) {
-      const mediaPath = mediaFiles[i];
-      try {
-        // Check if it's an image file
-        const fileExtension = mediaPath.split('.').pop().toLowerCase();
-        const isImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
-        
-        await processMediaFile(zip, mediaPath, async (data) => {
-          onProgress('media', {
-            fileIndex: i + 1,
-            totalFiles: mediaFiles.length
+    // 将顺序处理改为批处理
+    const batchSize = 5; // 根据实际情况调整
+    for (let i = 0; i < mediaFiles.length; i += batchSize) {
+      const batch = mediaFiles.slice(i, i + batchSize);
+      const batchResults = await Promise.all(batch.map(async (mediaPath) => {
+        try {
+          // 检查是否是图像文件
+          const fileExtension = mediaPath.split('.').pop().toLowerCase();
+          const isImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
+          
+          let result = { originalSize: 0, compressedSize: 0 };
+          
+          await processMediaFile(zip, mediaPath, async (data) => {
+            // 只压缩图像文件
+            if (isImage) {
+              result.originalSize = data.byteLength;
+              
+              // 使用适当的质量设置
+              let adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
+              
+              const compressResult = await compressImage(data, adjustedQuality);
+              
+              // 更新压缩统计信息
+              result.compressedSize = compressResult.data.byteLength;
+              return compressResult.data;
+            }
+            
+            // 返回非图像文件的原始数据
+            return data;
           });
           
-          // Only compress image files
-          if (isImage) {
-            totalOriginalSize += data.byteLength;
-            
-            // Use appropriate quality setting
-            let adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-            
-            const result = await compressImage(data, adjustedQuality);
-            
-            // Update compression statistics
-            totalCompressedSize += result.data.byteLength;
-            return result.data;
-          }
-          
-          // Return original data for non-image files
-          return data;
-        });
-      } catch (error) {
-        // Continue with other files even if one fails
-        console.warn(`Failed to process ${mediaPath}:`, error);
-      }
+          return {
+            path: mediaPath,
+            ...result,
+            success: true
+          };
+        } catch (error) {
+          console.warn(`Failed to process ${mediaPath}:`, error);
+          return {
+            path: mediaPath,
+            success: false,
+            error: error.message
+          };
+        }
+      }));
+      
+      // 更新进度和统计信息
+      const successfulBatches = batchResults.filter(r => r.success);
+      successfulBatches.forEach(result => {
+        totalOriginalSize += result.originalSize;
+        totalCompressedSize += result.compressedSize;
+      });
+      
+      // 计算剩余时间估计
+      const elapsed = Date.now() - startTime;
+      const processedCount = Math.min(i + batchSize, mediaFiles.length);
+      const estimatedTotal = mediaFiles.length > 0 ? (elapsed / processedCount) * mediaFiles.length : 0;
+      const estimatedRemaining = Math.max(0, estimatedTotal - elapsed);
+      
+      onProgress('media', {
+        fileIndex: processedCount,
+        totalFiles: mediaFiles.length,
+        processedFiles: batchResults.map(r => r.path.split('/').pop()),
+        estimatedTimeRemaining: Math.round(estimatedRemaining / 1000) // 秒
+      });
     }
     
     const savedSize = totalOriginalSize - totalCompressedSize;
@@ -98,7 +130,8 @@ export async function optimizePPTX(file, options = {}) {
       originalMediaSize: totalOriginalSize,
       compressedMediaSize: totalCompressedSize,
       savedMediaSize: savedSize,
-      savedMediaPercentage: savedPercentage
+      savedMediaPercentage: savedPercentage,
+      processingTime: (Date.now() - startTime) / 1000 // 处理总时间（秒）
     };
     
     // Report completion with final stats

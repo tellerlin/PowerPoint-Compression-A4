@@ -1,5 +1,6 @@
 import { COMPRESSION_SETTINGS } from '../pptx/constants';
 import { validateImageData } from './validation';
+import { imageCache } from './cache';
 
 async function getImageData(canvas) {
   return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
@@ -49,11 +50,9 @@ async function detectFormat(data) {
   }
 }
 
-const imageCache = new Map();
-
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
-  const cacheKey = data.byteLength + quality;
-  if (imageCache.has(cacheKey)) {
+  const cacheKey = data.byteLength + '-' + quality;
+  if (imageCache.get(cacheKey)) {
     return imageCache.get(cacheKey);
   }
 
@@ -76,7 +75,7 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
 
     // 对于小图像，使用更高的质量
     if (data.byteLength < 50 * 1024) { // 50KB以下的图像
-      quality = Math.min(0.92, quality + 0.03); // 稍微降低质量提升
+      quality = Math.min(0.92, quality + 0.03); // 稍微提高质量
     }
     
     let compressedBlob;
