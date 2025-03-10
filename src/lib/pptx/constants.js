@@ -8,9 +8,9 @@ export const SUPPORTED_IMAGE_EXTENSIONS = [
 ];
 
 export const COMPRESSION_SETTINGS = {
-  DEFAULT_QUALITY: 0.85, // 提高质量但保持原始结构
-  MAX_IMAGE_SIZE: 1366,
-  ZIP_COMPRESSION_LEVEL: 9
+  DEFAULT_QUALITY: 0.85, // 降回到0.85，提供更好的压缩率
+  MAX_IMAGE_SIZE: 1366, // 保持原始设置
+  ZIP_COMPRESSION_LEVEL: 9 // 保持最高压缩级别
 };
 
 export const MEDIA_PATH_PREFIX = 'ppt/media/';

@@ -24,7 +24,7 @@
     try {
       // 使用更高的压缩质量，但保持与原始代码相同的结构
       const optimizedBlob = await optimizePPTX(file, {
-        compressImages: { quality: 0.85 },
+        compressImages: { quality: 0.9 }, // 提高质量到0.9
         removeHiddenSlides: true,
         onProgress: (phase, detail) => {
           switch (phase) {

@@ -15,7 +15,12 @@ function analyzeImage(imageData) {
   return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };
 }
 
-function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = 1366, maxHeight = 768) {
+function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, maxHeight = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE) {
+  // 如果图像已经足够小，保持原始尺寸
+  if (originalWidth <= maxWidth && originalHeight <= maxHeight) {
+    return { width: originalWidth, height: originalHeight };
+  }
+  
   let width = originalWidth, height = originalHeight;
   if (width > maxWidth) { height = Math.round((height * maxWidth) / width); width = maxWidth; }
   if (height > maxHeight) { width = Math.round((width * maxHeight) / height); height = maxHeight; }
@@ -70,8 +75,15 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     const analysis = analyzeImage(imageData);
 
     let compressedBlob;
+    // 对于小图像，使用更高的质量
+    if (data.byteLength < 50 * 1024) { // 50KB以下的图像
+      quality = Math.min(0.95, quality + 0.05); // 提高质量但不超过0.95
+    }
+    
+    compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
+    // 对于透明图像，使用更高的质量
     if (analysis.hasAlpha) {
-      compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
+      compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.95, quality + 0.05) });
     } else {
       const [webpBlob, jpegBlob] = await Promise.all([
         canvas.convertToBlob({ type: 'image/webp', quality }),
@@ -90,5 +102,11 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     return { data: compressedData, format: compressedBlob.type.split('/').pop() };
   } catch (error) {
     throw new Error('Image processing failed: ' + error.message);
+  }
+  
+  // 如果压缩后的大小接近原始大小（节省不多），保留原始图像
+  const compressedSize = compressedBlob.size;
+  if (compressedSize > originalSize * 0.9) { // 如果压缩后仍然是原始大小的90%以上
+    return { data, format: originalFormat || 'original' };
   }
 }
