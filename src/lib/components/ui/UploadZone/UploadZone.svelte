@@ -6,7 +6,6 @@
   initializeGoogleAnalytics();
   
   export let fileName = '';
-  export let dragActive = false;
   
   let fileInput;
 </script>
