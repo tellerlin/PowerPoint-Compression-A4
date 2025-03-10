@@ -30,11 +30,12 @@ export async function optimizePPTX(file, options = {}) {
             fileName: mediaPath.split('/').pop(),
             totalFiles: mediaFiles.length
           });
-          const result = await compressImage(data, options.compressImages?.quality);
-          return result;
+          const result = await compressImage(data, options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY);
+          return result.data; // 确保返回的是 Uint8Array 数据
         });
       } catch (error) {
         // Continue with other files even if one fails
+        console.warn(`Failed to process ${mediaPath}:`, error);
       }
     }
     

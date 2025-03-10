@@ -12,14 +12,25 @@ export function findMediaFiles(zip) {
   );
 }
 
-export async function processMediaFile(zip, mediaPath, compressor) {  
-  if (zip.files[mediaPath]) {  
-      try {  
-          const originalData = await zip.files[mediaPath].async('arraybuffer');  
-          const compressedResult = await compressor(new Uint8Array(originalData));  
-          zip.file(mediaPath, compressedResult.data, { binary: true });  
-      } catch (error) {  
-          // ... existing code ...
-      }  
-  }  
+// 检查 processMediaFile 函数的实现
+export async function processMediaFile(zip, mediaPath, processor) {
+  const file = zip.file(mediaPath);
+  if (!file) return;
+  
+  try {
+    const data = await file.async('uint8array');
+    const processed = await processor(data);
+    
+    // 确保 processed 是 Uint8Array
+    if (processed instanceof Uint8Array) {
+      zip.file(mediaPath, processed);
+    } else if (processed && processed.data instanceof Uint8Array) {
+      zip.file(mediaPath, processed.data);
+    } else {
+      console.error('Invalid processed data type for', mediaPath);
+    }
+  } catch (error) {
+    console.error(`Error processing ${mediaPath}:`, error);
+    throw error;
+  }
 }

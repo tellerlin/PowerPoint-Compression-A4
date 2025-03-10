@@ -31,12 +31,17 @@ async function resizeImage(bitmap, targetWidth, targetHeight) {
 }
 
 async function detectFormat(data) {
-  const image = new Image();
-  const url = URL.createObjectURL(new Blob([data]));
-  image.src = url;
-  await image.decode();
-  URL.revokeObjectURL(url);
-  return image.complete ? image.naturalWidth > 0 ? image.src.split('.').pop() : 'unknown' : 'unknown';
+  try {
+    const image = new Image();
+    const url = URL.createObjectURL(new Blob([data]));
+    image.src = url;
+    await image.decode();
+    URL.revokeObjectURL(url);
+    return image.complete ? image.naturalWidth > 0 ? image.src.split('.').pop() : 'unknown' : 'unknown';
+  } catch (error) {
+    console.warn('Format detection failed:', error);
+    return 'unknown';
+  }
 }
 
 const imageCache = new Map();
@@ -80,9 +85,9 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
         : jpegBlob;
     }
 
-    const result = { data: compressedBlob, format: compressedBlob.type.split('/').pop() };
-    imageCache.set(cacheKey, result);
-    return result;
+    // 确保返回的是 Uint8Array 而不是 Blob
+    const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
+    return { data: compressedData, format: compressedBlob.type.split('/').pop() };
   } catch (error) {
     throw new Error('Image processing failed: ' + error.message);
   }

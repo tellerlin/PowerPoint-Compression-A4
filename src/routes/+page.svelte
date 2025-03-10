@@ -22,9 +22,9 @@
     progressManager = new ProgressManager();
     
     try {
-      // Start optimization with progress callbacks
+      // 使用更高的压缩质量，但保持与原始代码相同的结构
       const optimizedBlob = await optimizePPTX(file, {
-        compressImages: { quality: 0.7 },
+        compressImages: { quality: 0.85 },
         removeHiddenSlides: true,
         onProgress: (phase, detail) => {
           switch (phase) {
