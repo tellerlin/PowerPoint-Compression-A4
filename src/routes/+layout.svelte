@@ -9,7 +9,8 @@
   import { initializeGoogleAnalytics, initializeWeChatMetaTags } from '$lib/utils/analytics';
   import { page } from '$app/stores'; // 导入 page store
 
-  export let data; // 接收 load 函数传递的数据 (external reference only)
+  // Replace both export statements with just this one:
+  export const data = {};
 
   onMount(() => {
     themeStore.initialize();

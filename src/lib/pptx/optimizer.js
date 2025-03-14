@@ -1,11 +1,12 @@
 import JSZip from 'jszip';
-import { findMediaFiles, processMediaFile } from './media';
-import { compressImage } from '../utils/image';
 import { validateFile } from '../utils/validation';
+import { compressImage } from '../utils/image';
 import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
-import { removeHiddenSlides } from './slides';
+// 修改这个导入路径，从相对路径 './utils' 改为具体的文件路径
+import { findMediaFiles, processMediaFile, removeHiddenSlides } from './pptx-utils';
+import { removeUnusedLayouts } from './layout-cleaner';
 
-export async function optimizePPTX(file, options = {}) {
+async function optimizePPTX(file, options = {}) {
   try {
     validateFile(file);
     
@@ -19,6 +20,12 @@ export async function optimizePPTX(file, options = {}) {
     });
     
     const zip = await JSZip.loadAsync(file);
+    
+    // 添加删除未使用布局和母版的功能
+    if (options.removeUnusedLayouts) {
+      onProgress('init', { percentage: 50, status: 'Removing unused layouts and masters...' });
+      await removeUnusedLayouts(zip, onProgress);
+    }
     
     if (options.removeHiddenSlides) {
       onProgress('init', { percentage: 75, status: 'Removing hidden slides...' });
@@ -144,3 +151,5 @@ export async function optimizePPTX(file, options = {}) {
     throw error;
   }
 }
+
+export { optimizePPTX };
