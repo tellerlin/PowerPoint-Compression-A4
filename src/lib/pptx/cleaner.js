@@ -1,6 +1,6 @@
 import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
 import { PRESENTATION_PATH } from './constants';
-import { removeUnusedLayouts } from './layout-cleaner';
+import { removeUnusedLayouts, updateContentTypes, updatePresentationReferences } from './layout-cleaner';
 
 /**
  * Clean unused resources (layouts, masters, and media files) from the PPTX file
@@ -18,14 +18,17 @@ export async function cleanUnusedResources(zip, onProgress = () => {}) {
       onProgress('init', { percentage: status.percentage, status: status.status });
     });
     
-    // Note: removeUnusedLayouts already updates presentation references and content types
-    // so we don't need to call updatePresentationLayouts and updatePresentationMasters here
-    
     // Step 2: Clean unused media files
     onProgress('init', { percentage: 70, status: 'Analyzing media files...' });
     const usedMedia = await collectUsedMedia(zip);
     await removeUnusedMedia(zip, usedMedia);
     onProgress('init', { percentage: 90, status: 'Cleaning unused media references...' });
+    
+    // Get used layouts and masters for updating presentation references
+    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, await getUsedSlides(zip));
+    
+    // Update presentation references with used layouts and masters
+    await updatePresentationReferences(zip, usedLayouts, usedMasters);
     
     // Final update to content types to ensure all references are cleaned
     await updateContentTypes(zip);
@@ -313,124 +316,6 @@ async function removeUnusedMedia(zip, usedMedia) {
   }
 }
 
-/**
- * Update presentation.xml layout references
- * @param {JSZip} zip PPTX ZIP object
- * @param {Set<string>} usedLayouts Set of used layout paths
- */
-async function updatePresentationLayouts(zip, usedLayouts) {
-  try {
-    const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
-    if (!presentationXml) return;
-    
-    const presentationObj = await parseXmlWithNamespaces(presentationXml);
-    
-    // Update presentation.xml.rels
-    const relsPath = 'ppt/_rels/presentation.xml.rels';
-    const relsXml = await zip.file(relsPath)?.async('string');
-    if (!relsXml) return;
-    
-    const relsObj = await parseXml(relsXml);
-    const relationships = Array.isArray(relsObj.Relationships.Relationship)
-      ? relsObj.Relationships.Relationship
-      : [relsObj.Relationships.Relationship];
-    
-    // Filter out non-layout relationships and used layout relationships
-    relsObj.Relationships.Relationship = relationships.filter(rel => {
-      if (!rel.Type.includes('/slideLayout')) return true;
-      
-      const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
-      return usedLayouts.has(layoutPath);
-    });
-    
-    // Update relationship file
-    const updatedRelsXml = buildXml(relsObj);
-    zip.file(relsPath, updatedRelsXml);
-  } catch (error) {
-    console.error('Error updating presentation layout references:', error);
-  }
-}
+// updatePresentationLayouts and updatePresentationMasters functions are replaced by updatePresentationReferences from layout-cleaner.js
 
-/**
- * Update presentation.xml master references
- * @param {JSZip} zip PPTX ZIP object
- * @param {Set<string>} usedMasters Set of used master paths
- */
-async function updatePresentationMasters(zip, usedMasters) {
-  try {
-    const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
-    if (!presentationXml) return;
-    
-    const presentationObj = await parseXmlWithNamespaces(presentationXml);
-    
-    // Update presentation.xml.rels
-    const relsPath = 'ppt/_rels/presentation.xml.rels';
-    const relsXml = await zip.file(relsPath)?.async('string');
-    if (!relsXml) return;
-    
-    const relsObj = await parseXml(relsXml);
-    const relationships = Array.isArray(relsObj.Relationships.Relationship)
-      ? relsObj.Relationships.Relationship
-      : [relsObj.Relationships.Relationship];
-    
-    // Filter out non-master relationships and used master relationships
-    relsObj.Relationships.Relationship = relationships.filter(rel => {
-      if (!rel.Type.includes('/slideMaster')) return true;
-      
-      const masterPath = `ppt/${rel.Target.replace('../', '')}`;
-      return usedMasters.has(masterPath);
-    });
-    
-    // Update relationship file
-    const updatedRelsXml = buildXml(relsObj);
-    zip.file(relsPath, updatedRelsXml);
-  } catch (error) {
-    console.error('Error updating presentation master references:', error);
-  }
-}
-
-/**
- * Update [Content_Types].xml to remove references to deleted files
- * @param {JSZip} zip PPTX ZIP object
- */
-async function updateContentTypes(zip) {
-  try {
-    console.log('Updating content types...');
-    const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
-    if (!contentTypesXml) {
-      console.log('No content types file found');
-      return;
-    }
-    
-    const contentTypesObj = await parseXml(contentTypesXml);
-    const overrides = Array.isArray(contentTypesObj.Types.Override)
-      ? contentTypesObj.Types.Override
-      : [contentTypesObj.Types.Override];
-    
-    console.log(`Found ${overrides.length} content type overrides`);
-    
-    // Filter out overrides for files that no longer exist
-    const filteredOverrides = overrides.filter(override => {
-      const path = override.PartName.replace(/^\//, '');
-      const exists = zip.file(path) !== null;
-      if (!exists) console.log(`Removing content type for deleted file: ${path}`);
-      return exists;
-    });
-    
-    // If any overrides were removed
-    if (filteredOverrides.length < overrides.length) {
-      // Update overrides
-      contentTypesObj.Types.Override = filteredOverrides;
-      
-      // Update content types file
-      const updatedContentTypesXml = buildXml(contentTypesObj);
-      zip.file('[Content_Types].xml', updatedContentTypesXml);
-      
-      console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
-    } else {
-      console.log('No content type references needed to be removed');
-    }
-  } catch (error) {
-    console.error('Error updating content types:', error);
-  }
-}
+// updateContentTypes function is now imported from layout-cleaner.js

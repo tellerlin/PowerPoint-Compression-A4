@@ -223,7 +223,7 @@ async function getLayoutMaster(zip, layoutPath) {
  * @param {Set<string>} usedLayouts Set of used layout paths
  * @param {Set<string>} usedMasters Set of used master paths
  */
-async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
+export async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
   try {
     console.log('Updating presentation references...');
     // 更新presentation.xml.rels
@@ -284,7 +284,7 @@ async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
  * Update [Content_Types].xml to remove references to deleted files
  * @param {JSZip} zip PPTX ZIP object
  */
-async function updateContentTypes(zip) {
+export async function updateContentTypes(zip) {
   try {
     console.log('Updating content types...');
     const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
