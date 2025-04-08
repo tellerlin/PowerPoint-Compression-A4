@@ -45,11 +45,11 @@
       optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.8 },
         removeHiddenSlides: true,
-        removeUnusedLayouts: true,  // 启用清理未使用的布局和母版
+        removeUnusedLayouts: true,  // 确保启用清理未使用的布局和母版
         cleanUnusedResources: true, // 启用清理未使用的资源
         debug: true, // 添加调试选项，在控制台输出详细信息
         onProgress: (phase, detail) => {
-
+          console.log(`Progress: ${phase}`, detail); // 添加调试日志
           switch (phase) {
             case 'fileInfo':
               progressManager.updateFileInfo(detail);

@@ -27,14 +27,18 @@ async function optimizePPTX(file, options = {}) {
       await cleanUnusedResources(zip, onProgress);
     }
     
+    // 添加调试选项
+    const debug = options.debug || false;
+    
     // 添加删除未使用布局和母版的功能
     if (options.removeUnusedLayouts) {
       onProgress('init', { percentage: 50, status: 'Removing unused layouts and masters...' });
       try {
+        if (debug) console.log('Starting layout cleanup...');
         const result = await removeUnusedLayouts(zip, onProgress);
         if (!result) {
           console.warn('Failed to remove unused layouts and masters');
-        } else {
+        } else if (debug) {
           console.log('Successfully removed unused layouts and masters');
         }
       } catch (error) {

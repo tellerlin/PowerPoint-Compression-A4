@@ -7,11 +7,15 @@ import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
  */
 export async function removeUnusedLayouts(zip, onProgress = () => {}) {
   try {
+    console.log('Starting layout cleanup process...');
     onProgress('init', { percentage: 50, status: 'Analyzing slide layouts...' });
     
     // 1. 获取所有幻灯片
     const slides = await getAllSlides(zip);
-    if (slides.length === 0) return false;
+    if (slides.length === 0) {
+      console.log('No slides found in the presentation');
+      return false;
+    }
     
     console.log(`Found ${slides.length} slides in the presentation`);
     
@@ -61,6 +65,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       // 删除相关的关系文件
       const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
       if (zip.file(layoutRelsPath)) {
+        console.log(`Removing layout relationship file: ${layoutRelsPath}`);
         zip.remove(layoutRelsPath);
       }
     }
@@ -78,6 +83,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       // 删除相关的关系文件
       const masterRelsPath = masterPath.replace('slideMasters/', 'slideMasters/_rels/') + '.rels';
       if (zip.file(masterRelsPath)) {
+        console.log(`Removing master relationship file: ${masterRelsPath}`);
         zip.remove(masterRelsPath);
       }
     }
@@ -93,6 +99,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       await updateMasterLayoutReferences(zip, masterPath, usedLayouts);
     }
     
+    console.log('Layout cleanup completed successfully');
     return true;
   } catch (error) {
     console.error('Error removing unused layouts:', error);
@@ -218,15 +225,21 @@ async function getLayoutMaster(zip, layoutPath) {
  */
 async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
   try {
+    console.log('Updating presentation references...');
     // 更新presentation.xml.rels
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
-    if (!relsXml) return;
+    if (!relsXml) {
+      console.log('No presentation relationships file found');
+      return;
+    }
     
     const relsObj = await parseXml(relsXml);
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
+    
+    console.log(`Found ${relationships.length} relationships in presentation`);
     
     // 过滤出未使用的布局和母版关系
     const filteredRelationships = relationships.filter(rel => {
@@ -238,13 +251,17 @@ async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
       // 检查布局是否使用
       if (rel.Type.includes('/slideLayout')) {
         const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
-        return usedLayouts.has(layoutPath);
+        const isUsed = usedLayouts.has(layoutPath);
+        if (!isUsed) console.log(`Removing unused layout reference: ${layoutPath}`);
+        return isUsed;
       }
       
       // 检查母版是否使用
       if (rel.Type.includes('/slideMaster')) {
         const masterPath = `ppt/${rel.Target.replace('../', '')}`;
-        return usedMasters.has(masterPath);
+        const isUsed = usedMasters.has(masterPath);
+        if (!isUsed) console.log(`Removing unused master reference: ${masterPath}`);
+        return isUsed;
       }
       
       return false;
@@ -260,6 +277,52 @@ async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
     console.log(`Updated presentation references: removed ${relationships.length - filteredRelationships.length} unused references`);
   } catch (error) {
     console.error('Error updating presentation references:', error);
+  }
+}
+
+/**
+ * Update [Content_Types].xml to remove references to deleted files
+ * @param {JSZip} zip PPTX ZIP object
+ */
+async function updateContentTypes(zip) {
+  try {
+    console.log('Updating content types...');
+    const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
+    if (!contentTypesXml) {
+      console.log('No content types file found');
+      return;
+    }
+    
+    const contentTypesObj = await parseXml(contentTypesXml);
+    const overrides = Array.isArray(contentTypesObj.Types.Override)
+      ? contentTypesObj.Types.Override
+      : [contentTypesObj.Types.Override];
+    
+    console.log(`Found ${overrides.length} content type overrides`);
+    
+    // 过滤出存在的文件的覆盖
+    const filteredOverrides = overrides.filter(override => {
+      const path = override.PartName.replace(/^\//, '');
+      const exists = zip.file(path) !== null;
+      if (!exists) console.log(`Removing content type for deleted file: ${path}`);
+      return exists;
+    });
+    
+    // 如果有覆盖被移除
+    if (filteredOverrides.length < overrides.length) {
+      // 更新覆盖
+      contentTypesObj.Types.Override = filteredOverrides;
+      
+      // 更新内容类型文件
+      const updatedContentTypesXml = buildXml(contentTypesObj);
+      zip.file('[Content_Types].xml', updatedContentTypesXml);
+      
+      console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
+    } else {
+      console.log('No content type references needed to be removed');
+    }
+  } catch (error) {
+    console.error('Error updating content types:', error);
   }
 }
 
@@ -356,41 +419,5 @@ async function updateMasterXml(zip, masterPath, validRelationships) {
     }
   } catch (error) {
     console.error(`Error updating master XML for ${masterPath}:`, error);
-  }
-}
-
-/**
- * Update [Content_Types].xml to remove references to deleted files
- * @param {JSZip} zip PPTX ZIP object
- */
-async function updateContentTypes(zip) {
-  try {
-    const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
-    if (!contentTypesXml) return;
-    
-    const contentTypesObj = await parseXml(contentTypesXml);
-    const overrides = Array.isArray(contentTypesObj.Types.Override)
-      ? contentTypesObj.Types.Override
-      : [contentTypesObj.Types.Override];
-    
-    // 过滤出存在的文件的覆盖
-    const filteredOverrides = overrides.filter(override => {
-      const path = override.PartName.replace(/^\//, '');
-      return zip.file(path) !== null;
-    });
-    
-    // 如果有覆盖被移除
-    if (filteredOverrides.length < overrides.length) {
-      // 更新覆盖
-      contentTypesObj.Types.Override = filteredOverrides;
-      
-      // 更新内容类型文件
-      const updatedContentTypesXml = buildXml(contentTypesObj);
-      zip.file('[Content_Types].xml', updatedContentTypesXml);
-      
-      console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
-    }
-  } catch (error) {
-    console.error('Error updating content types:', error);
   }
 }
