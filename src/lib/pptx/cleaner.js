@@ -1,70 +1,133 @@
 import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
 import { PRESENTATION_PATH } from './constants';
+import { removeUnusedLayouts } from './layout-cleaner';
 
 /**
- * 清理未使用的资源（布局、母版和媒体文件）
- * @param {JSZip} zip PPTX的ZIP对象
- * @param {Function} onProgress 进度回调函数
- */
-/**
- * 清理未使用的资源
- * @param {JSZip} zip PPTX的ZIP对象
- * @param {Function} onProgress 进度回调函数
+ * Clean unused resources (layouts, masters, and media files) from the PPTX file
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Function} onProgress Progress callback function
+ * @returns {Promise<boolean>} Success status
  */
 export async function cleanUnusedResources(zip, onProgress = () => {}) {
   try {
-    // 获取所有使用的媒体文件
+    console.log('Starting resource cleanup process...');
+    
+    // Step 1: Clean unused layouts and masters
+    onProgress('init', { percentage: 10, status: 'Analyzing slide layouts and masters...' });
+    const layoutResult = await removeUnusedLayouts(zip, (status) => {
+      onProgress('init', { percentage: status.percentage, status: status.status });
+    });
+    
+    // Note: removeUnusedLayouts already updates presentation references and content types
+    // so we don't need to call updatePresentationLayouts and updatePresentationMasters here
+    
+    // Step 2: Clean unused media files
+    onProgress('init', { percentage: 70, status: 'Analyzing media files...' });
     const usedMedia = await collectUsedMedia(zip);
-    
-    // 删除未使用的媒体文件
     await removeUnusedMedia(zip, usedMedia);
+    onProgress('init', { percentage: 90, status: 'Cleaning unused media references...' });
     
-    onProgress('init', { percentage: 35, status: 'Cleaning unused media references...' });
+    // Final update to content types to ensure all references are cleaned
+    await updateContentTypes(zip);
     
+    console.log('Resource cleanup completed successfully');
     return true;
   } catch (error) {
-    console.error('清理未使用资源时出错:', error);
+    console.error('Error cleaning unused resources:', error);
     return false;
   }
 }
 
 /**
- * 收集所有使用的媒体文件
- * @param {JSZip} zip PPTX的ZIP对象
- * @returns {Promise<Set<string>>} 使用的媒体文件路径集合
+ * Collect all used media files in the presentation
+ * @param {JSZip} zip PPTX ZIP object
+ * @returns {Promise<Set<string>>} Set of used media file paths
  */
 async function collectUsedMedia(zip) {
   const usedMedia = new Set();
   
   try {
-    // 获取所有关系文件
+    console.log('Collecting used media files...');
+    
+    // Step 1: Get all slides in the presentation
+    const usedSlides = await getUsedSlides(zip);
+    console.log(`Found ${usedSlides.length} slides in the presentation`);
+    
+    // Step 2: Get all layouts and masters used in slides
+    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, usedSlides);
+    console.log(`Found ${usedLayouts.size} used layouts and ${usedMasters.size} used masters`);
+    
+    // Step 3: Get all media files used directly in slides
+    const slideMedia = await getUsedMedia(zip, usedSlides);
+    console.log(`Found ${slideMedia.size} media files used in slides`);
+    
+    // Add slide media to the used media set
+    for (const mediaPath of slideMedia) {
+      usedMedia.add(mediaPath);
+    }
+    
+    // Step 4: Get all relationship files
     const relsFiles = Object.keys(zip.files)
       .filter(path => path.includes('_rels/') && path.endsWith('.rels'));
     
-    // 解析每个关系文件，查找媒体引用
+    console.log(`Found ${relsFiles.length} relationship files to analyze`);
+    
+    // Step 5: Parse each relationship file to find media references
     for (const relsPath of relsFiles) {
+      // Skip relationship files we've already processed in getUsedMedia
+      if (relsPath.includes('slides/_rels/') && usedSlides.some(slide => 
+          relsPath === slide.path.replace('slides/', 'slides/_rels/') + '.rels')) {
+        continue;
+      }
+      
+      // Check if this is a layout or master relationship file
+      const isLayoutRels = relsPath.includes('slideLayouts/_rels/');
+      const isMasterRels = relsPath.includes('slideMasters/_rels/');
+      
+      // If it's a layout or master relationship file, check if it's used
+      if (isLayoutRels) {
+        const layoutPath = relsPath.replace('_rels/', '').replace('.rels', '');
+        if (!usedLayouts.has(layoutPath)) continue;
+      } else if (isMasterRels) {
+        const masterPath = relsPath.replace('_rels/', '').replace('.rels', '');
+        if (!usedMasters.has(masterPath)) continue;
+      }
+      
       const relsXml = await zip.file(relsPath)?.async('string');
       if (!relsXml) continue;
       
-      // 解析XML
-      const matches = relsXml.match(/Target="([^"]*media\/[^"]*)"/g);
-      if (!matches) continue;
+      // Use XML parsing for more reliable results
+      const relsObj = await parseXml(relsXml);
+      if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
       
-      // 添加到使用的媒体集合
-      for (const match of matches) {
-        const mediaPath = match.replace(/Target="\.\.\//, '').replace(/"$/, '');
-        usedMedia.add(`ppt/${mediaPath}`);
+      const relationships = Array.isArray(relsObj.Relationships.Relationship)
+        ? relsObj.Relationships.Relationship
+        : [relsObj.Relationships.Relationship];
+      
+      // Find media relationships
+      const mediaRels = relationships.filter(rel => 
+        rel.Type.includes('/image') || 
+        rel.Type.includes('/audio') || 
+        rel.Type.includes('/video'));
+      
+      for (const mediaRel of mediaRels) {
+        const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
+        usedMedia.add(mediaPath);
       }
     }
+    
+    console.log(`Found ${usedMedia.size} total used media files`);
   } catch (error) {
-    console.error('收集使用的媒体文件时出错:', error);
+    console.error('Error collecting used media files:', error);
   }
   
   return usedMedia;
 }
 
 /**
- * 获取演示文稿中使用的所有幻灯片
+ * Get all slides used in the presentation
+ * @param {JSZip} zip PPTX ZIP object
+ * @returns {Promise<Array>} Array of slide objects with rId and path
  */
 async function getUsedSlides(zip) {
   try {
@@ -84,31 +147,34 @@ async function getUsedSlides(zip) {
         path: `ppt/${rel.Target.replace('../', '')}`
       }));
   } catch (error) {
-    console.error('获取使用的幻灯片时出错:', error);
+    console.error('Error getting used slides:', error);
     return [];
   }
 }
 
 /**
- * 获取幻灯片中使用的所有布局和母版
+ * Get all layouts and masters used in slides
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Array} usedSlides Array of slide objects
+ * @returns {Promise<Object>} Object with usedLayouts and usedMasters Sets
  */
 async function getUsedLayoutsAndMasters(zip, usedSlides) {
   const usedLayouts = new Set();
   const usedMasters = new Set();
   
   try {
-    // 处理每个幻灯片
+    // Process each slide
     for (const slide of usedSlides) {
       const slideXml = await zip.file(slide.path)?.async('string');
       if (!slideXml) continue;
       
       const slideObj = await parseXmlWithNamespaces(slideXml);
       
-      // 获取幻灯片使用的布局ID
+      // Get layout ID used by the slide
       const layoutRId = slideObj?.p_sld?.p_cSld?.$?.layoutId;
       if (!layoutRId) continue;
       
-      // 获取幻灯片关系文件
+      // Get slide relationship file
       const slideRelsPath = slide.path.replace('slides/', 'slides/_rels/') + '.rels';
       const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
       if (!slideRelsXml) continue;
@@ -118,20 +184,20 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
         ? slideRelsObj.Relationships.Relationship
         : [slideRelsObj.Relationships.Relationship];
       
-      // 找到布局关系
+      // Find layout relationship
       const layoutRel = slideRels.find(rel => rel.Type.includes('/slideLayout'));
       if (!layoutRel) continue;
       
       const layoutPath = `ppt/${layoutRel.Target.replace('../', '')}`;
       usedLayouts.add(layoutPath);
       
-      // 获取布局使用的母版
+      // Get master used by the layout
       const layoutXml = await zip.file(layoutPath)?.async('string');
       if (!layoutXml) continue;
       
       const layoutObj = await parseXmlWithNamespaces(layoutXml);
       
-      // 获取布局关系文件
+      // Get layout relationship file
       const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
       const layoutRelsXml = await zip.file(layoutRelsPath)?.async('string');
       if (!layoutRelsXml) continue;
@@ -141,7 +207,7 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
         ? layoutRelsObj.Relationships.Relationship
         : [layoutRelsObj.Relationships.Relationship];
       
-      // 找到母版关系
+      // Find master relationship
       const masterRel = layoutRels.find(rel => rel.Type.includes('/slideMaster'));
       if (!masterRel) continue;
       
@@ -151,19 +217,22 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
     
     return { usedLayouts, usedMasters };
   } catch (error) {
-    console.error('获取使用的布局和母版时出错:', error);
+    console.error('Error getting used layouts and masters:', error);
     return { usedLayouts: new Set(), usedMasters: new Set() };
   }
 }
 
 /**
- * 获取幻灯片中使用的所有媒体文件
+ * Get all media files used in slides
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Array} usedSlides Array of slide objects
+ * @returns {Promise<Set<string>>} Set of used media file paths
  */
 async function getUsedMedia(zip, usedSlides) {
   const usedMedia = new Set();
   
   try {
-    // 处理每个幻灯片及其关系
+    // Process each slide and its relationships
     for (const slide of usedSlides) {
       const slideRelsPath = slide.path.replace('slides/', 'slides/_rels/') + '.rels';
       const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
@@ -174,7 +243,7 @@ async function getUsedMedia(zip, usedSlides) {
         ? slideRelsObj.Relationships.Relationship
         : [slideRelsObj.Relationships.Relationship];
       
-      // 找到媒体关系
+      // Find media relationships
       const mediaRels = slideRels.filter(rel => 
         rel.Type.includes('/image') || 
         rel.Type.includes('/audio') || 
@@ -188,91 +257,66 @@ async function getUsedMedia(zip, usedSlides) {
     
     return usedMedia;
   } catch (error) {
-    console.error('获取使用的媒体文件时出错:', error);
+    console.error('Error getting used media files:', error);
     return new Set();
   }
 }
 
 /**
- * 删除未使用的布局
- */
-async function removeUnusedLayouts(zip, usedLayouts) {
-  try {
-    // 获取所有布局文件
-    const layoutFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/slideLayouts/') && !path.includes('_rels'));
-    
-    // 删除未使用的布局
-    for (const layoutPath of layoutFiles) {
-      if (!usedLayouts.has(layoutPath)) {
-        zip.remove(layoutPath);
-        
-        // 删除相关的关系文件
-        const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
-        if (zip.file(layoutRelsPath)) {
-          zip.remove(layoutRelsPath);
-        }
-      }
-    }
-    
-    // 更新presentation.xml中的布局引用
-    await updatePresentationLayouts(zip, usedLayouts);
-  } catch (error) {
-    console.error('删除未使用的布局时出错:', error);
-  }
-}
-
-/**
- * 删除未使用的母版
- */
-async function removeUnusedMasters(zip, usedMasters) {
-  try {
-    // 获取所有母版文件
-    const masterFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/slideMasters/') && !path.includes('_rels'));
-    
-    // 删除未使用的母版
-    for (const masterPath of masterFiles) {
-      if (!usedMasters.has(masterPath)) {
-        zip.remove(masterPath);
-        
-        // 删除相关的关系文件
-        const masterRelsPath = masterPath.replace('slideMasters/', 'slideMasters/_rels/') + '.rels';
-        if (zip.file(masterRelsPath)) {
-          zip.remove(masterRelsPath);
-        }
-      }
-    }
-    
-    // 更新presentation.xml中的母版引用
-    await updatePresentationMasters(zip, usedMasters);
-  } catch (error) {
-    console.error('删除未使用的母版时出错:', error);
-  }
-}
-
-/**
- * 删除未使用的媒体文件
+ * Remove unused media files from the PPTX
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Set<string>} usedMedia Set of used media file paths
  */
 async function removeUnusedMedia(zip, usedMedia) {
   try {
-    // 获取所有媒体文件
+    // Get all media files
     const mediaFiles = Object.keys(zip.files)
       .filter(path => path.startsWith('ppt/media/'));
     
-    // 删除未使用的媒体文件
-    for (const mediaPath of mediaFiles) {
-      if (!usedMedia.has(mediaPath)) {
-        zip.remove(mediaPath);
+    console.log(`Total media files: ${mediaFiles.length}`);
+    console.log(`Used media files: ${usedMedia.size}`);
+    
+    // Double-check: Verify all media files in usedMedia actually exist
+    for (const mediaPath of usedMedia) {
+      if (!zip.file(mediaPath)) {
+        console.warn(`Warning: Referenced media file does not exist: ${mediaPath}`);
       }
     }
+    
+    // Delete unused media files with additional verification
+    const unusedMedia = mediaFiles.filter(path => !usedMedia.has(path));
+    console.log(`Found ${unusedMedia.length} unused media files to remove`);
+    
+    // Additional safety check: Don't delete if we're removing too many files
+    // This helps prevent accidental deletion of all media files due to a bug
+    if (unusedMedia.length > 0 && unusedMedia.length === mediaFiles.length) {
+      console.warn('Warning: Attempting to remove all media files. This may indicate an error in media detection. Skipping removal.');
+      return;
+    }
+    
+    // Additional safety check: Don't delete if the percentage is too high
+    const removalPercentage = (unusedMedia.length / mediaFiles.length) * 100;
+    if (removalPercentage > 80) {
+      console.warn(`Warning: Attempting to remove ${removalPercentage.toFixed(1)}% of media files. This may indicate an error in media detection. Skipping removal.`);
+      return;
+    }
+    
+    for (const mediaPath of unusedMedia) {
+      console.log(`Removing unused media: ${mediaPath}`);
+      zip.remove(mediaPath);
+    }
+    
+    // Update content types
+    await updateContentTypes(zip);
   } catch (error) {
-    console.error('删除未使用的媒体文件时出错:', error);
+    console.error('Error removing unused media files:', error);
   }
 }
 
 /**
- * 更新presentation.xml中的布局引用
+ * Update presentation.xml layout references
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Set<string>} usedLayouts Set of used layout paths
  */
 async function updatePresentationLayouts(zip, usedLayouts) {
   try {
@@ -281,7 +325,7 @@ async function updatePresentationLayouts(zip, usedLayouts) {
     
     const presentationObj = await parseXmlWithNamespaces(presentationXml);
     
-    // 更新presentation.xml.rels
+    // Update presentation.xml.rels
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
     if (!relsXml) return;
@@ -291,7 +335,7 @@ async function updatePresentationLayouts(zip, usedLayouts) {
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    // 过滤出非布局关系和使用的布局关系
+    // Filter out non-layout relationships and used layout relationships
     relsObj.Relationships.Relationship = relationships.filter(rel => {
       if (!rel.Type.includes('/slideLayout')) return true;
       
@@ -299,16 +343,18 @@ async function updatePresentationLayouts(zip, usedLayouts) {
       return usedLayouts.has(layoutPath);
     });
     
-    // 更新关系文件
+    // Update relationship file
     const updatedRelsXml = buildXml(relsObj);
     zip.file(relsPath, updatedRelsXml);
   } catch (error) {
-    console.error('更新演示文稿布局引用时出错:', error);
+    console.error('Error updating presentation layout references:', error);
   }
 }
 
 /**
- * 更新presentation.xml中的母版引用
+ * Update presentation.xml master references
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Set<string>} usedMasters Set of used master paths
  */
 async function updatePresentationMasters(zip, usedMasters) {
   try {
@@ -317,7 +363,7 @@ async function updatePresentationMasters(zip, usedMasters) {
     
     const presentationObj = await parseXmlWithNamespaces(presentationXml);
     
-    // 更新presentation.xml.rels
+    // Update presentation.xml.rels
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
     if (!relsXml) return;
@@ -327,7 +373,7 @@ async function updatePresentationMasters(zip, usedMasters) {
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    // 过滤出非母版关系和使用的母版关系
+    // Filter out non-master relationships and used master relationships
     relsObj.Relationships.Relationship = relationships.filter(rel => {
       if (!rel.Type.includes('/slideMaster')) return true;
       
@@ -335,37 +381,56 @@ async function updatePresentationMasters(zip, usedMasters) {
       return usedMasters.has(masterPath);
     });
     
-    // 更新关系文件
+    // Update relationship file
     const updatedRelsXml = buildXml(relsObj);
     zip.file(relsPath, updatedRelsXml);
   } catch (error) {
-    console.error('更新演示文稿母版引用时出错:', error);
+    console.error('Error updating presentation master references:', error);
   }
 }
 
 /**
- * 更新[Content_Types].xml
+ * Update [Content_Types].xml to remove references to deleted files
+ * @param {JSZip} zip PPTX ZIP object
  */
 async function updateContentTypes(zip) {
   try {
+    console.log('Updating content types...');
     const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
-    if (!contentTypesXml) return;
+    if (!contentTypesXml) {
+      console.log('No content types file found');
+      return;
+    }
     
     const contentTypesObj = await parseXml(contentTypesXml);
     const overrides = Array.isArray(contentTypesObj.Types.Override)
       ? contentTypesObj.Types.Override
       : [contentTypesObj.Types.Override];
     
-    // 过滤出实际存在的文件的Override
-    contentTypesObj.Types.Override = overrides.filter(override => {
+    console.log(`Found ${overrides.length} content type overrides`);
+    
+    // Filter out overrides for files that no longer exist
+    const filteredOverrides = overrides.filter(override => {
       const path = override.PartName.replace(/^\//, '');
-      return zip.file(path) !== null;
+      const exists = zip.file(path) !== null;
+      if (!exists) console.log(`Removing content type for deleted file: ${path}`);
+      return exists;
     });
     
-    // 更新内容类型文件
-    const updatedContentTypesXml = buildXml(contentTypesObj);
-    zip.file('[Content_Types].xml', updatedContentTypesXml);
+    // If any overrides were removed
+    if (filteredOverrides.length < overrides.length) {
+      // Update overrides
+      contentTypesObj.Types.Override = filteredOverrides;
+      
+      // Update content types file
+      const updatedContentTypesXml = buildXml(contentTypesObj);
+      zip.file('[Content_Types].xml', updatedContentTypesXml);
+      
+      console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
+    } else {
+      console.log('No content type references needed to be removed');
+    }
   } catch (error) {
-    console.error('更新内容类型时出错:', error);
+    console.error('Error updating content types:', error);
   }
 }
