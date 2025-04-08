@@ -45,6 +45,8 @@
       optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.9 },
         removeHiddenSlides: true,
+        removeUnusedLayouts: true,  // 启用清理未使用的布局和母版
+        cleanUnusedResources: true, // 启用清理未使用的资源
         onProgress: (phase, detail) => {
           switch (phase) {
             case 'fileInfo':

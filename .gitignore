@@ -33,6 +33,9 @@ dist/
 # Svelte local configuration
 .svelte-kit/
 
+# Sample data
+0/
+
 # Environment variables
 .env
 .aider*

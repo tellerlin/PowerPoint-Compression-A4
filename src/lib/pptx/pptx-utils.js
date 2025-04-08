@@ -1,171 +1,123 @@
-// Replace the import line
-import { Builder } from 'xml2js';
+import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
+import { MEDIA_PATH_PREFIX } from './constants';
 
 /**
- * Parse XML string using browser's DOMParser
- * @param {string} xmlString XML string to parse
- * @returns {Object} Parsed XML object
+ * 查找所有媒体文件
+ * @param {JSZip} zip PPTX的ZIP对象
+ * @returns {Array<string>} 媒体文件路径数组
  */
-async function parseXmlString(xmlString) {
-  const parser = new DOMParser();
-  const xmlDoc = parser.parseFromString(xmlString, 'text/xml');
-  
-  // Convert XML DOM to a JavaScript object similar to xml2js output
-  function domToObject(node) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return node.nodeValue.trim();
-    }
-    
-    const obj = {};
-    
-    // Add attributes
-    if (node.attributes && node.attributes.length > 0) {
-      obj.$ = {};
-      for (let i = 0; i < node.attributes.length; i++) {
-        const attr = node.attributes[i];
-        obj.$[attr.name] = attr.value;
-      }
-    }
-    
-    // Process child nodes
-    const childNodes = Array.from(node.childNodes).filter(n => 
-      n.nodeType === Node.ELEMENT_NODE || 
-      (n.nodeType === Node.TEXT_NODE && n.nodeValue.trim() !== '')
-    );
-    
-    if (childNodes.length > 0) {
-      childNodes.forEach(child => {
-        if (child.nodeType === Node.TEXT_NODE) {
-          const text = child.nodeValue.trim();
-          if (text) {
-            obj._ = text;
-          }
-        } else {
-          const childName = child.nodeName;
-          const childObj = domToObject(child);
-          
-          if (!obj[childName]) {
-            obj[childName] = childObj;
-          } else if (Array.isArray(obj[childName])) {
-            obj[childName].push(childObj);
-          } else {
-            obj[childName] = [obj[childName], childObj];
-          }
-        }
-      });
-    }
-    
-    return obj;
-  }
-  
-  return domToObject(xmlDoc.documentElement);
-}
-
-// Keep the existing functions but modify removeHiddenSlides
 export function findMediaFiles(zip) {
   return Object.keys(zip.files)
-    .filter(path => path.startsWith('ppt/media/') && !zip.files[path].dir);
+    .filter(path => path.startsWith(MEDIA_PATH_PREFIX));
 }
 
+/**
+ * 处理媒体文件
+ * @param {JSZip} zip PPTX的ZIP对象
+ * @param {string} mediaPath 媒体文件路径
+ * @param {Function} processor 处理函数
+ */
 export async function processMediaFile(zip, mediaPath, processor) {
-  try {
-    // 获取原始文件数据
-    const fileData = await zip.file(mediaPath).async('uint8array');
-    
-    // 处理文件数据
-    const processedData = await processor(fileData);
-    
-    // 更新文件
-    if (processedData && processedData !== fileData) {
-      zip.file(mediaPath, processedData);
-    }
-  } catch (error) {
-    console.error(`Error processing ${mediaPath}:`, error);
-    throw error;
+  const file = zip.file(mediaPath);
+  if (!file) return;
+  
+  const data = await file.async('uint8array');
+  const processedData = await processor(data);
+  
+  if (processedData) {
+    zip.file(mediaPath, processedData);
   }
 }
 
 /**
- * 删除PPTX中的隐藏幻灯片
- * @param {JSZip} zip PPTX文件的JSZip对象
- * @returns {Promise<{removedSlides: number}>} 删除的幻灯片数量
+ * 删除隐藏的幻灯片
+ * @param {JSZip} zip PPTX的ZIP对象
  */
 export async function removeHiddenSlides(zip) {
   try {
-    // 读取presentation.xml文件
-    const presentationXml = await zip.file('ppt/presentation.xml').async('text');
-    const presentation = await parseXmlString(presentationXml);
+    // 获取presentation.xml
+    const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
+    if (!presentationXml) return false;
     
-    // Check if we have a slide list
-    const p = presentation.p || presentation['p:presentation'];
-    const sldIdLst = p && (p.sldIdLst || p['p:sldIdLst']);
-    const sldId = sldIdLst && (sldIdLst.sldId || sldIdLst['p:sldId']);
+    // 解析XML
+    const presentationObj = await parseXmlWithNamespaces(presentationXml);
+    const slidesList = presentationObj?.p_presentation?.p_sldIdLst?.p_sldId;
     
-    if (!sldId) {
-      return { removedSlides: 0 };
-    }
+    if (!slidesList) return false;
     
-    // Get all slides
-    const slides = Array.isArray(sldId) ? sldId : [sldId];
-    const originalCount = slides.length;
+    // 转换为数组
+    const slides = Array.isArray(slidesList) ? slidesList : [slidesList];
     
-    // Filter out hidden slides
-    const visibleSlides = slides.filter(slide => {
-      return !slide.$ || !slide.$.show || slide.$.show !== '0';
-    });
+    // 找出隐藏的幻灯片
+    const hiddenSlides = slides.filter(slide => 
+      slide && slide.$ && slide.$.show === '0'
+    );
     
-    // If there are hidden slides, update presentation.xml
-    if (visibleSlides.length < originalCount) {
-      // Create a new XML document
-      const xmlDoc = new DOMParser().parseFromString(presentationXml, 'text/xml');
+    if (hiddenSlides.length === 0) return false;
+    
+    // 获取幻灯片关系
+    const relsPath = 'ppt/_rels/presentation.xml.rels';
+    const relsXml = await zip.file(relsPath)?.async('string');
+    if (!relsXml) return false;
+    
+    const relsObj = await parseXml(relsXml);
+    
+    // 删除隐藏的幻灯片
+    for (const hiddenSlide of hiddenSlides) {
+      const slideId = hiddenSlide.$.id;
+      const slideRId = hiddenSlide.$.r_id;
       
-      // Find and remove hidden slides
-      const slideNodes = xmlDoc.querySelectorAll('p\\:sldId, sldId');
-      for (const slideNode of slideNodes) {
-        if (slideNode.getAttribute('show') === '0') {
-          slideNode.parentNode.removeChild(slideNode);
-        }
+      // 找到对应的关系
+      const relationship = relsObj.Relationships.Relationship.find(rel => 
+        rel.Id === slideRId
+      );
+      
+      if (!relationship) continue;
+      
+      // 获取幻灯片路径
+      const slidePath = `ppt/${relationship.Target.replace('../', '')}`;
+      
+      // 删除幻灯片文件
+      zip.remove(slidePath);
+      
+      // 删除幻灯片关系文件
+      const slideRelsPath = slidePath.replace('slides/', 'slides/_rels/') + '.rels';
+      if (zip.file(slideRelsPath)) {
+        zip.remove(slideRelsPath);
       }
       
-      // Serialize back to XML
-      const serializer = new XMLSerializer();
-      const updatedXml = serializer.serializeToString(xmlDoc);
-      
-      // Update the file
-      zip.file('ppt/presentation.xml', updatedXml);
-      
-      // Get the IDs of removed slides
-      const removedSlideIds = slides
-        .filter(slide => slide.$ && slide.$.show === '0')
-        .map(slide => slide.$['r:id']);
-      
-      // Get slide paths from presentation.xml.rels
-      const relsXml = await zip.file('ppt/_rels/presentation.xml.rels').async('text');
-      const relsDoc = new DOMParser().parseFromString(relsXml, 'text/xml');
-      
-      // Find and remove the corresponding slide files
-      const relationships = relsDoc.querySelectorAll('Relationship');
-      for (const rel of relationships) {
-        const id = rel.getAttribute('Id');
-        if (removedSlideIds.includes(id)) {
-          const target = rel.getAttribute('Target');
-          const slidePath = 'ppt/' + target.replace('../', '');
-          zip.remove(slidePath);
-          
-          // Remove related rels file
-          const slideRelsPath = slidePath.replace('.xml', '.xml.rels').replace('slides/', 'slides/_rels/');
-          if (zip.files[slideRelsPath]) {
-            zip.remove(slideRelsPath);
-          }
-        }
+      // 从presentation.xml中移除幻灯片引用
+      const slideIdIndex = slides.findIndex(s => s.$.id === slideId);
+      if (slideIdIndex !== -1) {
+        slides.splice(slideIdIndex, 1);
       }
       
-      return { removedSlides: originalCount - visibleSlides.length };
+      // 从关系文件中移除引用
+      const relIndex = relsObj.Relationships.Relationship.findIndex(rel => 
+        rel.Id === slideRId
+      );
+      if (relIndex !== -1) {
+        relsObj.Relationships.Relationship.splice(relIndex, 1);
+      }
     }
     
-    return { removedSlides: 0 };
+    // 更新presentation.xml
+    if (Array.isArray(slidesList)) {
+      presentationObj.p_presentation.p_sldIdLst.p_sldId = slides;
+    } else {
+      presentationObj.p_presentation.p_sldIdLst.p_sldId = slides.length > 0 ? slides : undefined;
+    }
+    
+    const updatedPresentationXml = buildXml(presentationObj);
+    zip.file('ppt/presentation.xml', updatedPresentationXml);
+    
+    // 更新关系文件
+    const updatedRelsXml = buildXml(relsObj);
+    zip.file(relsPath, updatedRelsXml);
+    
+    return true;
   } catch (error) {
-    console.error('Error removing hidden slides:', error);
-    throw error;
+    console.error('删除隐藏幻灯片时出错:', error);
+    return false;
   }
 }

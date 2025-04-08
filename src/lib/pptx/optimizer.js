@@ -2,9 +2,9 @@ import JSZip from 'jszip';
 import { validateFile } from '../utils/validation';
 import { compressImage } from '../utils/image';
 import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
-// 修改这个导入路径，从相对路径 './utils' 改为具体的文件路径
 import { findMediaFiles, processMediaFile, removeHiddenSlides } from './pptx-utils';
 import { removeUnusedLayouts } from './layout-cleaner';
+import { cleanUnusedResources } from './cleaner';
 
 async function optimizePPTX(file, options = {}) {
   try {
@@ -21,14 +21,20 @@ async function optimizePPTX(file, options = {}) {
     
     const zip = await JSZip.loadAsync(file);
     
+    // 添加清理未使用资源的功能
+    if (options.cleanUnusedResources) {
+      onProgress('init', { percentage: 25, status: '清理未使用的资源...' });
+      await cleanUnusedResources(zip, onProgress);
+    }
+    
     // 添加删除未使用布局和母版的功能
     if (options.removeUnusedLayouts) {
-      onProgress('init', { percentage: 50, status: 'Removing unused layouts and masters...' });
+      onProgress('init', { percentage: 50, status: '删除未使用的布局和母版...' });
       await removeUnusedLayouts(zip, onProgress);
     }
     
     if (options.removeHiddenSlides) {
-      onProgress('init', { percentage: 75, status: 'Removing hidden slides...' });
+      onProgress('init', { percentage: 75, status: '删除隐藏的幻灯片...' });
       await removeHiddenSlides(zip);
     }
     
@@ -75,7 +81,7 @@ async function optimizePPTX(file, options = {}) {
             success: true
           };
         } catch (error) {
-          console.warn(`Failed to process ${mediaPath}:`, error);
+          console.warn(`处理 ${mediaPath} 失败:`, error);
           return {
             path: mediaPath,
             success: false,
@@ -109,7 +115,7 @@ async function optimizePPTX(file, options = {}) {
     const savedPercentage = totalOriginalSize > 0 ? (savedSize / totalOriginalSize * 100).toFixed(1) : 0;
     
     onProgress('finalize', { 
-      status: `Rebuilding presentation...`,
+      status: `重建演示文稿...`,
       stats: {
         originalSize: file.size,
         compressedSize: null, // Will be updated after zip generation
@@ -147,7 +153,7 @@ async function optimizePPTX(file, options = {}) {
     return compressedBlob;
     
   } catch (error) {
-    console.error('Optimization failed:', error);
+    console.error('优化失败:', error);
     throw error;
   }
 }
