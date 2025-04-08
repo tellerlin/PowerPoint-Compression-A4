@@ -50,11 +50,19 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
     const allMasterFiles = Object.keys(zip.files)
       .filter(path => path.startsWith('ppt/slideMasters/') && !path.includes('_rels'));
     
+    // 调试输出所有布局文件和已使用的布局文件
+    console.log('All layout files:', allLayoutFiles);
+    console.log('Used layout paths:', Array.from(usedLayouts));
+    
     console.log(`Total layouts: ${allLayoutFiles.length}, Total masters: ${allMasterFiles.length}`);
     
     onProgress('init', { percentage: 60, status: 'Removing unused layouts...' });
     
-    // 5. 删除未使用的布局
+    // 我们只保留幻灯片直接使用的布局，不再将母版引用的布局添加到保留列表中
+    // 这样可以删除更多未使用的布局，提高清理效率
+    console.log('直接使用的布局:', Array.from(usedLayouts));
+    
+    // 删除未使用的布局（只保留幻灯片直接使用的布局）
     const unusedLayouts = allLayoutFiles.filter(path => !usedLayouts.has(path));
     console.log(`Found ${unusedLayouts.length} unused layouts to remove`);
     
@@ -63,7 +71,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       zip.remove(layoutPath);
       
       // 删除相关的关系文件
-      const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
+      const layoutRelsPath = layoutPath.replace('ppt/slideLayouts/', 'ppt/slideLayouts/_rels/') + '.rels';
       if (zip.file(layoutRelsPath)) {
         console.log(`Removing layout relationship file: ${layoutRelsPath}`);
         zip.remove(layoutRelsPath);
@@ -81,7 +89,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       zip.remove(masterPath);
       
       // 删除相关的关系文件
-      const masterRelsPath = masterPath.replace('slideMasters/', 'slideMasters/_rels/') + '.rels';
+      const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
       if (zip.file(masterRelsPath)) {
         console.log(`Removing master relationship file: ${masterRelsPath}`);
         zip.remove(masterRelsPath);
@@ -98,6 +106,12 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
     for (const masterPath of usedMasters) {
       await updateMasterLayoutReferences(zip, masterPath, usedLayouts);
     }
+    
+    // 在删除布局后添加验证逻辑
+    console.log('删除后剩余布局文件:', Object.keys(zip.files).filter(p => p.startsWith('ppt/slideLayouts/')));
+    // 验证内容类型
+    const contentTypes = await zip.file('[Content_Types].xml')?.async('string');
+    console.log('内容类型中的布局引用:', contentTypes?.match(/slideLayout/g) || []);
     
     console.log('Layout cleanup completed successfully');
     return true;
@@ -191,12 +205,14 @@ async function getSlideLayout(zip, slide) {
  * @param {JSZip} zip PPTX ZIP object
  * @param {string} layoutPath Layout path
  */
-async function getLayoutMaster(zip, layoutPath) {
+export async function getLayoutMaster(zip, layoutPath) {
   try {
     // 获取布局关系文件
-    const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
+    const layoutRelsPath = layoutPath.replace('ppt/slideLayouts/', 'ppt/slideLayouts/_rels/') + '.rels';
     const layoutRelsXml = await zip.file(layoutRelsPath)?.async('string');
     if (!layoutRelsXml) return null;
+    
+    console.log(`Getting master for layout: ${layoutPath}, using rels file: ${layoutRelsPath}`);
     
     const layoutRelsObj = await parseXml(layoutRelsXml);
     const layoutRels = Array.isArray(layoutRelsObj.Relationships.Relationship)
@@ -215,6 +231,69 @@ async function getLayoutMaster(zip, layoutPath) {
     console.error('Error getting layout master:', error);
     return null;
   }
+}
+
+/**
+ * Update presentation references to layouts and masters
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Set<string>} usedLayouts Set of used layout paths
+ * @param {Set<string>} usedMasters Set of used master paths
+ */
+/**
+ * Get layouts referenced by masters
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Set<string>} usedMasters Set of used master paths
+ * @returns {Promise<Set<string>>} Set of layout paths referenced by masters
+ * @deprecated This function is no longer used in the main flow as we only keep layouts directly used by slides
+ */
+async function getMasterReferencedLayouts(zip, usedMasters) {
+  const referencedLayouts = new Set();
+  
+  try {
+    // 遍历所有使用的母版
+    for (const masterPath of usedMasters) {
+      // 获取母版关系文件
+      const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
+      const masterRelsXml = await zip.file(masterRelsPath)?.async('string');
+      if (!masterRelsXml) continue;
+      
+      console.log(`Checking layouts referenced by master: ${masterPath}`);
+      
+      const masterRelsObj = await parseXml(masterRelsXml);
+      const relationships = Array.isArray(masterRelsObj.Relationships.Relationship)
+        ? masterRelsObj.Relationships.Relationship
+        : [masterRelsObj.Relationships.Relationship];
+      
+      // 找到布局关系
+      const layoutRels = relationships.filter(rel => rel.Type.includes('/slideLayout'));
+      
+      // 添加布局路径到引用集合
+      for (const layoutRel of layoutRels) {
+        const layoutPath = `ppt/${layoutRel.Target.replace('../', '')}`;
+        referencedLayouts.add(layoutPath);
+        console.log(`Master ${masterPath} references layout: ${layoutPath}`);
+      }
+      
+      // 检查母版XML中的布局引用
+      const masterXml = await zip.file(masterPath)?.async('string');
+      if (masterXml) {
+        const masterObj = await parseXmlWithNamespaces(masterXml);
+        
+        // 检查sldLayoutIdLst中的布局引用
+        if (masterObj?.p_sldMaster?.p_sldLayoutIdLst?.p_sldLayoutId) {
+          const layoutIds = Array.isArray(masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId)
+            ? masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId
+            : [masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId];
+          
+          console.log(`Master ${masterPath} has ${layoutIds.length} layout references in XML`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error getting master referenced layouts:', error);
+  }
+  
+  return referencedLayouts;
 }
 
 /**
@@ -335,9 +414,11 @@ export async function updateContentTypes(zip) {
 async function updateMasterLayoutReferences(zip, masterPath, usedLayouts) {
   try {
     // 获取母版关系文件
-    const masterRelsPath = masterPath.replace('slideMasters/', 'slideMasters/_rels/') + '.rels';
+    const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
     const masterRelsXml = await zip.file(masterRelsPath)?.async('string');
     if (!masterRelsXml) return;
+    
+    console.log(`Updating master layout references for: ${masterPath}, using rels file: ${masterRelsPath}`);
     
     const masterRelsObj = await parseXml(masterRelsXml);
     const relationships = Array.isArray(masterRelsObj.Relationships.Relationship)

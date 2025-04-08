@@ -1,6 +1,7 @@
 import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
-import { PRESENTATION_PATH } from './constants';
-import { removeUnusedLayouts, updateContentTypes, updatePresentationReferences } from './layout-cleaner';
+import { PRESENTATION_PATH, MEDIA_PATH_PREFIX } from './constants';
+import { removeUnusedLayouts, updateContentTypes, updatePresentationReferences, getLayoutMaster } from './layout-cleaner';
+import { findMediaFiles } from './media';
 
 /**
  * Clean unused resources (layouts, masters, and media files) from the PPTX file
@@ -65,59 +66,10 @@ async function collectUsedMedia(zip) {
     console.log(`Found ${slideMedia.size} media files used in slides`);
     
     // Add slide media to the used media set
-    for (const mediaPath of slideMedia) {
-      usedMedia.add(mediaPath);
-    }
+    slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
     
-    // Step 4: Get all relationship files
-    const relsFiles = Object.keys(zip.files)
-      .filter(path => path.includes('_rels/') && path.endsWith('.rels'));
-    
-    console.log(`Found ${relsFiles.length} relationship files to analyze`);
-    
-    // Step 5: Parse each relationship file to find media references
-    for (const relsPath of relsFiles) {
-      // Skip relationship files we've already processed in getUsedMedia
-      if (relsPath.includes('slides/_rels/') && usedSlides.some(slide => 
-          relsPath === slide.path.replace('slides/', 'slides/_rels/') + '.rels')) {
-        continue;
-      }
-      
-      // Check if this is a layout or master relationship file
-      const isLayoutRels = relsPath.includes('slideLayouts/_rels/');
-      const isMasterRels = relsPath.includes('slideMasters/_rels/');
-      
-      // If it's a layout or master relationship file, check if it's used
-      if (isLayoutRels) {
-        const layoutPath = relsPath.replace('_rels/', '').replace('.rels', '');
-        if (!usedLayouts.has(layoutPath)) continue;
-      } else if (isMasterRels) {
-        const masterPath = relsPath.replace('_rels/', '').replace('.rels', '');
-        if (!usedMasters.has(masterPath)) continue;
-      }
-      
-      const relsXml = await zip.file(relsPath)?.async('string');
-      if (!relsXml) continue;
-      
-      // Use XML parsing for more reliable results
-      const relsObj = await parseXml(relsXml);
-      if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
-      
-      const relationships = Array.isArray(relsObj.Relationships.Relationship)
-        ? relsObj.Relationships.Relationship
-        : [relsObj.Relationships.Relationship];
-      
-      // Find media relationships
-      const mediaRels = relationships.filter(rel => 
-        rel.Type.includes('/image') || 
-        rel.Type.includes('/audio') || 
-        rel.Type.includes('/video'));
-      
-      for (const mediaRel of mediaRels) {
-        const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
-        usedMedia.add(mediaPath);
-      }
-    }
+    // Step 4: Process relationship files for layouts and masters
+    await processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia);
     
     console.log(`Found ${usedMedia.size} total used media files`);
   } catch (error) {
@@ -125,6 +77,66 @@ async function collectUsedMedia(zip) {
   }
   
   return usedMedia;
+}
+
+/**
+ * Process relationship files to find media references
+ * @param {JSZip} zip PPTX ZIP object
+ * @param {Set<string>} usedLayouts Set of used layout paths
+ * @param {Set<string>} usedMasters Set of used master paths
+ * @param {Array} usedSlides Array of used slide objects
+ * @param {Set<string>} usedMedia Set to store used media paths
+ */
+async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia) {
+  // Get all relationship files
+  const relsFiles = Object.keys(zip.files)
+    .filter(path => path.includes('_rels/') && path.endsWith('.rels'));
+  
+  console.log(`Found ${relsFiles.length} relationship files to analyze`);
+  
+  // Parse each relationship file to find media references
+  for (const relsPath of relsFiles) {
+    // Skip relationship files we've already processed in getUsedMedia
+    if (relsPath.includes('slides/_rels/') && usedSlides.some(slide => 
+        relsPath === slide.path.replace('slides/', 'slides/_rels/') + '.rels')) {
+      continue;
+    }
+    
+    // Check if this is a layout or master relationship file
+    const isLayoutRels = relsPath.includes('slideLayouts/_rels/');
+    const isMasterRels = relsPath.includes('slideMasters/_rels/');
+    
+    // If it's a layout or master relationship file, check if it's used
+    if (isLayoutRels) {
+      const layoutPath = relsPath.replace('_rels/', '').replace('.rels', '');
+      if (!usedLayouts.has(layoutPath)) continue;
+    } else if (isMasterRels) {
+      const masterPath = relsPath.replace('_rels/', '').replace('.rels', '');
+      if (!usedMasters.has(masterPath)) continue;
+    }
+    
+    const relsXml = await zip.file(relsPath)?.async('string');
+    if (!relsXml) continue;
+    
+    // Use XML parsing for more reliable results
+    const relsObj = await parseXml(relsXml);
+    if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
+    
+    const relationships = Array.isArray(relsObj.Relationships.Relationship)
+      ? relsObj.Relationships.Relationship
+      : [relsObj.Relationships.Relationship];
+    
+    // Find media relationships
+    const mediaRels = relationships.filter(rel => 
+      rel.Type.includes('/image') || 
+      rel.Type.includes('/audio') || 
+      rel.Type.includes('/video'));
+    
+    for (const mediaRel of mediaRels) {
+      const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
+      usedMedia.add(mediaPath);
+    }
+  }
 }
 
 /**
@@ -171,12 +183,6 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
       const slideXml = await zip.file(slide.path)?.async('string');
       if (!slideXml) continue;
       
-      const slideObj = await parseXmlWithNamespaces(slideXml);
-      
-      // Get layout ID used by the slide
-      const layoutRId = slideObj?.p_sld?.p_cSld?.$?.layoutId;
-      if (!layoutRId) continue;
-      
       // Get slide relationship file
       const slideRelsPath = slide.path.replace('slides/', 'slides/_rels/') + '.rels';
       const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
@@ -194,28 +200,11 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
       const layoutPath = `ppt/${layoutRel.Target.replace('../', '')}`;
       usedLayouts.add(layoutPath);
       
-      // Get master used by the layout
-      const layoutXml = await zip.file(layoutPath)?.async('string');
-      if (!layoutXml) continue;
-      
-      const layoutObj = await parseXmlWithNamespaces(layoutXml);
-      
-      // Get layout relationship file
-      const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
-      const layoutRelsXml = await zip.file(layoutRelsPath)?.async('string');
-      if (!layoutRelsXml) continue;
-      
-      const layoutRelsObj = await parseXml(layoutRelsXml);
-      const layoutRels = Array.isArray(layoutRelsObj.Relationships.Relationship)
-        ? layoutRelsObj.Relationships.Relationship
-        : [layoutRelsObj.Relationships.Relationship];
-      
-      // Find master relationship
-      const masterRel = layoutRels.find(rel => rel.Type.includes('/slideMaster'));
-      if (!masterRel) continue;
-      
-      const masterPath = `ppt/${masterRel.Target.replace('../', '')}`;
-      usedMasters.add(masterPath);
+      // Get master used by the layout using the imported function from layout-cleaner.js
+      const masterInfo = await getLayoutMaster(zip, layoutPath);
+      if (masterInfo && masterInfo.path) {
+        usedMasters.add(masterInfo.path);
+      }
     }
     
     return { usedLayouts, usedMasters };
@@ -272,9 +261,8 @@ async function getUsedMedia(zip, usedSlides) {
  */
 async function removeUnusedMedia(zip, usedMedia) {
   try {
-    // Get all media files
-    const mediaFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/media/'));
+    // Get all media files using the imported function
+    const mediaFiles = findMediaFiles(zip);
     
     console.log(`Total media files: ${mediaFiles.length}`);
     console.log(`Used media files: ${usedMedia.size}`);
@@ -290,17 +278,8 @@ async function removeUnusedMedia(zip, usedMedia) {
     const unusedMedia = mediaFiles.filter(path => !usedMedia.has(path));
     console.log(`Found ${unusedMedia.length} unused media files to remove`);
     
-    // Additional safety check: Don't delete if we're removing too many files
-    // This helps prevent accidental deletion of all media files due to a bug
-    if (unusedMedia.length > 0 && unusedMedia.length === mediaFiles.length) {
-      console.warn('Warning: Attempting to remove all media files. This may indicate an error in media detection. Skipping removal.');
-      return;
-    }
-    
-    // Additional safety check: Don't delete if the percentage is too high
-    const removalPercentage = (unusedMedia.length / mediaFiles.length) * 100;
-    if (removalPercentage > 80) {
-      console.warn(`Warning: Attempting to remove ${removalPercentage.toFixed(1)}% of media files. This may indicate an error in media detection. Skipping removal.`);
+    // Safety checks to prevent accidental deletion
+    if (shouldSkipMediaRemoval(mediaFiles.length, unusedMedia.length)) {
       return;
     }
     
@@ -314,6 +293,29 @@ async function removeUnusedMedia(zip, usedMedia) {
   } catch (error) {
     console.error('Error removing unused media files:', error);
   }
+}
+
+/**
+ * Determine if media removal should be skipped based on safety checks
+ * @param {number} totalCount Total number of media files
+ * @param {number} unusedCount Number of unused media files
+ * @returns {boolean} True if removal should be skipped
+ */
+function shouldSkipMediaRemoval(totalCount, unusedCount) {
+  // Don't delete if we're removing all files (likely a detection error)
+  if (unusedCount > 0 && unusedCount === totalCount) {
+    console.warn('Warning: Attempting to remove all media files. This may indicate an error in media detection. Skipping removal.');
+    return true;
+  }
+  
+  // Don't delete if the percentage is too high
+  const removalPercentage = (unusedCount / totalCount) * 100;
+  if (removalPercentage > 80) {
+    console.warn(`Warning: Attempting to remove ${removalPercentage.toFixed(1)}% of media files. This may indicate an error in media detection. Skipping removal.`);
+    return true;
+  }
+  
+  return false;
 }
 
 // updatePresentationLayouts and updatePresentationMasters functions are replaced by updatePresentationReferences from layout-cleaner.js
