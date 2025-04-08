@@ -33,8 +33,10 @@ dist/
 # Svelte local configuration
 .svelte-kit/
 
-# Sample data
+# Sample data and test files
 0/
+18/
+sample-data/
 
 # Environment variables
 .env

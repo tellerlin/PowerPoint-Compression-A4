@@ -19,6 +19,8 @@ export async function cleanUnusedResources(zip, onProgress = () => {}) {
     // 删除未使用的媒体文件
     await removeUnusedMedia(zip, usedMedia);
     
+    onProgress('init', { percentage: 35, status: 'Cleaning unused media references...' });
+    
     return true;
   } catch (error) {
     console.error('清理未使用资源时出错:', error);

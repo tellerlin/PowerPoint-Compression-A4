@@ -35,64 +35,64 @@ export async function processMediaFile(zip, mediaPath, processor) {
  */
 export async function removeHiddenSlides(zip) {
   try {
-    // 获取presentation.xml
+    // Get presentation.xml
     const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
     if (!presentationXml) return false;
     
-    // 解析XML
+    // Parse XML
     const presentationObj = await parseXmlWithNamespaces(presentationXml);
     const slidesList = presentationObj?.p_presentation?.p_sldIdLst?.p_sldId;
     
     if (!slidesList) return false;
     
-    // 转换为数组
+    // Convert to array
     const slides = Array.isArray(slidesList) ? slidesList : [slidesList];
     
-    // 找出隐藏的幻灯片
+    // Find hidden slides
     const hiddenSlides = slides.filter(slide => 
       slide && slide.$ && slide.$.show === '0'
     );
     
     if (hiddenSlides.length === 0) return false;
     
-    // 获取幻灯片关系
+    // Get slide relationships
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
     if (!relsXml) return false;
     
     const relsObj = await parseXml(relsXml);
     
-    // 删除隐藏的幻灯片
+    // Remove hidden slides
     for (const hiddenSlide of hiddenSlides) {
       const slideId = hiddenSlide.$.id;
       const slideRId = hiddenSlide.$.r_id;
       
-      // 找到对应的关系
+      // Find corresponding relationship
       const relationship = relsObj.Relationships.Relationship.find(rel => 
         rel.Id === slideRId
       );
       
       if (!relationship) continue;
       
-      // 获取幻灯片路径
+      // Get slide path
       const slidePath = `ppt/${relationship.Target.replace('../', '')}`;
       
-      // 删除幻灯片文件
+      // Remove slide file
       zip.remove(slidePath);
       
-      // 删除幻灯片关系文件
+      // Remove slide relationship file
       const slideRelsPath = slidePath.replace('slides/', 'slides/_rels/') + '.rels';
       if (zip.file(slideRelsPath)) {
         zip.remove(slideRelsPath);
       }
       
-      // 从presentation.xml中移除幻灯片引用
+      // Remove slide reference from presentation.xml
       const slideIdIndex = slides.findIndex(s => s.$.id === slideId);
       if (slideIdIndex !== -1) {
         slides.splice(slideIdIndex, 1);
       }
       
-      // 从关系文件中移除引用
+      // Remove reference from relationship file
       const relIndex = relsObj.Relationships.Relationship.findIndex(rel => 
         rel.Id === slideRId
       );
@@ -101,7 +101,7 @@ export async function removeHiddenSlides(zip) {
       }
     }
     
-    // 更新presentation.xml
+    // Update presentation.xml
     if (Array.isArray(slidesList)) {
       presentationObj.p_presentation.p_sldIdLst.p_sldId = slides;
     } else {
@@ -111,13 +111,13 @@ export async function removeHiddenSlides(zip) {
     const updatedPresentationXml = buildXml(presentationObj);
     zip.file('ppt/presentation.xml', updatedPresentationXml);
     
-    // 更新关系文件
+    // Update relationship file
     const updatedRelsXml = buildXml(relsObj);
     zip.file(relsPath, updatedRelsXml);
     
     return true;
   } catch (error) {
-    console.error('删除隐藏幻灯片时出错:', error);
+    console.error('Error removing hidden slides:', error);
     return false;
   }
 }

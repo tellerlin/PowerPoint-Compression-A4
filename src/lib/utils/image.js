@@ -51,62 +51,69 @@ async function detectFormat(data) {
 }
 
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
-  const cacheKey = data.byteLength + '-' + quality;
-  if (imageCache.get(cacheKey)) {
-    return imageCache.get(cacheKey);
-  }
-
-  validateImageData(data);
-  const blob = new Blob([data]);
-
-  if (quality < 0 || quality > 1) {
-    throw new Error('Quality must be between 0 and 1.');
-  }
-
   try {
-    const bitmap = await createImageBitmap(blob);
-    const originalSize = data.byteLength;
-    const originalFormat = await detectFormat(data);
-
-    const { width, height } = calculateOptimalDimensions(bitmap.width, bitmap.height);
-    const canvas = await resizeImage(bitmap, width, height);
-    const imageData = await getImageData(canvas);
-    const analysis = analyzeImage(imageData);
-
-    // 对于小图像，使用更高的质量
-    if (data.byteLength < 50 * 1024) { // 50KB以下的图像
-      quality = Math.min(0.92, quality + 0.03); // 稍微提高质量
-    }
-    
-    let compressedBlob;
-    // 对于透明图像，使用更高的质量
-    if (analysis.hasAlpha) {
-      compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.92, quality + 0.03) });
-    } else {
-      const [webpBlob, jpegBlob] = await Promise.all([
-        canvas.convertToBlob({ type: 'image/webp', quality }),
-        canvas.convertToBlob({ type: 'image/jpeg', quality })
-      ]);
-      const webpBuffer = await webpBlob.arrayBuffer();
-      const jpegBuffer = await jpegBlob.arrayBuffer();
-
-      compressedBlob = (webpBuffer.byteLength < jpegBuffer.byteLength && webpBuffer.byteLength < originalSize)
-        ? webpBlob
-        : jpegBlob;
+    const cacheKey = data.byteLength + '-' + quality;
+    if (imageCache.get(cacheKey)) {
+      return imageCache.get(cacheKey);
     }
 
-    // 如果压缩后的大小大于原始大小，保留原始图像
-    const compressedSize = compressedBlob.size;
-    if (compressedSize > originalSize) {
-      return { data, format: originalFormat || 'original' };
+    validateImageData(data);
+    const blob = new Blob([data]);
+
+    if (quality < 0 || quality > 1) {
+      console.warn('Invalid quality value, using default quality');
+      quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY;
     }
 
-    // 确保返回的是 Uint8Array 而不是 Blob
-    const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
-    const result = { data: compressedData, format: compressedBlob.type.split('/').pop() };
-    imageCache.set(cacheKey, result);
-    return result;
+    try {
+      const bitmap = await createImageBitmap(blob);
+      const originalSize = data.byteLength;
+      const originalFormat = await detectFormat(data);
+
+      const { width, height } = calculateOptimalDimensions(bitmap.width, bitmap.height);
+      const canvas = await resizeImage(bitmap, width, height);
+      const imageData = await getImageData(canvas);
+      const analysis = analyzeImage(imageData);
+
+      // Use higher quality for small images
+      if (data.byteLength < 50 * 1024) { // Images under 50KB
+        quality = Math.min(0.92, quality + 0.03); // Slightly increase quality
+      }
+      
+      let compressedBlob;
+      // Use higher quality for transparent images
+      if (analysis.hasAlpha) {
+        compressedBlob = await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.92, quality + 0.03) });
+      } else {
+        const [webpBlob, jpegBlob] = await Promise.all([
+          canvas.convertToBlob({ type: 'image/webp', quality }),
+          canvas.convertToBlob({ type: 'image/jpeg', quality })
+        ]);
+        const webpBuffer = await webpBlob.arrayBuffer();
+        const jpegBuffer = await jpegBlob.arrayBuffer();
+
+        compressedBlob = (webpBuffer.byteLength < jpegBuffer.byteLength && webpBuffer.byteLength < originalSize)
+          ? webpBlob
+          : jpegBlob;
+      }
+
+      // If compressed size is larger than original, keep original image
+      const compressedSize = compressedBlob.size;
+      if (compressedSize > originalSize) {
+        return { data, format: originalFormat || 'original' };
+      }
+
+      // Ensure we return Uint8Array not Blob
+      const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
+      const result = { data: compressedData, format: compressedBlob.type.split('/').pop() };
+      imageCache.set(cacheKey, result);
+      return result;
+    } catch (error) {
+      console.error('Image processing failed:', error);
+      return { data, format: 'original' }; // Return original data on error
+    }
   } catch (error) {
-    throw new Error('Image processing failed: ' + error.message);
+    console.error('Image compression failed:', error);
+    return { data, format: 'original' }; // Return original data on error
   }
 }

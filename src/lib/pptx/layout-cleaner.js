@@ -7,11 +7,11 @@ import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
  */
 export async function removeUnusedLayouts(zip, onProgress = () => {}) {
   try {
-    // 1. 获取所有幻灯片
+    // 1. Get all slides
     const slides = await getAllSlides(zip);
     if (slides.length === 0) return;
     
-    // 2. 获取所有使用的布局
+    // 2. Get all used layouts
     const usedLayouts = new Set();
     for (const slide of slides) {
       const layoutInfo = await getSlideLayout(zip, slide);
@@ -20,7 +20,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       }
     }
     
-    // 3. 获取所有使用的母版
+    // 3. Get all used masters
     const usedMasters = new Set();
     for (const layoutPath of usedLayouts) {
       const masterInfo = await getLayoutMaster(zip, layoutPath);
@@ -29,18 +29,18 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
       }
     }
     
-    // 4. 删除未使用的布局
+    // 4. Remove unused layouts
     await removeUnusedLayoutFiles(zip, usedLayouts);
     
-    // 5. 删除未使用的母版
+    // 5. Remove unused masters
     await removeUnusedMasterFiles(zip, usedMasters);
     
-    // 6. 更新 [Content_Types].xml
+    // 6. Update [Content_Types].xml
     await updateContentTypes(zip);
     
     return true;
   } catch (error) {
-    console.error('删除未使用布局时出错:', error);
+    console.error('Error removing unused layouts:', error);
     return false;
   }
 }
@@ -166,16 +166,16 @@ async function getLayoutMaster(zip, layoutPath) {
  */
 async function removeUnusedLayoutFiles(zip, usedLayouts) {
   try {
-    // 获取所有布局文件
+    // Get all layout files
     const layoutFiles = Object.keys(zip.files)
       .filter(path => path.startsWith('ppt/slideLayouts/') && !path.includes('_rels'));
     
-    // 删除未使用的布局
+    // Remove unused layouts
     for (const layoutPath of layoutFiles) {
       if (!usedLayouts.has(layoutPath)) {
         zip.remove(layoutPath);
         
-        // 删除相关的关系文件
+        // Remove related relationship files
         const layoutRelsPath = layoutPath.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels';
         if (zip.file(layoutRelsPath)) {
           zip.remove(layoutRelsPath);
@@ -183,7 +183,7 @@ async function removeUnusedLayoutFiles(zip, usedLayouts) {
       }
     }
   } catch (error) {
-    console.error('删除未使用布局文件时出错:', error);
+    console.error('Error removing unused layout files:', error);
   }
 }
 

@@ -23,18 +23,18 @@ async function optimizePPTX(file, options = {}) {
     
     // 添加清理未使用资源的功能
     if (options.cleanUnusedResources) {
-      onProgress('init', { percentage: 25, status: '清理未使用的资源...' });
+      onProgress('init', { percentage: 25, status: 'Cleaning unused resources...' });
       await cleanUnusedResources(zip, onProgress);
     }
     
     // 添加删除未使用布局和母版的功能
     if (options.removeUnusedLayouts) {
-      onProgress('init', { percentage: 50, status: '删除未使用的布局和母版...' });
+      onProgress('init', { percentage: 50, status: 'Removing unused layouts and masters...' });
       await removeUnusedLayouts(zip, onProgress);
     }
     
     if (options.removeHiddenSlides) {
-      onProgress('init', { percentage: 75, status: '删除隐藏的幻灯片...' });
+      onProgress('init', { percentage: 75, status: 'Removing hidden slides...' });
       await removeHiddenSlides(zip);
     }
     
@@ -115,7 +115,7 @@ async function optimizePPTX(file, options = {}) {
     const savedPercentage = totalOriginalSize > 0 ? (savedSize / totalOriginalSize * 100).toFixed(1) : 0;
     
     onProgress('finalize', { 
-      status: `重建演示文稿...`,
+      status: `Rebuilding presentation...`,
       stats: {
         originalSize: file.size,
         compressedSize: null, // Will be updated after zip generation
