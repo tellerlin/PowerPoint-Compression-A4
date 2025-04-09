@@ -51,29 +51,36 @@ async function collectUsedMedia(zip) {
   const usedMedia = new Set();
   
   try {
-    console.log('Collecting used media files...');
+    if (zip.debug) console.time('collectUsedMedia');
     
-    // Step 1: Get all slides in the presentation
-    const usedSlides = await getUsedSlides(zip);
-    console.log(`Found ${usedSlides.length} slides in the presentation`);
+    // 并行获取幻灯片、布局和母版信息
+    const [usedSlides, { usedLayouts, usedMasters }] = await Promise.all([
+      getUsedSlides(zip),
+      getUsedLayoutsAndMasters(zip, await getUsedSlides(zip))
+    ]);
     
-    // Step 2: Get all layouts and masters used in slides
-    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, usedSlides);
-    console.log(`Found ${usedLayouts.size} used layouts and ${usedMasters.size} used masters`);
-    
-    // Step 3: Get all media files used directly in slides
+    // 获取幻灯片中直接使用的媒体文件
     const slideMedia = await getUsedMedia(zip, usedSlides);
-    console.log(`Found ${slideMedia.size} media files used in slides`);
-    
-    // Add slide media to the used media set
     slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
     
-    // Step 4: Process relationship files for layouts and masters
+    // 处理关系文件中的媒体引用
     await processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia);
     
-    console.log(`Found ${usedMedia.size} total used media files`);
+    if (zip.debug) {
+      console.timeEnd('collectUsedMedia');
+      console.log('媒体收集统计:', {
+        slides: usedSlides.length,
+        layouts: usedLayouts.size,
+        masters: usedMasters.size,
+        media: usedMedia.size
+      });
+    }
   } catch (error) {
-    console.error('Error collecting used media files:', error);
+    console.error('收集媒体文件错误:', {
+      error: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
   }
   
   return usedMedia;

@@ -58,50 +58,54 @@ async function optimizePPTX(file, options = {}) {
     let totalCompressedSize = 0;
     
     // 将顺序处理改为批处理
-    const batchSize = 5; // 根据实际情况调整
+    // 动态调整批量大小，基于CPU核心数
+    const batchSize = Math.min(mediaFiles.length, Math.max(4, navigator.hardwareConcurrency || 4));
+    
+    // 使用更高效的并行处理方式
     for (let i = 0; i < mediaFiles.length; i += batchSize) {
       const batch = mediaFiles.slice(i, i + batchSize);
-      const batchResults = await Promise.all(batch.map(async (mediaPath) => {
-        try {
-          // 检查是否是图像文件
-          const fileExtension = mediaPath.split('.').pop().toLowerCase();
-          const isImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
-          
-          let result = { originalSize: 0, compressedSize: 0 };
-          
-          await processMediaFile(zip, mediaPath, async (data) => {
-            // 只压缩图像文件
-            if (isImage) {
-              result.originalSize = data.byteLength;
-              
-              // 使用适当的质量设置
-              let adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-              
-              const compressResult = await compressImage(data, adjustedQuality);
-              
-              // 更新压缩统计信息
-              result.compressedSize = compressResult.data.byteLength;
-              return compressResult.data;
-            }
+      const batchPromises = batch.map(mediaPath => {
+        return (async () => {
+          try {
+            const fileExtension = mediaPath.split('.').pop().toLowerCase();
+            const isImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
             
-            // 返回非图像文件的原始数据
-            return data;
-          });
-          
-          return {
-            path: mediaPath,
-            ...result,
-            success: true
-          };
-        } catch (error) {
-          console.warn(`处理 ${mediaPath} 失败:`, error);
-          return {
-            path: mediaPath,
-            success: false,
-            error: error.message
-          };
-        }
-      }));
+            let result = { originalSize: 0, compressedSize: 0 };
+            
+            await processMediaFile(zip, mediaPath, async (data) => {
+              if (isImage) {
+                result.originalSize = data.byteLength;
+                
+                const adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
+                const compressResult = await compressImage(data, adjustedQuality);
+                
+                result.compressedSize = compressResult.data.byteLength;
+                return compressResult.data;
+              }
+              return data;
+            });
+            
+            return {
+              path: mediaPath,
+              ...result,
+              success: true
+            };
+          } catch (error) {
+            console.error(`处理媒体文件失败: ${mediaPath}`, {
+              error: error.message,
+              stack: error.stack,
+              timestamp: new Date().toISOString()
+            });
+            return {
+              path: mediaPath,
+              success: false,
+              error: error.message
+            };
+          }
+        })();
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
       
       // 更新进度和统计信息
       const successfulBatches = batchResults.filter(r => r.success);
