@@ -45,14 +45,16 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
     
     // 4. 获取所有布局和母版文件
     const allLayoutFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/slideLayouts/') && !path.includes('_rels'));
+      .filter(path => path.startsWith('ppt/slideLayouts/') && path.endsWith('.xml') && !path.includes('_rels'));
     
     const allMasterFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/slideMasters/') && !path.includes('_rels'));
+      .filter(path => path.startsWith('ppt/slideMasters/') && path.endsWith('.xml') && !path.includes('_rels'));
     
     // 调试输出所有布局文件和已使用的布局文件
     console.log('All layout files:', allLayoutFiles);
     console.log('Used layout paths:', Array.from(usedLayouts));
+    console.log('All master files:', allMasterFiles);
+    console.log('Used master paths:', Array.from(usedMasters));
     
     console.log(`Total layouts: ${allLayoutFiles.length}, Total masters: ${allMasterFiles.length}`);
     
@@ -85,6 +87,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
     console.log(`Found ${unusedMasters.length} unused masters to remove`);
     
     for (const masterPath of unusedMasters) {
+      if (!masterPath.includes('.xml')) continue; // 跳过非XML文件
       console.log(`Removing unused master: ${masterPath}`);
       zip.remove(masterPath);
       
@@ -131,18 +134,50 @@ async function getAllSlides(zip) {
     if (!presentationXml) return [];
     
     const presentationObj = await parseXmlWithNamespaces(presentationXml);
-    const slidesList = presentationObj?.p_presentation?.p_sldIdLst?.p_sldId;
+    console.log('DEBUG - Presentation XML structure:', JSON.stringify(presentationObj, null, 2));
     
-    if (!slidesList) return [];
+    if (!presentationObj) {
+      console.log('DEBUG - Presentation object is null or undefined');
+      return [];
+    }
+    
+    // Navigate through the structure to find slides
+    let slidesList = null;
+    
+    // Based on the actual XML structure, we can directly access p:presentation
+    if (presentationObj['p:presentation']?.['p:sldIdLst']?.['p:sldId']) {
+      slidesList = presentationObj['p:presentation']['p:sldIdLst']['p:sldId'];
+      console.log('DEBUG - Found slides using p:presentation.p:sldIdLst.p:sldId path');
+    }
+    
+    if (!slidesList) {
+      console.log('DEBUG - Could not find slides list in the presentation XML');
+      return [];
+    }
     
     const slides = Array.isArray(slidesList) ? slidesList : [slidesList];
+    console.log('DEBUG - Slides array:', JSON.stringify(slides, null, 2));
     
+    // Extract slide information based on the actual attribute structure
     return slides
-      .filter(slide => slide && slide.$ && slide.$.r_id)
-      .map(slide => ({
-        id: slide.$.id,
-        rId: slide.$.r_id
-      }));
+      .filter(slide => {
+        const hasAttributes = slide && (slide['@_id'] && slide['@_r:id']);
+        if (!hasAttributes) {
+          console.log('DEBUG - Slide missing attributes:', JSON.stringify(slide, null, 2));
+        }
+        return hasAttributes;
+      })
+      .map(slide => {
+        const id = slide['@_id'];
+        const rId = slide['@_r:id'];
+        
+        console.log(`DEBUG - Extracted slide: id=${id}, rId=${rId}`);
+        
+        return {
+          id: id,
+          rId: rId
+        };
+      });
   } catch (error) {
     console.error('Error getting all slides:', error);
     return [];
@@ -156,43 +191,87 @@ async function getAllSlides(zip) {
  */
 async function getSlideLayout(zip, slide) {
   try {
-    // 获取presentation关系文件
+    // Get presentation relationships file
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
     if (!relsXml) return null;
     
     const relsObj = await parseXml(relsXml);
+    console.log('DEBUG - Presentation relationships structure:', JSON.stringify(relsObj, null, 2));
+    
+    if (!relsObj.Relationships || !relsObj.Relationships.Relationship) {
+      console.log('DEBUG - No relationships found in presentation.xml.rels');
+      return null;
+    }
+    
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    // 找到幻灯片关系
-    const slideRel = relationships.find(rel => rel.Id === slide.rId);
-    if (!slideRel) return null;
+    // Find slide relationship
+    const slideRel = relationships.find(rel => {
+      const relId = rel['@_Id'] || rel.Id;
+      console.log(`DEBUG - Checking relationship: ${relId} against slide.rId: ${slide.rId}`);
+      return relId === slide.rId;
+    });
     
-    const slidePath = `ppt/${slideRel.Target.replace('../', '')}`;
+    if (!slideRel) {
+      console.log(`DEBUG - Could not find relationship for slide rId: ${slide.rId}`);
+      return null;
+    }
     
-    // 获取幻灯片XML
+    const target = slideRel['@_Target'] || slideRel.Target;
+    if (!target) {
+      console.log('DEBUG - No Target found in slide relationship');
+      return null;
+    }
+    
+    const slidePath = `ppt/${target.replace('../', '')}`;
+    console.log(`DEBUG - Found slide path: ${slidePath}`);
+    
+    // Get slide XML
     const slideXml = await zip.file(slidePath)?.async('string');
     if (!slideXml) return null;
     
-    // 获取幻灯片关系文件
+    // Get slide relationships file
     const slideRelsPath = slidePath.replace('slides/', 'slides/_rels/') + '.rels';
     const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
     if (!slideRelsXml) return null;
     
     const slideRelsObj = await parseXml(slideRelsXml);
+    console.log('DEBUG - Slide relationships structure:', JSON.stringify(slideRelsObj, null, 2));
+    
+    if (!slideRelsObj.Relationships || !slideRelsObj.Relationships.Relationship) {
+      console.log('DEBUG - No relationships found in slide rels file');
+      return null;
+    }
+    
     const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
       ? slideRelsObj.Relationships.Relationship
       : [slideRelsObj.Relationships.Relationship];
     
-    // 找到布局关系
-    const layoutRel = slideRels.find(rel => rel && rel.Type && rel.Type.includes('/slideLayout'));
-    if (!layoutRel) return null;
+    // Find layout relationship
+    const layoutRel = slideRels.find(rel => {
+      const relType = rel['@_Type'] || rel.Type;
+      return relType && relType.includes('/slideLayout');
+    });
+    
+    if (!layoutRel) {
+      console.log('DEBUG - No layout relationship found in slide');
+      return null;
+    }
+    
+    const layoutTarget = layoutRel['@_Target'] || layoutRel.Target;
+    const layoutId = layoutRel['@_Id'] || layoutRel.Id;
+    
+    if (!layoutTarget) {
+      console.log('DEBUG - No Target found in layout relationship');
+      return null;
+    }
     
     return {
-      path: `ppt/${layoutRel.Target.replace('../', '')}`,
-      rId: layoutRel.Id
+      path: `ppt/${layoutTarget.replace('../', '')}`,
+      rId: layoutId
     };
   } catch (error) {
     console.error('Error getting slide layout:', error);
@@ -215,17 +294,40 @@ export async function getLayoutMaster(zip, layoutPath) {
     console.log(`Getting master for layout: ${layoutPath}, using rels file: ${layoutRelsPath}`);
     
     const layoutRelsObj = await parseXml(layoutRelsXml);
+    console.log('DEBUG - Layout relationships structure:', JSON.stringify(layoutRelsObj, null, 2));
+    
+    if (!layoutRelsObj.Relationships || !layoutRelsObj.Relationships.Relationship) {
+      console.log('DEBUG - No relationships found in layout rels file');
+      return null;
+    }
+    
     const layoutRels = Array.isArray(layoutRelsObj.Relationships.Relationship)
       ? layoutRelsObj.Relationships.Relationship
       : [layoutRelsObj.Relationships.Relationship];
     
-    // 找到母版关系
-    const masterRel = layoutRels.find(rel => rel && rel.Type && rel.Type.includes('/slideMaster'));
-    if (!masterRel) return null;
+    // 找到母版关系，使用 @_Type 属性
+    const masterRel = layoutRels.find(rel => {
+      const relType = rel['@_Type'] || rel.Type;
+      return relType && relType.includes('/slideMaster');
+    });
+    
+    if (!masterRel) {
+      console.log('DEBUG - No master relationship found in layout');
+      return null;
+    }
+    
+    // 使用 @_Target 和 @_Id 属性
+    const target = masterRel['@_Target'] || masterRel.Target;
+    const id = masterRel['@_Id'] || masterRel.Id;
+    
+    if (!target) {
+      console.log('DEBUG - No Target found in master relationship');
+      return null;
+    }
     
     return {
-      path: `ppt/${masterRel.Target.replace('../', '')}`,
-      rId: masterRel.Id
+      path: `ppt/${target.replace('../', '')}`,
+      rId: id
     };
   } catch (error) {
     console.error('Error getting layout master:', error);
@@ -305,7 +407,6 @@ async function getMasterReferencedLayouts(zip, usedMasters) {
 export async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
   try {
     console.log('Updating presentation references...');
-    // 更新presentation.xml.rels
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
     if (!relsXml) {
@@ -314,6 +415,13 @@ export async function updatePresentationReferences(zip, usedLayouts, usedMasters
     }
     
     const relsObj = await parseXml(relsXml);
+    console.log('DEBUG - Presentation references structure:', JSON.stringify(relsObj, null, 2));
+    
+    if (!relsObj.Relationships || !relsObj.Relationships.Relationship) {
+      console.log('DEBUG - No relationships found in presentation.xml.rels');
+      return;
+    }
+    
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
@@ -322,37 +430,25 @@ export async function updatePresentationReferences(zip, usedLayouts, usedMasters
     
     // 过滤出未使用的布局和母版关系
     const filteredRelationships = relationships.filter(rel => {
-      // 检查rel对象是否有效
-      if (!rel || typeof rel !== 'object') return false;
-      
-      // 检查Type属性是否存在
-      if (!rel.Type || typeof rel.Type !== 'string') {
-        console.log('Relationship missing Type attribute:', rel);
-        return true; // 保留无法确定类型的关系
-      }
-      
-      // 检查Target属性是否存在
-      if (!rel.Target || typeof rel.Target !== 'string') {
-        console.log('Relationship missing Target attribute:', rel);
-        return true; // 保留无法确定目标的关系
-      }
+      const relType = rel['@_Type'];
+      const target = rel['@_Target'];
       
       // 保留非布局和非母版关系
-      if (!rel.Type.includes('/slideLayout') && !rel.Type.includes('/slideMaster')) {
+      if (!relType || (!relType.includes('/slideLayout') && !relType.includes('/slideMaster'))) {
         return true;
       }
       
       // 检查布局是否使用
-      if (rel.Type.includes('/slideLayout')) {
-        const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
+      if (relType.includes('/slideLayout')) {
+        const layoutPath = `ppt/${target.replace('../', '')}`;
         const isUsed = usedLayouts.has(layoutPath);
         if (!isUsed) console.log(`Removing unused layout reference: ${layoutPath}`);
         return isUsed;
       }
       
       // 检查母版是否使用
-      if (rel.Type.includes('/slideMaster')) {
-        const masterPath = `ppt/${rel.Target.replace('../', '')}`;
+      if (relType.includes('/slideMaster')) {
+        const masterPath = `ppt/${target.replace('../', '')}`;
         const isUsed = usedMasters.has(masterPath);
         if (!isUsed) console.log(`Removing unused master reference: ${masterPath}`);
         return isUsed;
@@ -388,6 +484,13 @@ export async function updateContentTypes(zip) {
     }
     
     const contentTypesObj = await parseXml(contentTypesXml);
+    console.log('DEBUG - Content types structure:', JSON.stringify(contentTypesObj, null, 2));
+    
+    if (!contentTypesObj.Types || !contentTypesObj.Types.Override) {
+      console.log('DEBUG - No overrides found in content types');
+      return;
+    }
+    
     const overrides = Array.isArray(contentTypesObj.Types.Override)
       ? contentTypesObj.Types.Override
       : [contentTypesObj.Types.Override];
@@ -396,21 +499,15 @@ export async function updateContentTypes(zip) {
     
     // 过滤出存在的文件的覆盖
     const filteredOverrides = overrides.filter(override => {
-      // 检查override对象是否有效
-      if (!override || typeof override !== 'object') {
-        console.log('Invalid override object:', override);
+      const partName = override['@_PartName'] || override.PartName;
+      if (!partName) {
+        console.log('DEBUG - Override missing PartName:', JSON.stringify(override, null, 2));
         return false;
       }
       
-      // 检查PartName属性是否存在
-      if (!override.PartName || typeof override.PartName !== 'string') {
-        console.log('Override missing PartName attribute:', override);
-        return true; // 保留无法确定路径的覆盖
-      }
-      
-      const path = override.PartName.replace(/^\//, '');
-      const exists = zip.file(path) !== null;
-      if (!exists) console.log(`Removing content type for deleted file: ${path}`);
+      const filePath = partName.replace(/^\//, '');
+      const exists = zip.file(filePath) !== null;
+      if (!exists) console.log(`Removing content type for deleted file: ${filePath}`);
       return exists;
     });
     
@@ -448,35 +545,28 @@ async function updateMasterLayoutReferences(zip, masterPath, usedLayouts) {
     console.log(`Updating master layout references for: ${masterPath}, using rels file: ${masterRelsPath}`);
     
     const masterRelsObj = await parseXml(masterRelsXml);
+    console.log('DEBUG - Master relationships structure:', JSON.stringify(masterRelsObj, null, 2));
+    
     const relationships = Array.isArray(masterRelsObj.Relationships.Relationship)
       ? masterRelsObj.Relationships.Relationship
       : [masterRelsObj.Relationships.Relationship];
     
     // 过滤出未使用的布局关系
     const filteredRelationships = relationships.filter(rel => {
-      // 检查rel对象是否有效
-      if (!rel || typeof rel !== 'object') return false;
-      
-      // 检查Type属性是否存在
-      if (!rel.Type || typeof rel.Type !== 'string') {
-        console.log('Relationship missing Type attribute:', rel);
-        return true; // 保留无法确定类型的关系
-      }
-      
-      // 检查Target属性是否存在
-      if (!rel.Target || typeof rel.Target !== 'string') {
-        console.log('Relationship missing Target attribute:', rel);
-        return true; // 保留无法确定目标的关系
-      }
-      
       // 保留非布局关系
-      if (!rel.Type.includes('/slideLayout')) {
+      const relType = rel['@_Type'];
+      if (!relType || !relType.includes('/slideLayout')) {
         return true;
       }
       
       // 检查布局是否使用
-      const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
-      return usedLayouts.has(layoutPath);
+      const target = rel['@_Target'];
+      const layoutPath = `ppt/${target.replace('../', '')}`;
+      const isUsed = usedLayouts.has(layoutPath);
+      if (!isUsed) {
+        console.log(`Removing unused layout reference from master: ${layoutPath}`);
+      }
+      return isUsed;
     });
     
     // 如果有关系被移除
@@ -510,11 +600,12 @@ async function updateMasterXml(zip, masterPath, validRelationships) {
     if (!masterXml) return;
     
     const masterObj = await parseXmlWithNamespaces(masterXml);
+    console.log('DEBUG - Master XML structure:', JSON.stringify(masterObj, null, 2));
     
     // 获取有效的布局ID
     const validLayoutIds = validRelationships
-      .filter(rel => rel.Type.includes('/slideLayout'))
-      .map(rel => rel.Id);
+      .filter(rel => rel['@_Type'] && rel['@_Type'].includes('/slideLayout'))
+      .map(rel => rel['@_Id']);
     
     // 更新sldLayoutIdLst
     if (masterObj?.p_sldMaster?.p_sldLayoutIdLst?.p_sldLayoutId) {
@@ -523,9 +614,10 @@ async function updateMasterXml(zip, masterPath, validRelationships) {
         : [masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId];
       
       // 过滤出有效的布局ID
-      const filteredLayoutIds = layoutIds.filter(layout => 
-        layout && layout.$ && validLayoutIds.includes(layout.$.r_id)
-      );
+      const filteredLayoutIds = layoutIds.filter(layout => {
+        const rId = layout['@_r:id'] || (layout['@_'] && layout['@_']['r:id']);
+        return rId && validLayoutIds.includes(rId);
+      });
       
       // 更新布局ID列表
       if (filteredLayoutIds.length < layoutIds.length) {

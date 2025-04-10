@@ -53,21 +53,15 @@ async function collectUsedMedia(zip) {
   try {
     if (zip.debug) console.time('collectUsedMedia');
     
-    // Get slides first to avoid duplicate calls
-    const usedSlides = await getUsedSlides(zip);
-    if (!usedSlides || usedSlides.length === 0) {
-      console.warn('No slides found when collecting media');
-      return usedMedia;
-    }
-    
-    // 并行获取布局和母版信息
-    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, usedSlides);
+    // 并行获取幻灯片、布局和母版信息
+    const [usedSlides, { usedLayouts, usedMasters }] = await Promise.all([
+      getUsedSlides(zip),
+      getUsedLayoutsAndMasters(zip, await getUsedSlides(zip))
+    ]);
     
     // 获取幻灯片中直接使用的媒体文件
     const slideMedia = await getUsedMedia(zip, usedSlides);
-    if (slideMedia) {
-      slideMedia.forEach(mediaPath => mediaPath && usedMedia.add(mediaPath));
-    }
+    slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
     
     // 处理关系文件中的媒体引用
     await processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia);
@@ -76,8 +70,8 @@ async function collectUsedMedia(zip) {
       console.timeEnd('collectUsedMedia');
       console.log('媒体收集统计:', {
         slides: usedSlides.length,
-        layouts: usedLayouts ? usedLayouts.size : 0,
-        masters: usedMasters ? usedMasters.size : 0,
+        layouts: usedLayouts.size,
+        masters: usedMasters.size,
         media: usedMedia.size
       });
     }
@@ -133,23 +127,30 @@ async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlide
     
     // Use XML parsing for more reliable results
     const relsObj = await parseXml(relsXml);
+    
+    // Debug the structure
+    // console.log('Relationship structure:', JSON.stringify(relsObj, null, 2));
+    
     if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
     
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    // Find media relationships with proper null checks
-    const mediaRels = relationships.filter(rel => 
-      rel && rel.Type && typeof rel.Type === 'string' && (
-        rel.Type.includes('/image') || 
-        rel.Type.includes('/audio') || 
-        rel.Type.includes('/video')
-      ));
+    // Find media relationships - check for @_Type instead of Type
+    const mediaRels = relationships.filter(rel => {
+      const relType = rel['@_Type'] || rel.Type;
+      return relType && (
+        relType.includes('/image') || 
+        relType.includes('/audio') || 
+        relType.includes('/video')
+      );
+    });
     
     for (const mediaRel of mediaRels) {
-      if (mediaRel && mediaRel.Target) {
-        const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
+      const target = mediaRel['@_Target'] || mediaRel.Target;
+      if (target) {
+        const mediaPath = `ppt/${target.replace('../', '')}`;
         usedMedia.add(mediaPath);
       }
     }
@@ -168,20 +169,24 @@ async function getUsedSlides(zip) {
     if (!relsXml) return [];
     
     const relsObj = await parseXml(relsXml);
-    if (!relsObj || !relsObj.Relationships || !relsObj.Relationships.Relationship) {
-      console.warn('Invalid relationship structure in presentation.xml.rels');
-      return [];
-    }
+    
+    // Debug the structure
+    // console.log('Presentation relationships structure:', JSON.stringify(relsObj, null, 2));
+    
+    if (!relsObj.Relationships || !relsObj.Relationships.Relationship) return [];
     
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
     return relationships
-      .filter(rel => rel && rel.Type && typeof rel.Type === 'string' && rel.Type.includes('/slide'))
+      .filter(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        return relType && relType.includes('/slide');
+      })
       .map(rel => ({
-        rId: rel.Id,
-        path: `ppt/${rel.Target.replace('../', '')}`
+        rId: rel['@_Id'] || rel.Id,
+        path: `ppt/${(rel['@_Target'] || rel.Target).replace('../', '')}`
       }));
   } catch (error) {
     console.error('Error getting used slides:', error);
@@ -211,17 +216,25 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
       if (!slideRelsXml) continue;
       
       const slideRelsObj = await parseXml(slideRelsXml);
+      
+      if (!slideRelsObj.Relationships || !slideRelsObj.Relationships.Relationship) continue;
+      
       const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
         ? slideRelsObj.Relationships.Relationship
         : [slideRelsObj.Relationships.Relationship];
       
-      // Find layout relationship with proper null checks
-      const layoutRel = slideRels.find(rel => 
-        rel && rel.Type && typeof rel.Type === 'string' && rel.Type.includes('/slideLayout')
-      );
-      if (!layoutRel || !layoutRel.Target) continue;
+      // Find layout relationship
+      const layoutRel = slideRels.find(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        return relType && relType.includes('/slideLayout');
+      });
       
-      const layoutPath = `ppt/${layoutRel.Target.replace('../', '')}`;
+      if (!layoutRel) continue;
+      
+      const target = layoutRel['@_Target'] || layoutRel.Target;
+      if (!target) continue;
+      
+      const layoutPath = `ppt/${target.replace('../', '')}`;
       usedLayouts.add(layoutPath);
       
       // Get master used by the layout using the imported function from layout-cleaner.js
@@ -255,21 +268,27 @@ async function getUsedMedia(zip, usedSlides) {
       if (!slideRelsXml) continue;
       
       const slideRelsObj = await parseXml(slideRelsXml);
+      
+      if (!slideRelsObj.Relationships || !slideRelsObj.Relationships.Relationship) continue;
+      
       const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
         ? slideRelsObj.Relationships.Relationship
         : [slideRelsObj.Relationships.Relationship];
       
-      // Find media relationships with proper null checks
-      const mediaRels = slideRels.filter(rel => 
-        rel && rel.Type && typeof rel.Type === 'string' && (
-          rel.Type.includes('/image') || 
-          rel.Type.includes('/audio') || 
-          rel.Type.includes('/video')
-        ));
+      // Find media relationships
+      const mediaRels = slideRels.filter(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        return relType && (
+          relType.includes('/image') || 
+          relType.includes('/audio') || 
+          relType.includes('/video')
+        );
+      });
       
       for (const mediaRel of mediaRels) {
-        if (mediaRel && mediaRel.Target) {
-          const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
+        const target = mediaRel['@_Target'] || mediaRel.Target;
+        if (target) {
+          const mediaPath = `ppt/${target.replace('../', '')}`;
           usedMedia.add(mediaPath);
         }
       }
