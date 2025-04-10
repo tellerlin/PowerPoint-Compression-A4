@@ -53,20 +53,25 @@ async function collectUsedMedia(zip) {
   try {
     if (zip.debug) console.time('collectUsedMedia');
     
-    // Get slides first to avoid duplicate calls
+    // 并行获取幻灯片、布局和母版信息，避免重复调用getUsedSlides
     const usedSlides = await getUsedSlides(zip);
+    console.log(`Found ${usedSlides ? usedSlides.length : 0} slides in the presentation`);
+    
     if (!usedSlides || usedSlides.length === 0) {
       console.warn('No slides found when collecting media');
       return usedMedia;
     }
     
-    // 并行获取布局和母版信息
-    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, usedSlides);
+    // 并行获取布局、母版信息和幻灯片媒体，提高效率
+    const [{ usedLayouts, usedMasters }, slideMedia] = await Promise.all([
+      getUsedLayoutsAndMasters(zip, usedSlides),
+      getUsedMedia(zip, usedSlides)
+    ]);
     
-    // 获取幻灯片中直接使用的媒体文件
-    const slideMedia = await getUsedMedia(zip, usedSlides);
+    // 添加幻灯片中直接使用的媒体文件
     if (slideMedia) {
       slideMedia.forEach(mediaPath => mediaPath && usedMedia.add(mediaPath));
+      console.log(`Found ${slideMedia.size} media files directly used in slides`);
     }
     
     // 处理关系文件中的媒体引用
@@ -74,6 +79,13 @@ async function collectUsedMedia(zip) {
     
     if (zip.debug) {
       console.timeEnd('collectUsedMedia');
+      console.log('媒体收集统计:', {
+        slides: usedSlides.length,
+        layouts: usedLayouts ? usedLayouts.size : 0,
+        masters: usedMasters ? usedMasters.size : 0,
+        media: usedMedia.size
+      });
+    } else {
       console.log('媒体收集统计:', {
         slides: usedSlides.length,
         layouts: usedLayouts ? usedLayouts.size : 0,
@@ -133,24 +145,32 @@ async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlide
     
     // Use XML parsing for more reliable results
     const relsObj = await parseXml(relsXml);
+    
+    // Debug the structure for troubleshooting
+    // console.log(`Relationship file ${relsPath} structure:`, JSON.stringify(relsObj, null, 2));
+    
     if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
     
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    // Find media relationships with proper null checks
-    const mediaRels = relationships.filter(rel => 
-      rel && rel.Type && typeof rel.Type === 'string' && (
-        rel.Type.includes('/image') || 
-        rel.Type.includes('/audio') || 
-        rel.Type.includes('/video')
-      ));
+    // Find media relationships - check for both @_Type and Type attributes
+    const mediaRels = relationships.filter(rel => {
+      const relType = rel['@_Type'] || rel.Type;
+      return relType && (
+        relType.includes('/image') || 
+        relType.includes('/audio') || 
+        relType.includes('/video')
+      );
+    });
     
     for (const mediaRel of mediaRels) {
-      if (mediaRel && mediaRel.Target) {
-        const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
+      const target = mediaRel['@_Target'] || mediaRel.Target;
+      if (target) {
+        const mediaPath = `ppt/${target.replace('../', '')}`;
         usedMedia.add(mediaPath);
+        // console.log(`Found media reference in ${relsPath}: ${mediaPath}`);
       }
     }
   }
@@ -168,6 +188,10 @@ async function getUsedSlides(zip) {
     if (!relsXml) return [];
     
     const relsObj = await parseXml(relsXml);
+    
+    // Debug the structure to help diagnose issues
+    console.log('Presentation relationships structure:', JSON.stringify(relsObj, null, 2));
+    
     if (!relsObj || !relsObj.Relationships || !relsObj.Relationships.Relationship) {
       console.warn('Invalid relationship structure in presentation.xml.rels');
       return [];
@@ -177,11 +201,21 @@ async function getUsedSlides(zip) {
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
+    console.log(`Found ${relationships.length} relationships in presentation.xml.rels`);
+    
     return relationships
-      .filter(rel => rel && rel.Type && typeof rel.Type === 'string' && rel.Type.includes('/slide'))
+      .filter(rel => {
+        // 检查两种可能的属性名格式
+        const relType = rel['@_Type'] || rel.Type;
+        const hasSlideType = relType && (typeof relType === 'string') && relType.includes('/slide');
+        if (hasSlideType) {
+          console.log(`Found slide relationship: ${JSON.stringify(rel)}`);
+        }
+        return hasSlideType;
+      })
       .map(rel => ({
-        rId: rel.Id,
-        path: `ppt/${rel.Target.replace('../', '')}`
+        rId: rel['@_Id'] || rel.Id,
+        path: `ppt/${(rel['@_Target'] || rel.Target).replace('../', '')}`
       }));
   } catch (error) {
     console.error('Error getting used slides:', error);
