@@ -14,7 +14,7 @@ export function parseXml(xmlContent) {
         // 某些元素应该始终作为数组处理，即使只有一个元素
         const arrayElements = ['p:sp', 'p:pic', 'a:p', 'a:r', 'p:nvSpPr', 'p:cNvPr', 'p:cNvSpPr', 
                               'p:spPr', 'a:xfrm', 'a:off', 'a:ext', 'p:txBody', 'a:bodyPr', 
-                              'a:lstStyle', 'a:pPr', 'a:rPr', 'a:t', 'Relationship'];
+                              'a:lstStyle', 'a:pPr', 'a:rPr', 'a:t'];
         return arrayElements.includes(name);
       }
     };
@@ -41,7 +41,7 @@ export function parseXmlWithNamespaces(xmlContent) {
         // 某些元素应该始终作为数组处理，即使只有一个元素
         const arrayElements = ['p:sp', 'p:pic', 'a:p', 'a:r', 'p:nvSpPr', 'p:cNvPr', 'p:cNvSpPr', 
                               'p:spPr', 'a:xfrm', 'a:off', 'a:ext', 'p:txBody', 'a:bodyPr', 
-                              'a:lstStyle', 'a:pPr', 'a:rPr', 'a:t', 'p:sld', 'Relationship'];
+                              'a:lstStyle', 'a:pPr', 'a:rPr', 'a:t'];
         return arrayElements.includes(name);
       },
       processEntities: true,
