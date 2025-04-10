@@ -53,26 +53,15 @@ async function collectUsedMedia(zip) {
   try {
     if (zip.debug) console.time('collectUsedMedia');
     
-    // 并行获取幻灯片、布局和母版信息，避免重复调用getUsedSlides
-    const usedSlides = await getUsedSlides(zip);
-    console.log(`Found ${usedSlides ? usedSlides.length : 0} slides in the presentation`);
-    
-    if (!usedSlides || usedSlides.length === 0) {
-      console.warn('No slides found when collecting media');
-      return usedMedia;
-    }
-    
-    // 并行获取布局、母版信息和幻灯片媒体，提高效率
-    const [{ usedLayouts, usedMasters }, slideMedia] = await Promise.all([
-      getUsedLayoutsAndMasters(zip, usedSlides),
-      getUsedMedia(zip, usedSlides)
+    // 并行获取幻灯片、布局和母版信息
+    const [usedSlides, { usedLayouts, usedMasters }] = await Promise.all([
+      getUsedSlides(zip),
+      getUsedLayoutsAndMasters(zip, await getUsedSlides(zip))
     ]);
     
-    // 添加幻灯片中直接使用的媒体文件
-    if (slideMedia) {
-      slideMedia.forEach(mediaPath => mediaPath && usedMedia.add(mediaPath));
-      console.log(`Found ${slideMedia.size} media files directly used in slides`);
-    }
+    // 获取幻灯片中直接使用的媒体文件
+    const slideMedia = await getUsedMedia(zip, usedSlides);
+    slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
     
     // 处理关系文件中的媒体引用
     await processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia);
@@ -81,15 +70,8 @@ async function collectUsedMedia(zip) {
       console.timeEnd('collectUsedMedia');
       console.log('媒体收集统计:', {
         slides: usedSlides.length,
-        layouts: usedLayouts ? usedLayouts.size : 0,
-        masters: usedMasters ? usedMasters.size : 0,
-        media: usedMedia.size
-      });
-    } else {
-      console.log('媒体收集统计:', {
-        slides: usedSlides.length,
-        layouts: usedLayouts ? usedLayouts.size : 0,
-        masters: usedMasters ? usedMasters.size : 0,
+        layouts: usedLayouts.size,
+        masters: usedMasters.size,
         media: usedMedia.size
       });
     }
@@ -146,8 +128,8 @@ async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlide
     // Use XML parsing for more reliable results
     const relsObj = await parseXml(relsXml);
     
-    // Debug the structure for troubleshooting
-    // console.log(`Relationship file ${relsPath} structure:`, JSON.stringify(relsObj, null, 2));
+    // Debug the structure
+    // console.log('Relationship structure:', JSON.stringify(relsObj, null, 2));
     
     if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
     
@@ -155,7 +137,7 @@ async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlide
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    // Find media relationships - check for both @_Type and Type attributes
+    // Find media relationships - check for @_Type instead of Type
     const mediaRels = relationships.filter(rel => {
       const relType = rel['@_Type'] || rel.Type;
       return relType && (
@@ -170,7 +152,6 @@ async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlide
       if (target) {
         const mediaPath = `ppt/${target.replace('../', '')}`;
         usedMedia.add(mediaPath);
-        // console.log(`Found media reference in ${relsPath}: ${mediaPath}`);
       }
     }
   }
@@ -189,29 +170,19 @@ async function getUsedSlides(zip) {
     
     const relsObj = await parseXml(relsXml);
     
-    // Debug the structure to help diagnose issues
-    console.log('Presentation relationships structure:', JSON.stringify(relsObj, null, 2));
+    // Debug the structure
+    // console.log('Presentation relationships structure:', JSON.stringify(relsObj, null, 2));
     
-    if (!relsObj || !relsObj.Relationships || !relsObj.Relationships.Relationship) {
-      console.warn('Invalid relationship structure in presentation.xml.rels');
-      return [];
-    }
+    if (!relsObj.Relationships || !relsObj.Relationships.Relationship) return [];
     
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
     
-    console.log(`Found ${relationships.length} relationships in presentation.xml.rels`);
-    
     return relationships
       .filter(rel => {
-        // 检查两种可能的属性名格式
         const relType = rel['@_Type'] || rel.Type;
-        const hasSlideType = relType && (typeof relType === 'string') && relType.includes('/slide');
-        if (hasSlideType) {
-          console.log(`Found slide relationship: ${JSON.stringify(rel)}`);
-        }
-        return hasSlideType;
+        return relType && relType.includes('/slide');
       })
       .map(rel => ({
         rId: rel['@_Id'] || rel.Id,
@@ -245,17 +216,25 @@ async function getUsedLayoutsAndMasters(zip, usedSlides) {
       if (!slideRelsXml) continue;
       
       const slideRelsObj = await parseXml(slideRelsXml);
+      
+      if (!slideRelsObj.Relationships || !slideRelsObj.Relationships.Relationship) continue;
+      
       const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
         ? slideRelsObj.Relationships.Relationship
         : [slideRelsObj.Relationships.Relationship];
       
-      // Find layout relationship with proper null checks
-      const layoutRel = slideRels.find(rel => 
-        rel && rel.Type && typeof rel.Type === 'string' && rel.Type.includes('/slideLayout')
-      );
-      if (!layoutRel || !layoutRel.Target) continue;
+      // Find layout relationship
+      const layoutRel = slideRels.find(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        return relType && relType.includes('/slideLayout');
+      });
       
-      const layoutPath = `ppt/${layoutRel.Target.replace('../', '')}`;
+      if (!layoutRel) continue;
+      
+      const target = layoutRel['@_Target'] || layoutRel.Target;
+      if (!target) continue;
+      
+      const layoutPath = `ppt/${target.replace('../', '')}`;
       usedLayouts.add(layoutPath);
       
       // Get master used by the layout using the imported function from layout-cleaner.js
@@ -289,21 +268,27 @@ async function getUsedMedia(zip, usedSlides) {
       if (!slideRelsXml) continue;
       
       const slideRelsObj = await parseXml(slideRelsXml);
+      
+      if (!slideRelsObj.Relationships || !slideRelsObj.Relationships.Relationship) continue;
+      
       const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
         ? slideRelsObj.Relationships.Relationship
         : [slideRelsObj.Relationships.Relationship];
       
-      // Find media relationships with proper null checks
-      const mediaRels = slideRels.filter(rel => 
-        rel && rel.Type && typeof rel.Type === 'string' && (
-          rel.Type.includes('/image') || 
-          rel.Type.includes('/audio') || 
-          rel.Type.includes('/video')
-        ));
+      // Find media relationships
+      const mediaRels = slideRels.filter(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        return relType && (
+          relType.includes('/image') || 
+          relType.includes('/audio') || 
+          relType.includes('/video')
+        );
+      });
       
       for (const mediaRel of mediaRels) {
-        if (mediaRel && mediaRel.Target) {
-          const mediaPath = `ppt/${mediaRel.Target.replace('../', '')}`;
+        const target = mediaRel['@_Target'] || mediaRel.Target;
+        if (target) {
+          const mediaPath = `ppt/${target.replace('../', '')}`;
           usedMedia.add(mediaPath);
         }
       }
