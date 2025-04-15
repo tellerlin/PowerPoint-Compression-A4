@@ -121,6 +121,9 @@
         savedPercentage: 0
       }
     });
+    
+    // 添加这一行，自动触发文件选择对话框
+    setTimeout(() => document.getElementById('file-upload').click(), 100);
   }
 </script>
 
