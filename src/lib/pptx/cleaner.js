@@ -19,24 +19,27 @@ export async function cleanUnusedResources(zip, onProgress = () => {}) {
   try {
     console.log('Starting resource cleanup process...');
     
-    // Step 1: Clean unused layouts and masters
-    onProgress('init', { percentage: 10, status: 'Analyzing slide layouts and masters...' });
+    // Step 1: Get all used slides
+    onProgress('init', { percentage: 10, status: 'Analyzing slides...' });
+    const usedSlides = await getUsedSlides(zip);
+    
+    // Step 2: Clean unused layouts and masters
+    onProgress('init', { percentage: 30, status: 'Analyzing slide layouts and masters...' });
+    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, usedSlides);
     const layoutResult = await removeUnusedLayouts(zip, (status) => {
       onProgress('init', { percentage: status.percentage, status: status.status });
     });
     
-    // Step 2: Clean unused media files
+    // Step 3: Clean unused media files
     onProgress('init', { percentage: 70, status: 'Analyzing media files...' });
-    const usedSlides = await getUsedSlides(zip);
-    const { usedLayouts, usedMasters } = await getUsedLayoutsAndMasters(zip, usedSlides);
-    const usedMedia = await collectUsedMedia(zip);
+    const usedMedia = await collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters);
     await removeUnusedMedia(zip, usedMedia);
     onProgress('init', { percentage: 90, status: 'Cleaning unused media references...' });
     
-    // Update presentation references with used layouts and masters
+    // 更新演示文稿引用
     await updatePresentationReferences(zip, usedLayouts, usedMasters);
     
-    // Final update to content types to ensure all references are cleaned
+    // 最终更新内容类型
     await updateContentTypes(zip);
     
     console.log('Resource cleanup completed successfully');
@@ -47,28 +50,17 @@ export async function cleanUnusedResources(zip, onProgress = () => {}) {
   }
 }
 
-/**
- * Collect all used media files in the presentation
- * @param {JSZip} zip PPTX ZIP object
- * @returns {Promise<Set<string>>} Set of used media file paths
- */
-async function collectUsedMedia(zip) {
+async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
   const usedMedia = new Set();
   
   try {
     if (zip.debug) console.time('collectUsedMedia');
     
-    // Get slides and their layouts/masters in parallel
-    const [usedSlides, { usedLayouts, usedMasters }] = await Promise.all([
-      getUsedSlides(zip),
-      getUsedLayoutsAndMasters(zip, await getUsedSlides(zip))
-    ]);
-    
-    // Get media files directly used in slides
+    // 获取幻灯片中直接使用的媒体文件
     const slideMedia = await getUsedMedia(zip, usedSlides);
     slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
     
-    // Process relationship files for media references
+    // 处理关系文件中的媒体引用
     await processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia);
     
     if (zip.debug) {
@@ -105,51 +97,57 @@ async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlide
   
   console.log(`Found ${relsFiles.length} relationship files to analyze`);
   
-  for (const relsPath of relsFiles) {
-    if (relsPath.includes('slides/_rels/') && usedSlides.some(slide => 
-        relsPath === slide.path.replace('slides/', 'slides/_rels/') + '.rels')) {
-      continue;
-    }
-    
-    const isLayoutRels = relsPath.includes('slideLayouts/_rels/');
-    const isMasterRels = relsPath.includes('slideMasters/_rels/');
-    
-    if (isLayoutRels) {
-      const layoutPath = relsPath.replace('_rels/', '').replace('.rels', '');
-      if (!usedLayouts.has(layoutPath)) continue;
-    } else if (isMasterRels) {
-      const masterPath = relsPath.replace('_rels/', '').replace('.rels', '');
-      if (!usedMasters.has(masterPath)) continue;
-    }
-    
-    const relsXml = await zip.file(relsPath)?.async('string');
-    if (!relsXml) continue;
-    
-    const relsObj = await parseXml(relsXml);
-    
-    if (!relsObj.Relationships || !relsObj.Relationships.Relationship) continue;
-    
-    const relationships = Array.isArray(relsObj.Relationships.Relationship)
-      ? relsObj.Relationships.Relationship
-      : [relsObj.Relationships.Relationship];
-    
-    const mediaRels = relationships.filter(rel => {
-      const relType = rel['@_Type'] || rel.Type;
-      return relType && (
-        relType.includes('/image') || 
-        relType.includes('/audio') || 
-        relType.includes('/video')
-      );
-    });
-    
-    for (const mediaRel of mediaRels) {
-      const target = mediaRel['@_Target'] || mediaRel.Target;
-      if (target) {
-        const mediaPath = `ppt/${target.replace('../', '')}`;
-        usedMedia.add(mediaPath);
+  // 使用 Promise.all 并行处理关系文件
+  await Promise.all(relsFiles.map(async (relsPath) => {
+    try {
+      // 跳过已处理的幻灯片关系文件
+      if (relsPath.includes('slides/_rels/') && usedSlides.some(slide => 
+          relsPath === slide.path.replace('slides/', 'slides/_rels/') + '.rels')) {
+        return;
       }
+      
+      const isLayoutRels = relsPath.includes('slideLayouts/_rels/');
+      const isMasterRels = relsPath.includes('slideMasters/_rels/');
+      
+      // 跳过未使用的布局和母版关系文件
+      if (isLayoutRels) {
+        const layoutPath = relsPath.replace('_rels/', '').replace('.rels', '');
+        if (!usedLayouts.has(layoutPath)) return;
+      } else if (isMasterRels) {
+        const masterPath = relsPath.replace('_rels/', '').replace('.rels', '');
+        if (!usedMasters.has(masterPath)) return;
+      }
+      
+      const relsXml = await zip.file(relsPath)?.async('string');
+      if (!relsXml) return;
+      
+      const relsObj = await parseXml(relsXml);
+      
+      if (!relsObj.Relationships || !relsObj.Relationships.Relationship) return;
+      
+      const relationships = Array.isArray(relsObj.Relationships.Relationship)
+        ? relsObj.Relationships.Relationship
+        : [relsObj.Relationships.Relationship];
+      
+      // 处理媒体关系
+      relationships.forEach(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        if (relType && (
+          relType.includes('/image') || 
+          relType.includes('/audio') || 
+          relType.includes('/video')
+        )) {
+          const target = rel['@_Target'] || rel.Target;
+          if (target) {
+            const mediaPath = `ppt/${target.replace('../', '')}`;
+            usedMedia.add(mediaPath);
+          }
+        }
+      });
+    } catch (error) {
+      console.error(`Error processing relationship file ${relsPath}:`, error);
     }
-  }
+  }));
 }
 
 /**
@@ -246,11 +244,17 @@ async function removeUnusedMedia(zip, usedMedia) {
     console.log(`Total media files: ${mediaFiles.length}`);
     console.log(`Used media files: ${usedMedia.size}`);
     
+    // Check if referenced media files exist
+    const missingMedia = [];
     for (const mediaPath of usedMedia) {
       if (!zip.file(mediaPath)) {
         console.warn(`Warning: Referenced media file does not exist: ${mediaPath}`);
+        missingMedia.push(mediaPath);
       }
     }
+    
+    // Remove non-existent files from the used media collection
+    missingMedia.forEach(path => usedMedia.delete(path));
     
     const unusedMedia = mediaFiles.filter(path => !usedMedia.has(path));
     console.log(`Found ${unusedMedia.length} unused media files to remove`);
@@ -267,6 +271,7 @@ async function removeUnusedMedia(zip, usedMedia) {
     await updateContentTypes(zip);
   } catch (error) {
     console.error('Error removing unused media files:', error);
+    // Don't throw exception on error, allow the process to continue
   }
 }
 
@@ -277,6 +282,11 @@ async function removeUnusedMedia(zip, usedMedia) {
  * @returns {boolean} True if removal should be skipped
  */
 function shouldSkipMediaRemoval(totalCount, unusedCount) {
+  if (totalCount === 0) {
+    console.warn('No media files found in the presentation.');
+    return true;
+  }
+  
   if (unusedCount > 0 && unusedCount === totalCount) {
     console.warn('Warning: Attempting to remove all media files. Skipping removal.');
     return true;

@@ -42,12 +42,17 @@
     try {
       let optimizedBlob;  // declare variable first
       
-      optimizedBlob = await optimizePPTX(file, {
+        optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.8 },
         removeHiddenSlides: true,
         removeUnusedLayouts: true,  // 确保启用清理未使用的布局和母版
         cleanUnusedResources: true, // 启用清理未使用的资源
+        preprocessImages: {         // 添加预处理选项
+          removeDuplicateImages: true,
+          mergeSimilarImages: false // 暂时禁用合并相似图片功能
+        },
         debug: true, // 添加调试选项，在控制台输出详细信息
+
         onProgress: (phase, detail) => {
           console.log(`Progress: ${phase}`, detail); // 添加调试日志
           switch (phase) {
