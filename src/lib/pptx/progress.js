@@ -23,6 +23,8 @@ export class ProgressManager {
     this.processedFiles = 0;
     this.currentPhase = 'init';
     this.fileInfo = null;
+    this.phaseStartTimes = {};
+    this.phaseDurations = {};
     
     // Phase weights
     this.phases = {
@@ -30,6 +32,153 @@ export class ProgressManager {
       media: { weight: 60, start: 15 },
       finalize: { weight: 25, start: 75 }
     };
+    
+    // 添加历史数据收集
+    this.historicalData = {
+      init: [],
+      media: [],
+      finalize: []
+    };
+  }
+  
+  // 记录阶段开始时间
+  startPhase(phase) {
+    this.currentPhase = phase;
+    this.phaseStartTimes[phase] = Date.now();
+  }
+  
+  // 记录阶段结束时间并调整权重
+  endPhase(phase) {
+    if (this.phaseStartTimes[phase]) {
+      const duration = Date.now() - this.phaseStartTimes[phase];
+      this.phaseDurations[phase] = duration;
+      this.historicalData[phase].push(duration);
+      
+      // 保持历史数据在合理范围内
+      if (this.historicalData[phase].length > 5) {
+        this.historicalData[phase].shift();
+      }
+      
+      // 根据历史数据调整权重
+      this.adjustWeights();
+    }
+  }
+  
+  // 根据实际处理时间调整各阶段权重
+  adjustWeights() {
+    // 确保有足够的历史数据
+    const hasEnoughData = Object.values(this.historicalData)
+      .every(data => data.length > 0);
+      
+    if (!hasEnoughData) return;
+    
+    // 计算平均处理时间
+    const avgDurations = {};
+    let totalDuration = 0;
+    
+    for (const phase in this.historicalData) {
+      const durations = this.historicalData[phase];
+      avgDurations[phase] = durations.reduce((sum, d) => sum + d, 0) / durations.length;
+      totalDuration += avgDurations[phase];
+    }
+    
+    // 根据平均处理时间调整权重
+    if (totalDuration > 0) {
+      let startPercentage = 0;
+      
+      for (const phase in avgDurations) {
+        const weight = Math.round((avgDurations[phase] / totalDuration) * 100);
+        this.phases[phase] = {
+          weight: weight,
+          start: startPercentage
+        };
+        startPercentage += weight;
+      }
+      
+      // 确保总权重为100
+      const totalWeight = Object.values(this.phases).reduce((sum, p) => sum + p.weight, 0);
+      if (totalWeight !== 100) {
+        // 调整最后一个阶段的权重
+        const lastPhase = Object.keys(this.phases).pop();
+        this.phases[lastPhase].weight += (100 - totalWeight);
+      }
+    }
+  }
+  
+  // 更新初始化阶段进度
+  updateInitProgress(percentage) {
+    if (this.currentPhase !== 'init') {
+      this.startPhase('init');
+    }
+    
+    const phase = this.phases.init;
+    const actualProgress = (percentage / 100) * phase.weight;
+    this.updateProgress(actualProgress, 'Initializing compression...');
+    
+    if (percentage >= 100) {
+      this.endPhase('init');
+    }
+  }
+  
+  // 更新媒体处理阶段进度
+  updateMediaProgress(processedFile, totalFiles) {
+    if (this.mediaFilesCount === null) {
+      return;
+    }
+    
+    if (this.currentPhase !== 'media') {
+      this.startPhase('media');
+    }
+    
+    this.processedFiles++;
+    const phase = this.phases.media;
+    const mediaProgress = (this.processedFiles / this.mediaFilesCount) * phase.weight;
+    const totalProgress = this.phases.init.weight + mediaProgress;
+    
+    this.updateProgress(
+      totalProgress,
+      `Processing media files (${this.processedFiles}/${this.mediaFilesCount})`
+    );
+    
+    if (this.processedFiles === this.mediaFilesCount) {
+      this.endPhase('media');
+      this.updateFinalizationProgress('Finalizing...');
+    }
+  }
+  
+  // 更新最终阶段进度
+  updateFinalizationProgress(status, stats) {
+    if (this.currentPhase !== 'finalize') {
+      this.startPhase('finalize');
+    }
+    
+    const phase = this.phases.finalize;
+    const baseProgress = this.phases.init.weight + this.phases.media.weight;
+    const finalizeProgress = baseProgress + (phase.weight / 2);
+    
+    if (stats) {
+      this.updateProgress(finalizeProgress, status, stats);
+    } else {
+      this.updateProgress(finalizeProgress, status);
+    }
+  }
+  
+  // 完成压缩过程
+  completeCompression(stats) {
+    this.endPhase('finalize');
+    
+    const formattedStats = {
+      ...stats,
+      formattedOriginalSize: this.formatFileSize(stats.originalSize),
+      formattedCompressedSize: this.formatFileSize(stats.compressedSize),
+      formattedSavedSize: this.formatFileSize(stats.savedSize)
+    };
+    
+    this.updateProgress(
+      100, 
+      `Compression completed successfully!`, 
+      formattedStats
+    );
   }
 
   // Handle file info

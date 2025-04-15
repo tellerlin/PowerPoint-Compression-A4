@@ -2,9 +2,8 @@
   import { optimizePPTX } from '$lib/pptx/optimizer';
   import { ProgressManager, compressionProgress } from '$lib/pptx/progress';
   import { createDownloadLink, cleanupDownload } from '$lib/utils/file';
+  // 恢复原来的导入方式，避免导入错误
   import { Button } from '$lib/components/ui/Button';
-  import { UploadZone } from '$lib/components/ui/UploadZone';
-  import { ProgressBar } from '$lib/components/ui/ProgressBar';
   import { Alert } from '$lib/components/ui/Alert';
   import { Container } from '$lib/components/ui';
   
@@ -125,7 +124,6 @@
   }
 </script>
 
-<!-- Replace the outer div with the Container component -->
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
     <h1 class="text-3xl font-bold mb-2 text-gray-100">PowerPoint Compression Tool</h1>
