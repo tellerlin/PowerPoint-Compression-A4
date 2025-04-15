@@ -1,9 +1,9 @@
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
 
 /**
- * 解析XML内容
- * @param {string} xmlContent - 要解析的XML字符串
- * @returns {Object} - 解析后的JavaScript对象
+ * Parse XML content
+ * @param {string} xmlContent - XML string to parse
+ * @returns {Object} - Parsed JavaScript object
  */
 export function parseXml(xmlContent) {
   try {
@@ -11,7 +11,7 @@ export function parseXml(xmlContent) {
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
       isArray: (name, jpath, isLeafNode, isAttribute) => {
-        // 某些元素应该始终作为数组处理，即使只有一个元素
+        // Some elements should always be treated as arrays, even if there's only one element
         const arrayElements = ['p:sp', 'p:pic', 'a:p', 'a:r', 'p:nvSpPr', 'p:cNvPr', 'p:cNvSpPr', 
                               'p:spPr', 'a:xfrm', 'a:off', 'a:ext', 'p:txBody', 'a:bodyPr', 
                               'a:lstStyle', 'a:pPr', 'a:rPr', 'a:t', 'Relationship'];
@@ -22,47 +22,47 @@ export function parseXml(xmlContent) {
     const parser = new XMLParser(options);
     return parser.parse(xmlContent);
   } catch (error) {
-    console.error('解析XML时出错:', error);
+    console.error('Error parsing XML:', error);
     throw error;
   }
 }
 
 /**
- * 解析带命名空间的XML内容
- * @param {string} xmlContent - 要解析的XML字符串
- * @returns {Object} - 解析后的JavaScript对象
+ * Parse XML content with namespaces
+ * @param {string} xmlContent - XML string to parse
+ * @returns {Object} - Parsed JavaScript object
  */
-// 增强XML解析函数，添加容错机制
+// Enhanced XML parsing function with error handling
 
 export async function parseXmlWithNamespaces(xmlString) {
   try {
-    // 原有解析逻辑
+    // Original parsing logic
     const result = await parseXml(xmlString);
     return result;
   } catch (error) {
-    console.error('XML解析错误:', error);
+    console.error('XML parsing error:', error);
     
-    // 尝试修复常见XML问题
+    // Try to fix common XML issues
     try {
-      // 1. 修复未闭合的标签
+      // 1. Fix unclosed tags
       const fixedXml = fixUnclosedTags(xmlString);
       
-      // 2. 修复无效字符
+      // 2. Fix invalid characters
       const sanitizedXml = sanitizeXmlString(fixedXml);
       
-      // 重新尝试解析
+      // Try parsing again
       return await parseXml(sanitizedXml);
     } catch (secondError) {
-      console.error('XML修复后仍然解析失败:', secondError);
-      // 返回一个最小可用的对象，避免null引用错误
+      console.error('XML parsing still failed after fixes:', secondError);
+      // Return a minimal usable object to avoid null reference errors
       return { _parseFailed: true };
     }
   }
 }
 
-// 修复未闭合标签的辅助函数
+// Helper function to fix unclosed tags
 function fixUnclosedTags(xmlString) {
-  // 简单实现，实际应用中可能需要更复杂的逻辑
+  // Simple implementation, more complex logic might be needed in real applications
   const tagStack = [];
   const regex = /<\/?([a-zA-Z0-9:]+)[^>]*>/g;
   let match;
@@ -72,17 +72,17 @@ function fixUnclosedTags(xmlString) {
     const tagName = match[1];
     
     if (fullTag.startsWith('</')) {
-      // 关闭标签
+      // Closing tag
       if (tagStack.length > 0 && tagStack[tagStack.length - 1] === tagName) {
         tagStack.pop();
       }
     } else if (!fullTag.endsWith('/>')) {
-      // 开放标签
+      // Opening tag
       tagStack.push(tagName);
     }
   }
   
-  // 添加缺失的关闭标签
+  // Add missing closing tags
   let result = xmlString;
   while (tagStack.length > 0) {
     const tagName = tagStack.pop();
@@ -92,32 +92,32 @@ function fixUnclosedTags(xmlString) {
   return result;
 }
 
-// 清理XML字符串中的无效字符
+// Clean invalid characters from XML string
 function sanitizeXmlString(xmlString) {
-  // 移除XML中不允许的控制字符
+  // Remove control characters not allowed in XML
   return xmlString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 }
 
-// 增强parseXml函数，添加安全检查
+// Enhanced parseXml function with safety checks
 export function parseXmlSafely(xmlString) {
   if (!xmlString || typeof xmlString !== 'string') {
-    console.warn('尝试解析无效的XML内容:', xmlString);
+    console.warn('Attempted to parse invalid XML content:', xmlString);
     return { _invalid: true };
   }
   
   try {
-    // 使用原有的parseXml函数
+    // Use the original parseXml function
     return parseXml(xmlString);
   } catch (error) {
-    console.error('XML解析错误:', error);
+    console.error('XML parsing error:', error);
     return { _parseFailed: true, _error: error.message };
   }
 }
 
 /**
- * 将JavaScript对象转换为XML字符串
- * @param {Object} jsObject - 要转换的JavaScript对象
- * @returns {string} - 生成的XML字符串
+ * Convert JavaScript object to XML string
+ * @param {Object} jsObject - JavaScript object to convert
+ * @returns {string} - Generated XML string
  */
 export function buildXml(jsObject) {
   try {
@@ -132,51 +132,51 @@ export function buildXml(jsObject) {
     const xmlContent = builder.build(jsObject);
     return xmlContent;
   } catch (error) {
-    console.error('构建XML时出错:', error);
+    console.error('Error building XML:', error);
     throw error;
   }
 }
 
 /**
- * 从ZIP文件中读取并解析XML文件
- * @param {JSZip} zip - JSZip实例
- * @param {string} path - ZIP内的文件路径
- * @returns {Promise<Object>} - 解析后的JavaScript对象
+ * Read and parse XML file from ZIP
+ * @param {JSZip} zip - JSZip instance
+ * @param {string} path - File path within ZIP
+ * @returns {Promise<Object>} - Parsed JavaScript object
  */
 export async function parseXmlFromZip(zip, path) {
   try {
     const file = zip.file(path);
     if (!file) {
-      console.warn(`文件不存在: ${path}`);
+      console.warn(`File does not exist: ${path}`);
       return null;
     }
     
     const content = await file.async('text');
     return parseXml(content);
   } catch (error) {
-    console.error(`解析ZIP中的XML文件时出错 (${path}):`, error);
+    console.error(`Error parsing XML file from ZIP (${path}):`, error);
     throw error;
   }
 }
 
 /**
- * 从ZIP文件中读取并解析带命名空间的XML文件
- * @param {JSZip} zip - JSZip实例
- * @param {string} path - ZIP内的文件路径
- * @returns {Promise<Object>} - 解析后的JavaScript对象
+ * Read and parse XML file with namespaces from ZIP
+ * @param {JSZip} zip - JSZip instance
+ * @param {string} path - File path within ZIP
+ * @returns {Promise<Object>} - Parsed JavaScript object
  */
 export async function parseXmlWithNamespacesFromZip(zip, path) {
   try {
     const file = zip.file(path);
     if (!file) {
-      console.warn(`文件不存在: ${path}`);
+      console.warn(`File does not exist: ${path}`);
       return null;
     }
     
     const content = await file.async('text');
     return parseXmlWithNamespaces(content);
   } catch (error) {
-    console.error('解析 XML 时出错:', error);
+    console.error('Error parsing XML:', error);
     throw error;
   }
 }

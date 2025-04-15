@@ -1,18 +1,18 @@
 export function setupKeyboardShortcuts(node, actions) {
   function handleKeydown(event) {
-    // Ctrl+O: 打开文件
+    // Ctrl+O: Open file
     if (event.ctrlKey && event.key === 'o' && actions.openFile) {
       event.preventDefault();
       actions.openFile();
     }
     
-    // Ctrl+S: 保存文件
+    // Ctrl+S: Save file
     if (event.ctrlKey && event.key === 's' && actions.saveFile) {
       event.preventDefault();
       actions.saveFile();
     }
     
-    // Esc: 取消操作
+    // Esc: Cancel operation
     if (event.key === 'Escape' && actions.cancel) {
       event.preventDefault();
       actions.cancel();

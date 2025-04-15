@@ -1,19 +1,19 @@
 module.exports = {
-    // 禁止无用的文件依赖
+    // Prohibit unused file dependencies
     forbidden: [
       {
         name: 'no-unsolicited-imports',
         severity: 'warn',
         from: {},
         to: {
-          pathNot: '^src/.*$', // 确保只关注 `src` 目录下的文件
+          pathNot: '^src/.*$', // Ensure only focusing on files in the `src` directory
         },
       },
     ],
     options: {
-      // 输出为文本格式
+      // Output as text format
       outputType: 'text',
-      // 包含详细的模块依赖
-      collapse: 1, // 仅显示模块之间的直接依赖
+      // Include detailed module dependencies
+      collapse: 1, // Only show direct dependencies between modules
     },
   };

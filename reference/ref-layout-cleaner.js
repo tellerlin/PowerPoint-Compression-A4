@@ -404,7 +404,7 @@ async function getMasterReferencedLayouts(zip, usedMasters) {
  * @param {Set<string>} usedLayouts Set of used layout paths
  * @param {Set<string>} usedMasters Set of used master paths
  */
-export async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
+async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
   try {
     console.log('Updating presentation references...');
     const relsPath = 'ppt/_rels/presentation.xml.rels';
@@ -428,17 +428,17 @@ export async function updatePresentationReferences(zip, usedLayouts, usedMasters
     
     console.log(`Found ${relationships.length} relationships in presentation`);
     
-    // 过滤出未使用的布局和母版关系
+    // Filter out unused layout and master relationships
     const filteredRelationships = relationships.filter(rel => {
       const relType = rel['@_Type'];
       const target = rel['@_Target'];
       
-      // 保留非布局和非母版关系
+      // Keep non-layout and non-master relationships
       if (!relType || (!relType.includes('/slideLayout') && !relType.includes('/slideMaster'))) {
         return true;
       }
       
-      // 检查布局是否使用
+      // Check if layout is used
       if (relType.includes('/slideLayout')) {
         const layoutPath = `ppt/${target.replace('../', '')}`;
         const isUsed = usedLayouts.has(layoutPath);
@@ -446,7 +446,7 @@ export async function updatePresentationReferences(zip, usedLayouts, usedMasters
         return isUsed;
       }
       
-      // 检查母版是否使用
+      // Check if master is used
       if (relType.includes('/slideMaster')) {
         const masterPath = `ppt/${target.replace('../', '')}`;
         const isUsed = usedMasters.has(masterPath);
@@ -457,10 +457,10 @@ export async function updatePresentationReferences(zip, usedLayouts, usedMasters
       return false;
     });
     
-    // 更新关系
+    // Update relationships
     relsObj.Relationships.Relationship = filteredRelationships;
     
-    // 更新关系文件
+    // Update relationship file
     const updatedRelsXml = buildXml(relsObj);
     zip.file(relsPath, updatedRelsXml);
     
@@ -537,7 +537,7 @@ export async function updateContentTypes(zip) {
  */
 async function updateMasterLayoutReferences(zip, masterPath, usedLayouts) {
   try {
-    // 获取母版关系文件
+    // Get master relationship file
     const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
     const masterRelsXml = await zip.file(masterRelsPath)?.async('string');
     if (!masterRelsXml) return;
@@ -551,15 +551,15 @@ async function updateMasterLayoutReferences(zip, masterPath, usedLayouts) {
       ? masterRelsObj.Relationships.Relationship
       : [masterRelsObj.Relationships.Relationship];
     
-    // 过滤出未使用的布局关系
+    // Filter out unused layout relationships
     const filteredRelationships = relationships.filter(rel => {
-      // 保留非布局关系
+      // Keep non-layout relationships
       const relType = rel['@_Type'];
       if (!relType || !relType.includes('/slideLayout')) {
         return true;
       }
       
-      // 检查布局是否使用
+      // Check if layout is used
       const target = rel['@_Target'];
       const layoutPath = `ppt/${target.replace('../', '')}`;
       const isUsed = usedLayouts.has(layoutPath);
@@ -569,18 +569,18 @@ async function updateMasterLayoutReferences(zip, masterPath, usedLayouts) {
       return isUsed;
     });
     
-    // 如果有关系被移除
+    // If relationships were removed
     if (filteredRelationships.length < relationships.length) {
-      // 更新关系
+      // Update relationships
       masterRelsObj.Relationships.Relationship = filteredRelationships;
       
-      // 更新关系文件
+      // Update relationship file
       const updatedRelsXml = buildXml(masterRelsObj);
       zip.file(masterRelsPath, updatedRelsXml);
       
       console.log(`Updated master ${masterPath} references: removed ${relationships.length - filteredRelationships.length} unused layout references`);
       
-      // 更新母版XML中的布局引用
+      // Update master XML layout references
       await updateMasterXml(zip, masterPath, filteredRelationships);
     }
   } catch (error) {
