@@ -6,6 +6,7 @@
   import { UploadZone } from '$lib/components/ui/UploadZone';
   import { ProgressBar } from '$lib/components/ui/ProgressBar';
   import { Alert } from '$lib/components/ui/Alert';
+  import { Container } from '$lib/components/ui';
   
   let files;
   let processing = false;
@@ -22,7 +23,7 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  // 添加一个文件变更监听
+  // Add a file change listener
   $: if (files) {
     console.log('Files changed:', files);
   }
@@ -45,16 +46,16 @@
         optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.8 },
         removeHiddenSlides: true,
-        removeUnusedLayouts: true,  // 确保启用清理未使用的布局和母版
-        cleanUnusedResources: true, // 启用清理未使用的资源
-        preprocessImages: {         // 添加预处理选项
+        removeUnusedLayouts: true,  // Enable cleaning of unused layouts and masters
+        cleanUnusedResources: true, // Enable cleaning of unused resources
+        preprocessImages: {         // Add preprocessing options
           removeDuplicateImages: true,
-          mergeSimilarImages: false // 暂时禁用合并相似图片功能
+          mergeSimilarImages: false // Temporarily disable similar image merging
         },
-        debug: true, // 添加调试选项，在控制台输出详细信息
+        debug: true, // Add debug option for detailed console output
 
         onProgress: (phase, detail) => {
-          console.log(`Progress: ${phase}`, detail); // 添加调试日志
+          console.log(`Progress: ${phase}`, detail); // Add debug log
           switch (phase) {
             case 'fileInfo':
               progressManager.updateFileInfo(detail);
@@ -124,7 +125,8 @@
   }
 </script>
 
-<div class="container mx-auto px-4 py-8 max-w-4xl">
+<!-- Replace the outer div with the Container component -->
+<Container size="lg" class_="py-8">
   <div class="text-center mb-8">
     <h1 class="text-3xl font-bold mb-2 text-gray-100">PowerPoint Compression Tool</h1>
     <p class="text-gray-400">Reduce your PPTX file size without losing quality</p>
@@ -225,4 +227,4 @@
       </div>
     {/if}
   </div>
-</div>
+</Container>
