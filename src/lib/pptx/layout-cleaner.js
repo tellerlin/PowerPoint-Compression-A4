@@ -604,3 +604,54 @@ async function updateMasterXml(zip, masterPath, validRelationships) {
     console.error(`Error updating master XML for ${masterPath}:`, error);
   }
 }
+
+export async function getUsedLayoutsAndMasters(zip, usedSlides) {
+  const usedLayouts = new Set();
+  const usedMasters = new Set();
+  
+  try {
+    // Process each slide
+    for (const slide of usedSlides) {
+      const slideXml = await zip.file(slide.path)?.async('string');
+      if (!slideXml) continue;
+      
+      // Get slide relationship file
+      const slideRelsPath = slide.path.replace('slides/', 'slides/_rels/') + '.rels';
+      const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
+      if (!slideRelsXml) continue;
+      
+      const slideRelsObj = await parseXml(slideRelsXml);
+      
+      if (!slideRelsObj?.Relationships?.Relationship) continue;
+      
+      const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
+        ? slideRelsObj.Relationships.Relationship
+        : [slideRelsObj.Relationships.Relationship];
+      
+      // Find layout relationship
+      const layoutRel = slideRels.find(rel => {
+        const relType = rel['@_Type'] || rel.Type;
+        return relType && relType.includes('/slideLayout');
+      });
+      
+      if (!layoutRel) continue;
+      
+      const target = layoutRel['@_Target'] || layoutRel.Target;
+      if (!target) continue;
+      
+      const layoutPath = `ppt/${target.replace('../', '')}`;
+      usedLayouts.add(layoutPath);
+      
+      // Get master used by the layout using the imported function from layout-cleaner.js
+      const masterInfo = await getLayoutMaster(zip, layoutPath);
+      if (masterInfo && masterInfo.path) {
+        usedMasters.add(masterInfo.path);
+      }
+    }
+    
+    return { usedLayouts, usedMasters };
+  } catch (error) {
+    console.error('Error getting used layouts and masters:', error);
+    return { usedLayouts: new Set(), usedMasters: new Set() };
+  }
+}
