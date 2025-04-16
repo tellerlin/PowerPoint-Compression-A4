@@ -8,8 +8,8 @@ export const SUPPORTED_IMAGE_EXTENSIONS = [
 ];
 
 export const COMPRESSION_SETTINGS = {
-  DEFAULT_QUALITY: 0.80, // Default compression quality at 80%
-  MAX_IMAGE_SIZE: 1200, // Reduced maximum image size for better compression
+  DEFAULT_QUALITY: 0.90, // 将默认压缩质量从0.80提高到0.90
+  MAX_IMAGE_SIZE: 1600, // 增加最大图像尺寸从1200到1600，保留更多细节
   ZIP_COMPRESSION_LEVEL: 9 // Maximum ZIP compression level
 };
 

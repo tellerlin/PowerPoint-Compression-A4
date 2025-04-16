@@ -1,8 +1,10 @@
 import { COMPRESSION_SETTINGS } from '../pptx/constants';
 import { validateImageData } from './validation';
 import { imageCache } from './cache';
+// Remove Squoosh import as it's not compatible with SvelteKit
+// import { ImagePool } from '@squoosh/lib';
 
-// 添加hashCode函数用于缓存键生成
+// Keep existing hashCode function and other utility functions
 function hashCode(data) {
   // 简化的哈希算法，仅使用数据的部分样本
   let hash = 0;
@@ -79,13 +81,17 @@ function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = CO
   let adjustedMaxHeight = maxHeight;
   
   if (imageType === ImageType.DIAGRAM) {
-    // 图表类型可以使用较小的尺寸
-    adjustedMaxWidth = Math.min(maxWidth, 800);
-    adjustedMaxHeight = Math.min(maxHeight, 800);
+    // 图表类型使用更大的尺寸以保持清晰度
+    adjustedMaxWidth = Math.min(maxWidth, 1600); // 从1200提高到1600
+    adjustedMaxHeight = Math.min(maxHeight, 1600); // 从1200提高到1600
   } else if (imageType === ImageType.ICON) {
-    // 图标类型保持较小尺寸
-    adjustedMaxWidth = Math.min(maxWidth, 128);
-    adjustedMaxHeight = Math.min(maxHeight, 128);
+    // 图标类型也适当提高尺寸
+    adjustedMaxWidth = Math.min(maxWidth, 384); // 从256提高到384
+    adjustedMaxHeight = Math.min(maxHeight, 384); // 从256提高到384
+  } else if (imageType === ImageType.PHOTO) {
+    // 对于照片，保留更多细节
+    adjustedMaxWidth = Math.min(maxWidth, 2000); // 新增照片类型的专门处理
+    adjustedMaxHeight = Math.min(maxHeight, 2000);
   }
   
   // 如果图像已经足够小，保持原始尺寸
@@ -127,9 +133,98 @@ async function detectFormat(data) {
   }
 }
 
+// Replace the Squoosh compression function with a browser-native approach
+async function compressWithAdvancedTechniques(canvas, options = {}) {
+  const { quality, imageType, hasAlpha } = options;
+  
+  // Create results array to store all compression attempts
+  const results = [];
+  
+  // Try different formats with optimized settings
+  try {
+    // For images with transparency, prioritize WebP
+    if (hasAlpha) {
+      const webpBlob = await canvas.convertToBlob({ 
+        type: 'image/webp', 
+        quality: Math.min(0.99, quality + 0.1)
+      });
+      const webpBuffer = await webpBlob.arrayBuffer();
+      results.push({
+        data: new Uint8Array(webpBuffer),
+        format: 'webp',
+        size: webpBuffer.byteLength
+      });
+      
+      // Also try PNG for transparent images
+      const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+      const pngBuffer = await pngBlob.arrayBuffer();
+      results.push({
+        data: new Uint8Array(pngBuffer),
+        format: 'png',
+        size: pngBuffer.byteLength
+      });
+    } else {
+      // For non-transparent images, try all formats
+      
+      // Try WebP with high effort compression
+      const webpBlob = await canvas.convertToBlob({ 
+        type: 'image/webp', 
+        quality: quality
+      });
+      const webpBuffer = await webpBlob.arrayBuffer();
+      results.push({
+        data: new Uint8Array(webpBuffer),
+        format: 'webp',
+        size: webpBuffer.byteLength
+      });
+      
+      // Try JPEG with progressive option for diagrams and photos
+      if (imageType !== ImageType.ICON) {
+        // Use higher quality for diagrams
+        const jpegQuality = imageType === ImageType.DIAGRAM ? 
+          Math.min(0.99, quality + 0.15) : quality;
+          
+        const jpegBlob = await canvas.convertToBlob({ 
+          type: 'image/jpeg', 
+          quality: jpegQuality 
+        });
+        const jpegBuffer = await jpegBlob.arrayBuffer();
+        results.push({
+          data: new Uint8Array(jpegBuffer),
+          format: 'jpeg',
+          size: jpegBuffer.byteLength
+        });
+      }
+      
+      // Always try PNG, especially important for diagrams and icons
+      const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+      const pngBuffer = await pngBlob.arrayBuffer();
+      results.push({
+        data: new Uint8Array(pngBuffer),
+        format: 'png',
+        size: pngBuffer.byteLength
+      });
+    }
+    
+    // Find the smallest result
+    let bestResult = results[0];
+    for (let i = 1; i < results.length; i++) {
+      if (results[i].size < bestResult.size) {
+        bestResult = results[i];
+      }
+    }
+    
+    return bestResult;
+    
+  } catch (error) {
+    console.error('Advanced compression failed:', error);
+    return null;
+  }
+}
+
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
   try {
-    // 使用更精确的缓存键
+    // Use cache as before
     const cacheKey = `${data.byteLength}-${quality}-${hashCode(data)}`;
     if (imageCache.get(cacheKey)) {
       return imageCache.get(cacheKey);
@@ -148,73 +243,128 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       const originalSize = data.byteLength;
       const originalFormat = await detectFormat(data);
       
-      // 创建临时画布用于分析图像类型
+      // Create temporary canvas for analysis
       const tempCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const tempCtx = tempCanvas.getContext('2d');
       tempCtx.drawImage(bitmap, 0, 0);
       const imageData = tempCtx.getImageData(0, 0, bitmap.width, bitmap.height);
       
-      // 分析图像类型
+      // Analyze image type
       const imageType = analyzeImageType(imageData);
       
-      // 只有当图片尺寸超过阈值时才调整大小
-      const { width, height } = calculateOptimalDimensions(bitmap.width, bitmap.height, 
-                                                          COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, 
-                                                          COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
-                                                          imageType);
+      // Calculate optimal dimensions
+      const { width, height } = calculateOptimalDimensions(
+        bitmap.width, bitmap.height, 
+        COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, 
+        COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
+        imageType
+      );
       
-      // 如果尺寸没有变化且原始大小较小，直接返回原图
-      if (width === bitmap.width && height === bitmap.height && originalSize < 100 * 1024) {
+      // Skip small images
+      if (width === bitmap.width && height === bitmap.height && originalSize < 400 * 1024) {
         return { data, format: originalFormat || 'original' };
       }
       
+      // Resize image
       const canvas = await resizeImage(bitmap, width, height);
       const analysis = analyzeImage(imageData);
 
-      // 提高小图片和透明图片的质量
+      // Adjust quality based on image characteristics
       let adjustedQuality = quality;
-      if (data.byteLength < 100 * 1024) { // 小于100KB的图片
-        adjustedQuality = Math.min(0.95, quality + 0.05);
+      if (data.byteLength < 300 * 1024) {
+        adjustedQuality = Math.min(0.99, quality + 0.1);
+      } else if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+        adjustedQuality = Math.min(0.99, quality + 0.15);
       }
       
+      // Use our advanced compression technique instead of Squoosh
+      const advancedResult = await compressWithAdvancedTechniques(canvas, {
+        quality: adjustedQuality,
+        imageType: imageType,
+        hasAlpha: analysis.hasAlpha,
+        width,
+        height
+      });
+      
+      // If advanced compression worked and is better than original, use it
+      if (advancedResult && advancedResult.size < originalSize * 0.9) {
+        const result = {
+          data: advancedResult.data,
+          format: advancedResult.format,
+          originalSize,
+          compressedSize: advancedResult.size,
+          compressionRatio: (advancedResult.size / originalSize).toFixed(2),
+          imageType
+        };
+        imageCache.set(cacheKey, result);
+        return result;
+      }
+      
+      // Fall back to original compression logic
       let compressedBlob;
       // 透明图片使用WebP格式并提高质量
       if (analysis.hasAlpha) {
         compressedBlob = await canvas.convertToBlob({ 
           type: 'image/webp', 
-          quality: Math.min(0.95, adjustedQuality + 0.05) 
+          quality: Math.min(0.99, adjustedQuality + 0.1)
         });
       } else {
         // 对于不透明图片，尝试多种格式并选择最佳结果
-        const [webpBlob, jpegBlob, pngBlob] = await Promise.all([
-          canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }),
-          canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality }),
-          canvas.convertToBlob({ type: 'image/png' })
-        ]);
+        // 为PNG添加压缩选项
+        const pngOptions = { type: 'image/png' };
         
-        const webpBuffer = await webpBlob.arrayBuffer();
-        const jpegBuffer = await jpegBlob.arrayBuffer();
-        const pngBuffer = await pngBlob.arrayBuffer();
-
-        // 选择最小的格式，但如果压缩后大小接近原始大小，则保留原始图片
-        const minSize = Math.min(webpBuffer.byteLength, jpegBuffer.byteLength, pngBuffer.byteLength);
-        
-        if (minSize > originalSize * 0.9) { // 如果压缩后仍然接近原始大小的90%
-          return { data, format: originalFormat || 'original' };
-        }
-        
-        if (minSize === webpBuffer.byteLength) {
-          compressedBlob = webpBlob;
-        } else if (minSize === jpegBuffer.byteLength) {
-          compressedBlob = jpegBlob;
+        // 对于图表和图标，优先考虑PNG格式以保持清晰度
+        if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+          const pngBlob = await canvas.convertToBlob(pngOptions);
+          const pngBuffer = await pngBlob.arrayBuffer();
+          
+          // 如果PNG大小在可接受范围内，直接使用PNG
+          if (pngBuffer.byteLength < originalSize * 1.2 || pngBuffer.byteLength < 500 * 1024) {
+            compressedBlob = pngBlob;
+          } else {
+            // 否则尝试其他格式
+            const [webpBlob, jpegBlob] = await Promise.all([
+              canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }),
+              canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality })
+            ]);
+            
+            const webpBuffer = await webpBlob.arrayBuffer();
+            const jpegBuffer = await jpegBlob.arrayBuffer();
+            
+            compressedBlob = webpBuffer.byteLength <= jpegBuffer.byteLength ? webpBlob : jpegBlob;
+          }
         } else {
-          compressedBlob = pngBlob;
+          // 对于照片类型，比较所有格式
+          const [webpBlob, jpegBlob, pngBlob] = await Promise.all([
+            canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }),
+            canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality }),
+            canvas.convertToBlob(pngOptions)
+          ]);
+          
+          const webpBuffer = await webpBlob.arrayBuffer();
+          const jpegBuffer = await jpegBlob.arrayBuffer();
+          const pngBuffer = await pngBlob.arrayBuffer();
+
+          // 选择最小的格式，但如果压缩后大小接近原始大小，则保留原始图片
+          const minSize = Math.min(webpBuffer.byteLength, jpegBuffer.byteLength, pngBuffer.byteLength);
+          
+          if (minSize > originalSize * 0.7) {
+            return { data, format: originalFormat || 'original' };
+          }
+          
+          if (minSize === webpBuffer.byteLength) {
+            compressedBlob = webpBlob;
+          } else if (minSize === jpegBuffer.byteLength) {
+            compressedBlob = jpegBlob;
+          } else {
+            compressedBlob = pngBlob;
+          }
         }
       }
 
-      // 如果压缩后大小大于原始大小，保留原始图片
+      // 如果压缩后大小大于原始大小的90%，保留原始图片
       const compressedSize = compressedBlob.size;
-      if (compressedSize > originalSize) {
+      if (compressedSize > originalSize * 0.9) {
         return { data, format: originalFormat || 'original' };
       }
 

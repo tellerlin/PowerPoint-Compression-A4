@@ -10,7 +10,7 @@ export async function removeUnusedLayouts(zip, onProgress = () => {}) {
     console.log('Starting layout cleanup process...');
     onProgress('init', { percentage: 20, status: 'Analyzing presentation structure...' });
     
-    // 1. 获取所有幻灯片
+    // 1. Get all slides
     const slides = await getAllSlides(zip);
     if (!slides || slides.length === 0) {
       console.warn('No slides found in the presentation');
@@ -339,7 +339,6 @@ async function getMasterReferencedLayouts(zip, usedMasters) {
 export async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
   try {
     console.log('Updating presentation references...');
-    // 更新presentation.xml.rels
     const relsPath = 'ppt/_rels/presentation.xml.rels';
     const relsXml = await zip.file(relsPath)?.async('string');
     if (!relsXml) {
@@ -354,51 +353,37 @@ export async function updatePresentationReferences(zip, usedLayouts, usedMasters
     
     console.log(`Found ${relationships.length} relationships in presentation`);
     
-    // 过滤出未使用的布局和母版关系
+    // Filter unused layouts and masters relationships
     const filteredRelationships = relationships.filter(rel => {
-      // 检查rel对象是否有效
       if (!rel || typeof rel !== 'object') return false;
       
-      // 检查Type属性是否存在
-      if (!rel.Type || typeof rel.Type !== 'string') {
-        console.log('Relationship missing Type attribute:', rel);
-        return true; // 保留无法确定类型的关系
-      }
+      // Keep relationships without Type or Target
+      if (!rel.Type || !rel.Target) return true;
       
-      // 检查Target属性是否存在
-      if (!rel.Target || typeof rel.Target !== 'string') {
-        console.log('Relationship missing Target attribute:', rel);
-        return true; // 保留无法确定目标的关系
-      }
-      
-      // 保留非布局和非母版关系
+      // Keep non-layout and non-master relationships
       if (!rel.Type.includes('/slideLayout') && !rel.Type.includes('/slideMaster')) {
         return true;
       }
       
-      // 检查布局是否使用
+      // Check if layout is used
       if (rel.Type.includes('/slideLayout')) {
         const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
-        const isUsed = usedLayouts.has(layoutPath);
-        if (!isUsed) console.log(`Removing unused layout reference: ${layoutPath}`);
-        return isUsed;
+        return usedLayouts.has(layoutPath);
       }
       
-      // 检查母版是否使用
+      // Check if master is used
       if (rel.Type.includes('/slideMaster')) {
         const masterPath = `ppt/${rel.Target.replace('../', '')}`;
-        const isUsed = usedMasters.has(masterPath);
-        if (!isUsed) console.log(`Removing unused master reference: ${masterPath}`);
-        return isUsed;
+        return usedMasters.has(masterPath);
       }
       
       return false;
     });
     
-    // 更新关系
+    // Update relationships
     relsObj.Relationships.Relationship = filteredRelationships;
     
-    // 更新关系文件
+    // Update relationships file
     const updatedRelsXml = buildXml(relsObj);
     zip.file(relsPath, updatedRelsXml);
     

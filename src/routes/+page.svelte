@@ -43,7 +43,7 @@
       let optimizedBlob;  // declare variable first
       
         optimizedBlob = await optimizePPTX(file, {
-        compressImages: { quality: 0.8 },
+        compressImages: { quality: 0.9 },  // 将质量从0.8提高到0.9
         removeHiddenSlides: true,
         removeUnusedLayouts: true,  // Enable cleaning of unused layouts and masters
         cleanUnusedResources: true, // Enable cleaning of unused resources
