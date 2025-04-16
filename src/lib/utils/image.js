@@ -301,67 +301,37 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       }
       
       // Fall back to original compression logic
-      let compressedBlob;
-      // 透明图片使用WebP格式并提高质量
+      // 1. 针对不同类型和透明度，尝试多种格式和参数
+      const candidates = [];
       if (analysis.hasAlpha) {
-        compressedBlob = await canvas.convertToBlob({ 
-          type: 'image/webp', 
-          quality: Math.min(0.99, adjustedQuality + 0.1)
-        });
+        // WebP透明 + PNG
+        candidates.push(await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.99, adjustedQuality + 0.1) }));
+        candidates.push(await canvas.convertToBlob({ type: 'image/png' }));
       } else {
-        // 对于不透明图片，尝试多种格式并选择最佳结果
-        // 为PNG添加压缩选项
-        const pngOptions = { type: 'image/png' };
-        
-        // 对于图表和图标，优先考虑PNG格式以保持清晰度
-        if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-          const pngBlob = await canvas.convertToBlob(pngOptions);
-          const pngBuffer = await pngBlob.arrayBuffer();
-          
-          // 如果PNG大小在可接受范围内，直接使用PNG
-          if (pngBuffer.byteLength < originalSize * 1.2 || pngBuffer.byteLength < 500 * 1024) {
-            compressedBlob = pngBlob;
-          } else {
-            // 否则尝试其他格式
-            const [webpBlob, jpegBlob] = await Promise.all([
-              canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }),
-              canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality })
-            ]);
-            
-            const webpBuffer = await webpBlob.arrayBuffer();
-            const jpegBuffer = await jpegBlob.arrayBuffer();
-            
-            compressedBlob = webpBuffer.byteLength <= jpegBuffer.byteLength ? webpBlob : jpegBlob;
-          }
-        } else {
-          // 对于照片类型，比较所有格式
-          const [webpBlob, jpegBlob, pngBlob] = await Promise.all([
-            canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }),
-            canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality }),
-            canvas.convertToBlob(pngOptions)
-          ]);
-          
-          const webpBuffer = await webpBlob.arrayBuffer();
-          const jpegBuffer = await jpegBlob.arrayBuffer();
-          const pngBuffer = await pngBlob.arrayBuffer();
-
-          // 选择最小的格式，但如果压缩后大小接近原始大小，则保留原始图片
-          const minSize = Math.min(webpBuffer.byteLength, jpegBuffer.byteLength, pngBuffer.byteLength);
-          
-          if (minSize > originalSize * 0.7) {
-            return { data, format: originalFormat || 'original' };
-          }
-          
-          if (minSize === webpBuffer.byteLength) {
-            compressedBlob = webpBlob;
-          } else if (minSize === jpegBuffer.byteLength) {
-            compressedBlob = jpegBlob;
-          } else {
-            compressedBlob = pngBlob;
-          }
-        }
+        // WebP + JPEG + PNG
+        candidates.push(await canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }));
+        candidates.push(await canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality }));
+        candidates.push(await canvas.convertToBlob({ type: 'image/png' }));
       }
-
+      // 2. 选择体积最小且质量高的
+      let best = { blob: null, size: Infinity };
+      for (const blob of candidates) {
+        if (blob.size < best.size) best = { blob, size: blob.size };
+      }
+      // 选择最小的格式，但如果压缩后大小接近原始大小，则保留原始图片
+      const minSize = Math.min(webpBuffer.byteLength, jpegBuffer.byteLength, pngBuffer.byteLength);
+      
+      if (minSize > originalSize * 0.7) {
+        return { data, format: originalFormat || 'original' };
+      }
+      
+      if (minSize === webpBuffer.byteLength) {
+        compressedBlob = webpBlob;
+      } else if (minSize === jpegBuffer.byteLength) {
+        compressedBlob = jpegBlob;
+      } else {
+        compressedBlob = pngBlob;
+      }
       // 如果压缩后大小大于原始大小的90%，保留原始图片
       const compressedSize = compressedBlob.size;
       if (compressedSize > originalSize * 0.9) {
