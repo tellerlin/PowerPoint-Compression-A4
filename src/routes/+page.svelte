@@ -72,10 +72,11 @@
           removeDuplicateImages: true,
           mergeSimilarImages: false // Temporarily disable similar image merging
         },
-        debug: true, // Add debug option for detailed console output
+        debug: true, // 启用调试模式以获取详细日志
+        logLevel: 'verbose', // 添加详细日志级别
 
         onProgress: (phase, detail) => {
-          console.log(`Progress: ${phase}`, detail); // Add debug log
+          console.log(`Progress: ${phase}`, detail); // 保留调试日志
           switch (phase) {
             case 'fileInfo':
               progressManager.updateFileInfo(detail);
@@ -111,6 +112,12 @@
               };
               progressManager.completeCompression(completeStats);
               break;
+            case 'error':
+              // 添加错误处理
+              console.error('Compression error:', detail.message);
+              console.error('Error details:', detail.error);
+              progressManager.handleError(detail.message || "处理失败", detail.percentage || 0);
+              break;
           }
         }
       });
@@ -126,7 +133,15 @@
       
     } catch (error) {
       console.error("Compression error:", error);
-      progressManager.handleError(error.message || "File processing failed", $compressionProgress.percentage);
+      // 增强错误日志，记录更多详细信息
+      console.error("Error details:", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        phase: $compressionProgress.status,
+        percentage: $compressionProgress.percentage
+      });
+      progressManager.handleError(error.message || "文件处理失败", $compressionProgress.percentage);
     }
   }
 

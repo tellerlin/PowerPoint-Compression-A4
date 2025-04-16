@@ -2,7 +2,6 @@ import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX } from './constants';
 import { 
   removeUnusedLayouts, 
-  updateContentTypes, 
   updatePresentationReferences, 
   getLayoutMaster,
   getUsedLayoutsAndMasters
@@ -94,47 +93,28 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
 async function processRelationshipFiles(zip, usedLayouts, usedMasters, usedSlides, usedMedia) {
   const relsFiles = Object.keys(zip.files)
     .filter(path => path.includes('_rels/') && path.endsWith('.rels'));
-  
+
   console.log(`Found ${relsFiles.length} relationship files to analyze`);
-  
-  // 使用 Promise.all 并行处理关系文件
+
   await Promise.all(relsFiles.map(async (relsPath) => {
     try {
-      // 跳过已处理的幻灯片关系文件
-      if (relsPath.includes('slides/_rels/') && usedSlides.some(slide => 
-          relsPath === slide.path.replace('slides/', 'slides/_rels/') + '.rels')) {
-        return;
-      }
-      
-      const isLayoutRels = relsPath.includes('slideLayouts/_rels/');
-      const isMasterRels = relsPath.includes('slideMasters/_rels/');
-      
-      // 跳过未使用的布局和母版关系文件
-      if (isLayoutRels) {
-        const layoutPath = relsPath.replace('_rels/', '').replace('.rels', '');
-        if (!usedLayouts.has(layoutPath)) return;
-      } else if (isMasterRels) {
-        const masterPath = relsPath.replace('_rels/', '').replace('.rels', '');
-        if (!usedMasters.has(masterPath)) return;
-      }
-      
+      // === 修改点：不再跳过未被引用的 master/layout 关系文件，始终收集媒体引用 ===
       const relsXml = await zip.file(relsPath)?.async('string');
       if (!relsXml) return;
-      
+
       const relsObj = await parseXml(relsXml);
-      
+
       if (!relsObj.Relationships || !relsObj.Relationships.Relationship) return;
-      
+
       const relationships = Array.isArray(relsObj.Relationships.Relationship)
         ? relsObj.Relationships.Relationship
         : [relsObj.Relationships.Relationship];
-      
-      // 处理媒体关系
+
       relationships.forEach(rel => {
         const relType = rel['@_Type'] || rel.Type;
         if (relType && (
-          relType.includes('/image') || 
-          relType.includes('/audio') || 
+          relType.includes('/image') ||
+          relType.includes('/audio') ||
           relType.includes('/video')
         )) {
           const target = rel['@_Target'] || rel.Target;
@@ -233,9 +213,9 @@ async function getUsedMedia(zip, usedSlides) {
 }
 
 /**
- * Remove unused media files from the PPTX
- * @param {JSZip} zip PPTX ZIP object
- * @param {Set<string>} usedMedia Set of used media file paths
+ * 移除未使用的媒体文件
+ * @param {JSZip} zip PPTX ZIP对象
+ * @param {Set<string>} usedMedia 已使用的媒体文件路径集合
  */
 async function removeUnusedMedia(zip, usedMedia) {
   try {
@@ -244,7 +224,7 @@ async function removeUnusedMedia(zip, usedMedia) {
     console.log(`Total media files: ${mediaFiles.length}`);
     console.log(`Used media files: ${usedMedia.size}`);
     
-    // Check if referenced media files exist
+    // 验证已使用的媒体文件是否存在
     const missingMedia = [];
     for (const mediaPath of usedMedia) {
       if (!zip.file(mediaPath)) {
@@ -253,25 +233,46 @@ async function removeUnusedMedia(zip, usedMedia) {
       }
     }
     
-    // Remove non-existent files from the used media collection
-    missingMedia.forEach(path => usedMedia.delete(path));
+    // 从已使用的媒体集合中移除不存在的文件
+    missingMedia.forEach(path => {
+      console.log(`Removing non-existent media reference: ${path}`);
+      usedMedia.delete(path);
+    });
     
+    // 找出未使用的媒体文件
     const unusedMedia = mediaFiles.filter(path => !usedMedia.has(path));
     console.log(`Found ${unusedMedia.length} unused media files to remove`);
     
-    if (shouldSkipMediaRemoval(mediaFiles.length, unusedMedia.length)) {
+    // 安全检查，避免删除所有媒体文件
+    if (unusedMedia.length > 0 && unusedMedia.length === mediaFiles.length) {
+      console.warn('Safety check: Skipping removal - attempting to remove all media files');
       return;
     }
     
+    // 删除未使用的媒体文件
     for (const mediaPath of unusedMedia) {
       console.log(`Removing unused media: ${mediaPath}`);
-      zip.remove(mediaPath);
+      try {
+        zip.remove(mediaPath);
+      } catch (removeError) {
+        console.error(`Error removing media file ${mediaPath}:`, removeError);
+      }
     }
     
-    await updateContentTypes(zip);
+    // 记录剩余的媒体文件
+    const remainingMedia = Object.keys(zip.files).filter(path => 
+      path.startsWith('ppt/media/') && !path.includes('_rels')
+    );
+    console.log(`Remaining media files after cleanup: ${remainingMedia.length}`);
+    
   } catch (error) {
     console.error('Error removing unused media files:', error);
-    // Don't throw exception on error, allow the process to continue
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    // 不抛出异常，让流程继续
   }
 }
 
@@ -299,4 +300,108 @@ function shouldSkipMediaRemoval(totalCount, unusedCount) {
   }
   
   return false;
+}
+
+/**
+ * 更新内容类型文件，移除对不存在文件的引用
+ * @param {JSZip} zip PPTX ZIP对象
+ */
+async function updateContentTypes(zip) {
+  try {
+    console.log('Updating content types...');
+    const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
+    if (!contentTypesXml) {
+      console.warn('Content types file not found');
+      return;
+    }
+    
+    console.log('Parsing content types XML...');
+    let contentTypesObj;
+    try {
+      contentTypesObj = await parseXml(contentTypesXml);
+      if (!contentTypesObj) {
+        throw new Error('Failed to parse content types XML');
+      }
+    } catch (parseError) {
+      console.error('Error parsing content types XML:', parseError);
+      console.error('XML content:', contentTypesXml.substring(0, 200) + '...');
+      return; // 解析失败时提前返回，避免使用未定义的变量
+    }
+    
+    // 确保Types节点存在
+    if (!contentTypesObj.Types) {
+      console.error('Invalid content types structure: missing Types node');
+      console.error('Content types object:', JSON.stringify(contentTypesObj, null, 2).substring(0, 500) + '...');
+      return;
+    }
+    
+    // 处理Override节点
+    if (!contentTypesObj.Types.Override) {
+      console.warn('No Override nodes found in content types');
+      return;
+    }
+    
+    const overrides = Array.isArray(contentTypesObj.Types.Override)
+      ? contentTypesObj.Types.Override
+      : [contentTypesObj.Types.Override];
+    
+    console.log(`Found ${overrides.length} content type overrides`);
+    
+    // 过滤出存在的文件的覆盖
+    const filteredOverrides = overrides.filter(override => {
+      try {
+        if (!override) {
+          console.warn('Invalid override: undefined or null');
+          return false;
+        }
+        
+        // 尝试多种方式获取PartName属性
+        const partName = override['@_PartName'] || 
+                         override.PartName || 
+                         (override.$ && override.$['PartName']);
+        
+        if (!partName) {
+          console.warn('Override missing PartName attribute:', JSON.stringify(override).substring(0, 100));
+          return false;
+        }
+        
+        const filePath = partName.replace(/^\//, '');
+        const exists = zip.file(filePath) !== null;
+        
+        if (!exists) {
+          console.log(`Removing content type for deleted file: ${filePath}`);
+        }
+        
+        return exists;
+      } catch (err) {
+        console.error('Error processing override:', err);
+        return false;
+      }
+    });
+    
+    // 如果有覆盖被移除
+    if (filteredOverrides.length < overrides.length) {
+      // 更新覆盖
+      contentTypesObj.Types.Override = filteredOverrides;
+      
+      // 更新内容类型文件
+      try {
+        const updatedContentTypesXml = buildXml(contentTypesObj);
+        zip.file('[Content_Types].xml', updatedContentTypesXml);
+        console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
+      } catch (buildError) {
+        console.error('Error building updated content types XML:', buildError);
+      }
+    } else {
+      console.log('No content type references needed to be removed');
+    }
+  } catch (error) {
+    console.error('Error updating content types:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    // 不抛出异常，让流程继续
+  }
 }
