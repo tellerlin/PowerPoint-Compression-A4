@@ -73,6 +73,7 @@ function simpleHash(data) {
   return hash.toString(16);
 }
 
+// 在 optimizePPTX 函数中
 async function optimizePPTX(file, options = {}) {
   try {
     validateFile(file);
@@ -80,13 +81,35 @@ async function optimizePPTX(file, options = {}) {
     const { onProgress = () => {} } = options;
     const startTime = Date.now();
     
+    // 安全检查硬件并发能力 - 只在这里声明一次
+    const hasHardwareConcurrency = typeof navigator !== 'undefined' && 
+                                  'hardwareConcurrency' in navigator && 
+                                  typeof navigator.hardwareConcurrency === 'number';
+    
+    const cpuCount = hasHardwareConcurrency ? navigator.hardwareConcurrency : 4;
+    
     // Send initial file info
     onProgress('fileInfo', {
       name: file.name,
       size: file.size
     });
     
-    const zip = await JSZip.loadAsync(file);
+    let zip;
+    try {
+      zip = await JSZip.loadAsync(file);
+    } catch (zipError) {
+      // Specific handling for ZIP loading errors
+      console.error('ZIP loading error:', zipError);
+      const errorMessage = zipError.message.includes('invalid') 
+        ? 'Invalid or corrupted file format. Please ensure you upload a valid PowerPoint file.' 
+        : `Failed to load file: ${zipError.message}`;
+      
+      onProgress('error', { 
+        message: errorMessage,
+        details: zipError.message
+      });
+      throw new Error(errorMessage);
+    }
     
     // 添加清理未使用资源的功能
     if (options.cleanUnusedResources) {
@@ -141,7 +164,12 @@ async function optimizePPTX(file, options = {}) {
     
     // 将顺序处理改为批处理
     // 动态调整批量大小，基于CPU核心数
-    const batchSize = Math.min(mediaFiles.length, Math.max(4, navigator.hardwareConcurrency || 4));
+    // 删除这里的重复声明，使用上面已经声明的变量
+    
+    const batchSize = Math.min(
+      mediaFiles.length,
+      Math.max(4, cpuCount)
+    );
     
     // 使用更高效的并行处理方式
     for (let i = 0; i < mediaFiles.length; i += batchSize) {
@@ -256,7 +284,26 @@ async function optimizePPTX(file, options = {}) {
     return compressedBlob;
     
   } catch (error) {
-    console.error('优化失败:', error);
+    console.error('Optimization error:', error);
+    
+    // 提供更友好的错误信息
+    let userFriendlyMessage = '处理文件时发生错误';
+    
+    if (error.message.includes('file size')) {
+      userFriendlyMessage = '文件过大，请尝试分割为多个较小的文件';
+    } else if (error.message.includes('memory')) {
+      userFriendlyMessage = '浏览器内存不足，请关闭其他标签页后重试';
+    } else if (error.message.includes('format')) {
+      userFriendlyMessage = '文件格式不支持，请确保上传有效的 PowerPoint 文件';
+    }
+    
+    if (typeof onProgress === 'function') {
+      onProgress('error', { 
+        message: userFriendlyMessage,
+        details: error.message
+      });
+    }
+    
     throw error;
   }
 }

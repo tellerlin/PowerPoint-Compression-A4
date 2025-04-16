@@ -5,7 +5,7 @@ import { XMLParser, XMLBuilder } from 'fast-xml-parser';
  * @param {string} xmlContent - XML string to parse
  * @returns {Object} - Parsed JavaScript object
  */
-export function parseXml(xmlContent) {
+export function parseXmlSync(xmlContent) {
   try {
     const options = {
       ignoreAttributes: false,
@@ -27,6 +27,9 @@ export function parseXml(xmlContent) {
   }
 }
 
+// For backward compatibility
+export const parseXml = parseXmlSync;
+
 /**
  * Parse XML content with namespaces
  * @param {string} xmlContent - XML string to parse
@@ -36,8 +39,8 @@ export function parseXml(xmlContent) {
 
 export async function parseXmlWithNamespaces(xmlString) {
   try {
-    // Original parsing logic
-    const result = await parseXml(xmlString);
+    // Use the sync version for consistency
+    const result = parseXmlSync(xmlString);
     return result;
   } catch (error) {
     console.error('XML parsing error:', error);
@@ -50,8 +53,8 @@ export async function parseXmlWithNamespaces(xmlString) {
       // 2. Fix invalid characters
       const sanitizedXml = sanitizeXmlString(fixedXml);
       
-      // Try parsing again
-      return await parseXml(sanitizedXml);
+      // Try parsing again with the sync version
+      return parseXmlSync(sanitizedXml);
     } catch (secondError) {
       console.error('XML parsing still failed after fixes:', secondError);
       // Return a minimal usable object to avoid null reference errors
@@ -99,15 +102,15 @@ function sanitizeXmlString(xmlString) {
 }
 
 // Enhanced parseXml function with safety checks
-export function parseXmlSafely(xmlString) {
+function parseXmlSafely(xmlString) {
   if (!xmlString || typeof xmlString !== 'string') {
     console.warn('Attempted to parse invalid XML content:', xmlString);
     return { _invalid: true };
   }
   
   try {
-    // Use the original parseXml function
-    return parseXml(xmlString);
+    // Use the sync version
+    return parseXmlSync(xmlString);
   } catch (error) {
     console.error('XML parsing error:', error);
     return { _parseFailed: true, _error: error.message };
@@ -178,5 +181,31 @@ export async function parseXmlWithNamespacesFromZip(zip, path) {
   } catch (error) {
     console.error('Error parsing XML:', error);
     throw error;
+  }
+}
+
+// Rename the async version to avoid conflict
+export async function parseXmlAsync(xmlString) {
+  try {
+    // Try to fix unclosed tags
+    const fixedXml = fixUnclosedTags(xmlString);
+    const result = await xml2js.parseStringPromise(fixedXml, {
+      explicitArray: false,
+      normalizeTags: false
+    });
+    return result;
+  } catch (error) {
+    console.error('XML parsing error:', error.message);
+    // Add more detailed error information
+    const errorInfo = {
+      message: error.message,
+      xmlPreview: xmlString.length > 100 ? xmlString.substring(0, 100) + '...' : xmlString,
+      errorPosition: error.line ? `Line ${error.line}, Column ${error.column}` : 'Unknown position'
+    };
+    
+    // Throw enhanced error object
+    const enhancedError = new Error(`XML parsing failed: ${error.message}`);
+    enhancedError.details = errorInfo;
+    throw enhancedError;
   }
 }

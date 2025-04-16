@@ -3,8 +3,12 @@
 export class CacheManager {
   constructor(options = {}) {
     this.caches = {};
-    // Only use navigator.deviceMemory if running in browser
-    if (typeof navigator !== 'undefined' && navigator.deviceMemory) {
+    // Enhanced browser compatibility check for deviceMemory
+    const hasDeviceMemory = typeof navigator !== 'undefined' && 
+                           'deviceMemory' in navigator && 
+                           typeof navigator.deviceMemory === 'number';
+    
+    if (hasDeviceMemory) {
       this.maxSize = Math.max(50 * 1024 * 1024, Math.floor(navigator.deviceMemory * 0.2 * 1024 * 1024 * 1024));
     } else {
       this.maxSize = options.maxSize || 100 * 1024 * 1024;

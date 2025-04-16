@@ -43,15 +43,25 @@ export class ProgressManager {
   }
 
   savePhases() {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('progress_phases', JSON.stringify(this.phases));
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('progress_phases', JSON.stringify(this.phases));
+      }
+    } catch (error) {
+      // 处理隐私模式或存储已满的情况
+      console.warn('Failed to save progress phases:', error);
     }
   }
 
   loadPhases() {
-    if (typeof localStorage !== 'undefined') {
-      const data = localStorage.getItem('progress_phases');
-      if (data) return JSON.parse(data);
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const data = localStorage.getItem('progress_phases');
+        if (data) return JSON.parse(data);
+      }
+    } catch (error) {
+      // 处理数据损坏或其他异常
+      console.warn('Failed to load progress phases:', error);
     }
     return null;
   }

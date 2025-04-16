@@ -2,10 +2,10 @@
   import { optimizePPTX } from '$lib/pptx/optimizer';
   import { ProgressManager, compressionProgress } from '$lib/pptx/progress';
   import { createDownloadLink, cleanupDownload } from '$lib/utils/file';
-  // 恢复原来的导入方式，避免导入错误
   import { Button } from '$lib/components/ui/Button';
   import { Alert } from '$lib/components/ui/Alert';
   import { Container } from '$lib/components/ui';
+  import { browser } from '$app/environment';
   
   let files;
   let processing = false;
@@ -14,47 +14,43 @@
   let downloadUrl = null;
   let downloadLink = null;
 
-  function formatFileSize(bytes) {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  }
-
-  // Add a file change listener
-  $: if (files) {
-    console.log('Files changed:', files);
-  }
-  
-  $: fileName = files?.[0]?.name;
-  $: fileInfo = $compressionProgress.fileInfo;
-  // Remove this line to fix the redeclaration issue
-  // $: compressionStats = $compressionProgress.stats;
-  $: compressionComplete = $compressionProgress.percentage === 100;
-
-  // 在 script 标签内添加格式化函数
+  // Unified bytes formatting function
   function formatBytes(bytes, decimals = 2) {
     if (bytes === 0 || bytes === undefined) return '0 Bytes';
-    
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    
+    // Add safety check for negative or NaN values
+    if (bytes < 0 || isNaN(bytes)) return '0 Bytes';
     
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
+
+  // Add a file change listener with error handling
+  $: if (files) {
+    try {
+      console.log('Files changed:', files);
+    } catch (error) {
+      console.error('Error processing files:', error);
+    }
+  }
+
+  $: fileName = files?.[0]?.name;
+  $: fileInfo = $compressionProgress.fileInfo;
+  $: compressionComplete = $compressionProgress.percentage === 100;
   
   // Keep only this declaration with the enhanced formatting logic
   $: compressionStats = {
-    originalSize: $compressionProgress.stats.originalSize,
-    compressedSize: $compressionProgress.stats.compressedSize,
-    savedSize: $compressionProgress.stats.savedSize,
-    savedPercentage: $compressionProgress.stats.savedPercentage,
-    formattedOriginalSize: formatBytes($compressionProgress.stats.originalSize),
-    formattedCompressedSize: formatBytes($compressionProgress.stats.compressedSize),
-    formattedSavedSize: formatBytes($compressionProgress.stats.savedSize)
+    originalSize: $compressionProgress.stats.originalSize || 0,
+    compressedSize: $compressionProgress.stats.compressedSize || 0,
+    savedSize: $compressionProgress.stats.savedSize || 0,
+    savedPercentage: $compressionProgress.stats.savedPercentage || 0,
+    formattedOriginalSize: formatBytes($compressionProgress.stats.originalSize || 0),
+    formattedCompressedSize: formatBytes($compressionProgress.stats.compressedSize || 0),
+    formattedSavedSize: formatBytes($compressionProgress.stats.savedSize || 0)
   };
 
   async function handleSubmit() {
@@ -134,8 +130,25 @@
     }
   }
 
+  // Add browser environment check
   function handleDownload() {
-    if (downloadLink) {
+    if (typeof window === 'undefined' || !downloadLink || !downloadUrl) return;
+    
+    // Detect Safari browser
+    const isSafari = typeof navigator !== 'undefined' && 
+                    /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    if (isSafari) {
+      // Special handling for Safari
+      try {
+        window.open(downloadUrl, '_blank');
+      } catch (error) {
+        console.error('Safari download failed:', error);
+        // Fallback: direct link click
+        downloadLink.click();
+      }
+    } else {
+      // Normal handling for other browsers
       downloadLink.click();
     }
   }
@@ -163,11 +176,17 @@
       }
     });
     
-    // 添加这一行，自动触发文件选择对话框
-    setTimeout(() => document.getElementById('file-upload').click(), 100);
+    // 修改为仅在浏览器环境执行
+    if (browser) {
+      setTimeout(() => {
+        const fileUpload = document.getElementById('file-upload');
+        if (fileUpload) fileUpload.click();
+      }, 100);
+    }
   }
 </script>
 
+<!-- In the template section, update formatFileSize to formatBytes -->
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
     <h1 class="text-3xl font-bold mb-2 text-gray-100">PowerPoint Compression Tool</h1>
@@ -197,7 +216,7 @@
       {#if files && files.length > 0}
         <div class="mt-4 p-4 bg-gray-700 rounded-md text-gray-200">
           <p class="font-medium">Selected file:</p>
-          <p>{files[0].name} ({formatFileSize(files[0].size)})</p>
+          <p>{files[0].name} ({formatBytes(files[0].size)})</p>
         </div>
         
         <div class="mt-4 flex justify-center">

@@ -406,10 +406,83 @@ export async function updateContentTypes(zip) {
       return;
     }
     
-    const contentTypesObj = await parseXml(contentTypesXml);
-    if (!contentTypesObj?.Types?.Override) {
-      console.warn('Invalid content types structure');
-      return;
+    // 添加安全的 XML 解析函数
+    async function parseXmlSafely(xmlString) {
+      try {
+        return await parseXml(xmlString);
+      } catch (error) {
+        console.error('XML parsing error:', error.message);
+        // 返回空对象而不是抛出错误
+        return { Types: { Override: [] } };
+      }
+    }
+    
+    // 在 updateContentTypes 函数中使用安全解析
+    async function updateContentTypes(zip) {
+      try {
+        console.log('Updating content types...');
+        const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
+        if (!contentTypesXml) {
+          console.warn('No content types file found');
+          return;
+        }
+        
+        // 使用安全解析
+        const contentTypesObj = await parseXmlSafely(contentTypesXml);
+        if (!contentTypesObj?.Types?.Override) {
+          console.warn('Invalid content types structure');
+          return;
+        }
+        
+        const overrides = Array.isArray(contentTypesObj.Types.Override)
+          ? contentTypesObj.Types.Override
+          : [contentTypesObj.Types.Override];
+        
+        console.log(`Found ${overrides.length} content type overrides`);
+        
+        // 过滤出存在的文件的覆盖
+        const filteredOverrides = overrides.filter(override => {
+          // 检查override对象是否有效
+          if (!override || typeof override !== 'object') {
+            console.log('Invalid override object:', override);
+            return false;
+          }
+          
+          // 尝试多种方式获取PartName属性
+          let partName = override.PartName || 
+                        override['@_PartName'] || 
+                        (override.$ && override.$['PartName']) || 
+                        (override._attributes && override._attributes['PartName']);
+          
+          // 检查PartName属性是否存在
+          if (!partName || typeof partName !== 'string') {
+            console.log('Override missing PartName attribute:', override);
+            return false; // 不再保留无法确定路径的覆盖
+          }
+          
+          const path = partName.replace(/^\//, '');
+          const exists = zip.file(path) !== null;
+          if (!exists) console.log(`Removing content type for deleted file: ${path}`);
+          return exists;
+        });
+        
+        // 如果有覆盖被移除
+        if (filteredOverrides.length < overrides.length) {
+          // 更新覆盖
+          contentTypesObj.Types.Override = filteredOverrides;
+          
+          // 更新内容类型文件
+          const updatedContentTypesXml = buildXml(contentTypesObj);
+          zip.file('[Content_Types].xml', updatedContentTypesXml);
+          
+          console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
+        } else {
+          console.log('No content type references needed to be removed');
+        }
+      } catch (error) {
+        console.error('Error updating content types:', error);
+        // 不要抛出错误，让流程继续
+      }
     }
     
     const overrides = Array.isArray(contentTypesObj.Types.Override)
