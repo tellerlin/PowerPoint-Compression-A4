@@ -210,8 +210,8 @@ async function optimizePPTX(file, options = {}) {
       });
     }
     
-    const savedSize = totalOriginalSize - totalCompressedSize;
-    const savedPercentage = totalOriginalSize > 0 ? (savedSize / totalOriginalSize * 100).toFixed(1) : 0;
+    const savedMediaSize = totalOriginalSize - totalCompressedSize;
+    const savedMediaPercentage = totalOriginalSize > 0 ? (savedMediaSize / totalOriginalSize * 100).toFixed(1) : 0;
     
     onProgress('finalize', { 
       status: `Rebuilding presentation...`,
@@ -220,8 +220,8 @@ async function optimizePPTX(file, options = {}) {
         compressedSize: null, // Will be updated after zip generation
         originalMediaSize: totalOriginalSize,
         compressedMediaSize: totalCompressedSize,
-        savedMediaSize: savedSize,
-        savedMediaPercentage: savedPercentage
+        savedMediaSize: savedMediaSize,
+        savedMediaPercentage: savedMediaPercentage
       }
     });
     
@@ -243,13 +243,15 @@ async function optimizePPTX(file, options = {}) {
       savedPercentage: ((file.size - compressedBlob.size) / file.size * 100).toFixed(1),
       originalMediaSize: totalOriginalSize,
       compressedMediaSize: totalCompressedSize,
-      savedMediaSize: savedSize,
-      savedMediaPercentage: savedPercentage,
+      savedMediaSize: savedMediaSize,
+      savedMediaPercentage: savedMediaPercentage,
       processingTime: (Date.now() - startTime) / 1000 // 处理总时间（秒）
     };
     
     // Report completion with final stats
-    onProgress('complete', { stats: finalStats });
+    onProgress('complete', {
+      stats: finalStats
+    });
     
     return compressedBlob;
     

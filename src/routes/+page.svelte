@@ -29,8 +29,33 @@
   
   $: fileName = files?.[0]?.name;
   $: fileInfo = $compressionProgress.fileInfo;
-  $: compressionStats = $compressionProgress.stats;
+  // Remove this line to fix the redeclaration issue
+  // $: compressionStats = $compressionProgress.stats;
   $: compressionComplete = $compressionProgress.percentage === 100;
+
+  // 在 script 标签内添加格式化函数
+  function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0 || bytes === undefined) return '0 Bytes';
+    
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  }
+  
+  // Keep only this declaration with the enhanced formatting logic
+  $: compressionStats = {
+    originalSize: $compressionProgress.stats.originalSize,
+    compressedSize: $compressionProgress.stats.compressedSize,
+    savedSize: $compressionProgress.stats.savedSize,
+    savedPercentage: $compressionProgress.stats.savedPercentage,
+    formattedOriginalSize: formatBytes($compressionProgress.stats.originalSize),
+    formattedCompressedSize: formatBytes($compressionProgress.stats.compressedSize),
+    formattedSavedSize: formatBytes($compressionProgress.stats.savedSize)
+  };
 
   async function handleSubmit() {
     const file = files?.[0];
@@ -66,13 +91,29 @@
               progressManager.initializeCompression(detail.count);
               break;
             case 'media':
-              progressManager.updateMediaProgress(detail.fileIndex, detail.totalFiles);
+              // 计算处理进度百分比
+              const percentage = detail.totalFiles > 0 
+                ? Math.round((detail.fileIndex / detail.totalFiles) * 100) 
+                : 0;
+              
+              // 更新已处理文件数
+              progressManager.processedFiles = detail.fileIndex;
+              
+              // 调用更新进度方法
+              progressManager.updateMediaProgress(percentage);
               break;
             case 'finalize':
               progressManager.updateFinalizationProgress(detail.status, detail.stats);
               break;
             case 'complete':
-              progressManager.completeCompression(detail.stats);
+              // 确保 detail.stats 包含所有必要字段
+              const completeStats = {
+                ...detail.stats,
+                originalSize: file.size, // 使用原始文件大小
+                compressedSize: detail.stats.compressedSize || (file.size * (1 - detail.stats.savedPercentage / 100)),
+                savedSize: detail.stats.savedSize || (file.size * detail.stats.savedPercentage / 100)
+              };
+              progressManager.completeCompression(completeStats);
               break;
           }
         }

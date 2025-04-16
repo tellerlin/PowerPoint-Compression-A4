@@ -3,56 +3,50 @@
 export class CacheManager {
   constructor(options = {}) {
     this.caches = {};
-    this.maxSize = options.maxSize || 100 * 1024 * 1024; // 默认100MB
+    // Only use navigator.deviceMemory if running in browser
+    if (typeof navigator !== 'undefined' && navigator.deviceMemory) {
+      this.maxSize = Math.max(50 * 1024 * 1024, Math.floor(navigator.deviceMemory * 0.2 * 1024 * 1024 * 1024));
+    } else {
+      this.maxSize = options.maxSize || 100 * 1024 * 1024;
+    }
     this.currentSize = 0;
     this.hits = 0;
     this.misses = 0;
   }
   
-  // 创建或获取指定名称的缓存
-  getCache(name) {
-    if (!this.caches[name]) {
-      this.caches[name] = new Map();
+  getCache(name, subspace = '') {
+    const fullName = subspace ? `${name}:${subspace}` : name;
+    if (!this.caches[fullName]) {
+      this.caches[fullName] = new Map();
     }
-    return this.caches[name];
+    return this.caches[fullName];
   }
   
-  // 设置缓存项
-  set(cacheName, key, value, size) {
-    const cache = this.getCache(cacheName);
-    
-    // 如果已存在相同键，先移除旧值
+  set(cacheName, key, value, size, subspace = '') {
+    const cache = this.getCache(cacheName, subspace);
     if (cache.has(key)) {
       const oldItem = cache.get(key);
       this.currentSize -= oldItem.size;
       cache.delete(key);
     }
-    
-    // 检查缓存大小限制
-    if (this.currentSize + size > this.maxSize) {
+    // Evict until enough space
+    while (this.currentSize + size > this.maxSize) {
       this.evictOldest();
     }
-    
-    // 添加新项
     const timestamp = Date.now();
     cache.set(key, { value, size, timestamp });
     this.currentSize += size;
-    
     return value;
   }
   
-  // 获取缓存项
-  get(cacheName, key) {
-    const cache = this.getCache(cacheName);
+  get(cacheName, key, subspace = '') {
+    const cache = this.getCache(cacheName, subspace);
     const item = cache.get(key);
-    
     if (item) {
-      // 更新访问时间
       item.timestamp = Date.now();
       this.hits++;
       return item.value;
     }
-    
     this.misses++;
     return null;
   }
@@ -118,10 +112,10 @@ export const globalCache = new CacheManager();
 
 // 图像缓存现在使用全局缓存管理器
 export const imageCache = {
-  get(key) {
-    return globalCache.get('images', key);
+  get(key, type = 'default') {
+    return globalCache.get('images', key, type);
   },
-  set(key, value) {
-    return globalCache.set('images', key, value, value.data.byteLength);
+  set(key, value, type = 'default') {
+    return globalCache.set('images', key, value, value.data.byteLength, type);
   }
 };

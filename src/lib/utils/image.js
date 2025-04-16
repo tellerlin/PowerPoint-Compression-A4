@@ -322,3 +322,40 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     };
   }
 }
+
+
+function createCanvas(width, height) {
+  if (typeof OffscreenCanvas !== 'undefined') {
+    try {
+      return new OffscreenCanvas(width, height);
+    } catch (e) {
+      // fallback
+    }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+async function blobToArrayBuffer(blob) {
+  if (blob.stream) {
+    // Stream API for large blobs
+    const reader = blob.stream().getReader();
+    const chunks = [];
+    let done, value;
+    while ({ done, value } = await reader.read(), !done) {
+      chunks.push(value);
+    }
+    let length = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    let result = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      result.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return result.buffer;
+  } else {
+    return await blob.arrayBuffer();
+  }
+}
