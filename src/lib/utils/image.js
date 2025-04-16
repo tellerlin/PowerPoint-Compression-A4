@@ -76,39 +76,23 @@ function analyzeImage(imageData) {
 }
 
 function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, maxHeight = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, imageType = ImageType.UNKNOWN) {
-  // 根据图片内容类型动态调整最大尺寸
-  let adjustedMaxWidth = maxWidth;
-  let adjustedMaxHeight = maxHeight;
+  // 找出最短边和最长边
+  const shortestSide = Math.min(originalWidth, originalHeight);
+  const longestSide = Math.max(originalWidth, originalHeight);
   
-  if (imageType === ImageType.DIAGRAM) {
-    // 图表类型使用更大的尺寸以保持清晰度
-    adjustedMaxWidth = Math.min(maxWidth, 1600); // 从1200提高到1600
-    adjustedMaxHeight = Math.min(maxHeight, 1600); // 从1200提高到1600
-  } else if (imageType === ImageType.ICON) {
-    // 图标类型也适当提高尺寸
-    adjustedMaxWidth = Math.min(maxWidth, 384); // 从256提高到384
-    adjustedMaxHeight = Math.min(maxHeight, 384); // 从256提高到384
-  } else if (imageType === ImageType.PHOTO) {
-    // 对于照片，保留更多细节
-    adjustedMaxWidth = Math.min(maxWidth, 2000); // 新增照片类型的专门处理
-    adjustedMaxHeight = Math.min(maxHeight, 2000);
-  }
-  
-  // 如果图像已经足够小，保持原始尺寸
-  if (originalWidth <= adjustedMaxWidth && originalHeight <= adjustedMaxHeight) {
+  // 如果最短边已经小于等于MAX_IMAGE_SIZE，保持原始尺寸
+  if (shortestSide <= COMPRESSION_SETTINGS.MAX_IMAGE_SIZE) {
     return { width: originalWidth, height: originalHeight };
   }
   
-  let width = originalWidth, height = originalHeight;
-  if (width > adjustedMaxWidth) { 
-    height = Math.round((height * adjustedMaxWidth) / width); 
-    width = adjustedMaxWidth; 
-  }
-  if (height > adjustedMaxHeight) { 
-    width = Math.round((width * adjustedMaxHeight) / height); 
-    height = adjustedMaxHeight; 
-  }
-  return { width, height };
+  // 计算缩放比例（基于最短边）
+  const scale = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE / shortestSide;
+  
+  // 等比例调整尺寸
+  return {
+    width: Math.round(originalWidth * scale),
+    height: Math.round(originalHeight * scale)
+  };
 }
 
 async function resizeImage(bitmap, targetWidth, targetHeight) {
@@ -133,229 +117,208 @@ async function detectFormat(data) {
   }
 }
 
-// Replace the Squoosh compression function with a browser-native approach
-async function compressWithAdvancedTechniques(canvas, options = {}) {
-  const { quality, imageType, hasAlpha } = options;
-  
-  // Create results array to store all compression attempts
-  const results = [];
-  
-  // Try different formats with optimized settings
-  try {
-    // For images with transparency, prioritize WebP
-    if (hasAlpha) {
-      const webpBlob = await canvas.convertToBlob({ 
-        type: 'image/webp', 
-        quality: Math.min(0.99, quality + 0.1)
-      });
-      const webpBuffer = await webpBlob.arrayBuffer();
-      results.push({
-        data: new Uint8Array(webpBuffer),
-        format: 'webp',
-        size: webpBuffer.byteLength
-      });
-      
-      // Also try PNG for transparent images
-      const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-      const pngBuffer = await pngBlob.arrayBuffer();
-      results.push({
-        data: new Uint8Array(pngBuffer),
-        format: 'png',
-        size: pngBuffer.byteLength
-      });
-    } else {
-      // For non-transparent images, try all formats
-      
-      // Try WebP with high effort compression
-      const webpBlob = await canvas.convertToBlob({ 
-        type: 'image/webp', 
-        quality: quality
-      });
-      const webpBuffer = await webpBlob.arrayBuffer();
-      results.push({
-        data: new Uint8Array(webpBuffer),
-        format: 'webp',
-        size: webpBuffer.byteLength
-      });
-      
-      // Try JPEG with progressive option for diagrams and photos
-      if (imageType !== ImageType.ICON) {
-        // Use higher quality for diagrams
-        const jpegQuality = imageType === ImageType.DIAGRAM ? 
-          Math.min(0.99, quality + 0.15) : quality;
-          
-        const jpegBlob = await canvas.convertToBlob({ 
-          type: 'image/jpeg', 
-          quality: jpegQuality 
-        });
-        const jpegBuffer = await jpegBlob.arrayBuffer();
-        results.push({
-          data: new Uint8Array(jpegBuffer),
-          format: 'jpeg',
-          size: jpegBuffer.byteLength
-        });
-      }
-      
-      // Always try PNG, especially important for diagrams and icons
-      const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-      const pngBuffer = await pngBlob.arrayBuffer();
-      results.push({
-        data: new Uint8Array(pngBuffer),
-        format: 'png',
-        size: pngBuffer.byteLength
-      });
-    }
-    
-    // Find the smallest result
-    let bestResult = results[0];
-    for (let i = 1; i < results.length; i++) {
-      if (results[i].size < bestResult.size) {
-        bestResult = results[i];
-      }
-    }
-    
-    return bestResult;
-    
-  } catch (error) {
-    console.error('Advanced compression failed:', error);
-    return null;
-  }
-}
-
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
+  // 参数校验
+  if (!(data instanceof Uint8Array)) {
+    throw new TypeError('compressImage: data must be a Uint8Array');
+  }
+  if (typeof quality !== 'number' || quality < 0 || quality > 1) {
+    throw new RangeError('compressImage: quality must be a number between 0 and 1');
+  }
+
   try {
-    // Use cache as before
     const cacheKey = `${data.byteLength}-${quality}-${hashCode(data)}`;
-    if (imageCache.get(cacheKey)) {
-      return imageCache.get(cacheKey);
+    let cached;
+    try {
+      cached = imageCache.get(cacheKey);
+    } catch (e) {
+      console.error('[ImageCompress] Cache get failed:', e);
+      cached = null;
     }
-
-    validateImageData(data);
-    const blob = new Blob([data]);
-
-    if (quality < 0 || quality > 1) {
-      console.warn('Invalid quality value, using default quality');
-      quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY;
+    if (cached) {
+      console.log(`[ImageCompress] Cache hit for key: ${cacheKey}`);
+      return cached;
     }
 
     try {
-      const bitmap = await createImageBitmap(blob);
-      const originalSize = data.byteLength;
-      const originalFormat = await detectFormat(data);
-      
-      // Create temporary canvas for analysis
-      const tempCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const tempCtx = tempCanvas.getContext('2d');
+      validateImageData(data);
+    } catch (e) {
+      console.error('[ImageCompress] Image data validation failed:', e);
+      throw e;
+    }
+
+    let blob;
+    try {
+      blob = new Blob([data]);
+    } catch (e) {
+      console.error('[ImageCompress] Failed to create Blob:', e);
+      throw e;
+    }
+
+    let bitmap;
+    try {
+      bitmap = await createImageBitmap(blob);
+      if (!bitmap) throw new Error('Bitmap is null');
+    } catch (e) {
+      console.error('[ImageCompress] Failed to create image bitmap:', e);
+      throw new Error('Invalid image data');
+    }
+
+    const originalSize = data.byteLength;
+    let originalFormat = 'unknown';
+    try {
+      originalFormat = await detectFormat(data);
+    } catch (e) {
+      console.warn('[ImageCompress] Format detection failed:', e);
+    }
+    const originalWidth = bitmap.width;
+    const originalHeight = bitmap.height;
+
+    if (originalSize < 20 * 1024) {
+      console.log(`[ImageCompress] ${originalFormat || 'original'} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (no resize)`);
+      return {
+        data,
+        format: originalFormat || 'original',
+        compressionMethod: 'original',
+        originalDimensions: { width: originalWidth, height: originalHeight },
+        finalDimensions: { width: originalWidth, height: originalHeight }
+      };
+    }
+
+    let tempCanvas, tempCtx, imageData;
+    try {
+      tempCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) throw new Error('Failed to get 2d context');
       tempCtx.drawImage(bitmap, 0, 0);
-      const imageData = tempCtx.getImageData(0, 0, bitmap.width, bitmap.height);
-      
-      // Analyze image type
-      const imageType = analyzeImageType(imageData);
-      
-      // Calculate optimal dimensions
-      const { width, height } = calculateOptimalDimensions(
-        bitmap.width, bitmap.height, 
-        COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, 
+      imageData = tempCtx.getImageData(0, 0, bitmap.width, bitmap.height);
+    } catch (e) {
+      console.error('[ImageCompress] Failed to analyze image:', e);
+      throw e;
+    }
+
+    let imageType, analysis;
+    try {
+      imageType = analyzeImageType(imageData);
+      analysis = analyzeImage(imageData);
+    } catch (e) {
+      console.error('[ImageCompress] Image analysis failed:', e);
+      imageType = 'unknown';
+      analysis = { hasAlpha: false, isAnimated: false };
+    }
+
+    let targetQuality = quality;
+    if (imageType === 'diagram' || imageType === 'icon') {
+      targetQuality = Math.min(quality, 0.75);
+    }
+
+    let width, height;
+    try {
+      ({ width, height } = calculateOptimalDimensions(
+        bitmap.width, bitmap.height,
+        COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
         COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
         imageType
-      );
-      
-      // Skip small images
-      if (width === bitmap.width && height === bitmap.height && originalSize < 400 * 1024) {
-        return { data, format: originalFormat || 'original' };
-      }
-      
-      // Resize image
-      const canvas = await resizeImage(bitmap, width, height);
-      const analysis = analyzeImage(imageData);
-
-      // Adjust quality based on image characteristics
-      let adjustedQuality = quality;
-      if (data.byteLength < 300 * 1024) {
-        adjustedQuality = Math.min(0.99, quality + 0.1);
-      } else if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-        adjustedQuality = Math.min(0.99, quality + 0.15);
-      }
-      
-      // Use our advanced compression technique instead of Squoosh
-      const advancedResult = await compressWithAdvancedTechniques(canvas, {
-        quality: adjustedQuality,
-        imageType: imageType,
-        hasAlpha: analysis.hasAlpha,
-        width,
-        height
-      });
-      
-      // If advanced compression worked and is better than original, use it
-      if (advancedResult && advancedResult.size < originalSize * 0.9) {
-        const result = {
-          data: advancedResult.data,
-          format: advancedResult.format,
-          originalSize,
-          compressedSize: advancedResult.size,
-          compressionRatio: (advancedResult.size / originalSize).toFixed(2),
-          imageType
-        };
-        imageCache.set(cacheKey, result);
-        return result;
-      }
-      
-      // Fall back to original compression logic
-      // 1. 针对不同类型和透明度，尝试多种格式和参数
-      const candidates = [];
-      if (analysis.hasAlpha) {
-        // WebP透明 + PNG
-        candidates.push(await canvas.convertToBlob({ type: 'image/webp', quality: Math.min(0.99, adjustedQuality + 0.1) }));
-        candidates.push(await canvas.convertToBlob({ type: 'image/png' }));
-      } else {
-        // WebP + JPEG + PNG
-        candidates.push(await canvas.convertToBlob({ type: 'image/webp', quality: adjustedQuality }));
-        candidates.push(await canvas.convertToBlob({ type: 'image/jpeg', quality: adjustedQuality }));
-        candidates.push(await canvas.convertToBlob({ type: 'image/png' }));
-      }
-      // 2. 选择体积最小且质量高的
-      let best = { blob: null, size: Infinity };
-      for (const blob of candidates) {
-        if (blob.size < best.size) best = { blob, size: blob.size };
-      }
-      // 选择最小的格式，但如果压缩后大小接近原始大小，则保留原始图片
-      const minSize = Math.min(webpBuffer.byteLength, jpegBuffer.byteLength, pngBuffer.byteLength);
-      
-      if (minSize > originalSize * 0.7) {
-        return { data, format: originalFormat || 'original' };
-      }
-      
-      if (minSize === webpBuffer.byteLength) {
-        compressedBlob = webpBlob;
-      } else if (minSize === jpegBuffer.byteLength) {
-        compressedBlob = jpegBlob;
-      } else {
-        compressedBlob = pngBlob;
-      }
-      // 如果压缩后大小大于原始大小的90%，保留原始图片
-      const compressedSize = compressedBlob.size;
-      if (compressedSize > originalSize * 0.9) {
-        return { data, format: originalFormat || 'original' };
-      }
-
-      // 确保返回Uint8Array而不是Blob
-      const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
-      const result = { 
-        data: compressedData, 
-        format: compressedBlob.type.split('/').pop(),
-        originalSize,
-        compressedSize: compressedData.byteLength,
-        compressionRatio: (compressedData.byteLength / originalSize).toFixed(2),
-        imageType
-      };
-      imageCache.set(cacheKey, result);
-      return result;
-    } catch (error) {
-      console.error('Image processing failed:', error);
-      return { data, format: 'original' }; // 出错时返回原始数据
+      ));
+    } catch (e) {
+      console.error('[ImageCompress] Dimension calculation failed:', e);
+      width = bitmap.width;
+      height = bitmap.height;
     }
+
+    if (width === bitmap.width && height === bitmap.height && originalSize < 100 * 1024) {
+      console.log(`[ImageCompress] ${originalFormat || 'original'} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (no resize)`);
+      return {
+        data,
+        format: originalFormat || 'original',
+        compressionMethod: 'original',
+        originalDimensions: { width: originalWidth, height: originalHeight },
+        finalDimensions: { width: originalWidth, height: originalHeight }
+      };
+    }
+
+    let canvas, ctx;
+    try {
+      canvas = await resizeImage(bitmap, width, height);
+      ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to get 2d context after resize');
+    } catch (e) {
+      console.error('[ImageCompress] Image resize failed:', e);
+      throw e;
+    }
+
+    const blobs = [];
+    try {
+      blobs.push({
+        type: 'webp',
+        blob: await canvas.convertToBlob({ type: 'image/webp', quality: targetQuality })
+      });
+      if (!analysis.hasAlpha) {
+        blobs.push({
+          type: 'jpeg',
+          blob: await canvas.convertToBlob({ type: 'image/jpeg', quality: targetQuality })
+        });
+      }
+      if (imageType === 'diagram' || imageType === 'icon') {
+        blobs.push({
+          type: 'png',
+          blob: await canvas.convertToBlob({ type: 'image/png' })
+        });
+      }
+    } catch (e) {
+      console.error('[ImageCompress] Blob conversion failed:', e);
+      throw e;
+    }
+
+    let best = blobs[0];
+    for (const candidate of blobs) {
+      if (candidate.blob.size < best.blob.size) best = candidate;
+    }
+
+    if (best.blob.size > originalSize * 0.95) {
+      console.log(`[ImageCompress] ${originalFormat || 'original'} -> original | method: original | size: ${originalSize}B -> ${originalSize}B`);
+      return {
+        data,
+        format: originalFormat || 'original',
+        compressionMethod: 'original'
+      };
+    }
+
+    let compressedData;
+    try {
+      compressedData = new Uint8Array(await best.blob.arrayBuffer());
+    } catch (e) {
+      console.error('[ImageCompress] Failed to read compressed blob:', e);
+      throw e;
+    }
+
+    console.log(`[ImageCompress] ${originalFormat || 'original'} -> ${best.type} | method: ${best.type} | quality: ${targetQuality} | size: ${originalSize}B -> ${compressedData.byteLength}B | dimension: ${originalWidth}x${originalHeight} -> ${width}x${height}`);
+
+    const result = {
+      data: compressedData,
+      format: best.type,
+      originalSize,
+      compressedSize: compressedData.byteLength,
+      compressionRatio: (compressedData.byteLength / originalSize).toFixed(2),
+      imageType,
+      compressionMethod: best.type,
+      originalDimensions: { width: originalWidth, height: originalHeight },
+      finalDimensions: { width, height }
+    };
+    try {
+      imageCache.set(cacheKey, result);
+    } catch (e) {
+      console.warn('[ImageCompress] Failed to cache result:', e);
+    }
+    return result;
+
   } catch (error) {
-    console.error('Image compression failed:', error);
-    return { data, format: 'original' }; // 出错时返回原始数据
+    console.error('[ImageCompress] Image compression failed:', error);
+    return {
+      data,
+      format: 'original',
+      compressionMethod: 'original',
+      error: error.message
+    };
   }
 }
