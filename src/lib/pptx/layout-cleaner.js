@@ -1,715 +1,625 @@
-import { parseXmlWithNamespaces, buildXml, parseXml } from './xml/parser';
+// Import parseXml and buildXml, remove parseXmlWithNamespaces
+import { buildXml, parseXml } from './xml/parser.js';
+import { readFileFromMemFS, writeFileToMemFS, deleteFileFromMemFS, fileExistsInMemFS, listFilesFromMemFS } from './zip-fs.js';
+import { PRESENTATION_PATH } from './constants.js';
 
 /**
- * Remove unused layouts and masters from the PPTX file
- * @param {JSZip} zip PPTX ZIP object
+ * Remove unused layouts and masters from the PPTX file using memFS
+ * @param {Object} memFS Memory File System object
  * @param {Function} onProgress Progress callback function
+ * @returns {Promise<Object>} Returns the modified memFS object
  */
-export async function removeUnusedLayouts(zip, onProgress = () => {}) {
+// Modify function signature to accept memFS and return memFS
+export async function removeUnusedLayouts(memFS, onProgress = () => {}) {
   try {
-    console.log('Starting layout cleanup process...');
+    console.log('Starting layout cleanup process using memFS...');
     onProgress('init', { percentage: 20, status: 'Analyzing presentation structure...' });
-    
-    // 1. Get all slides
-    const slides = await getAllSlides(zip);
+
+    // 1. Get all slides using memFS
+    const slides = await getAllSlides(memFS); // Pass memFS
     if (!slides || slides.length === 0) {
       console.warn('No slides found in the presentation');
-      return false;
+      return { memFS, usedLayouts: new Set(), usedMasters: new Set() };
     }
-    
+
     console.log(`Found ${slides.length} slides in the presentation`);
     onProgress('init', { percentage: 30, status: 'Analyzing slide layouts...' });
-    
-    // 2. 并行获取所有使用的布局
-    const layoutPromises = slides.map(slide => getSlideLayout(zip, slide));
+
+    // 2. Get used layouts using memFS
+    const layoutPromises = slides.map(slide => getSlideLayout(memFS, slide)); // Pass memFS
     const layoutResults = await Promise.all(layoutPromises);
-    
+
     const usedLayouts = new Set();
     layoutResults.forEach((layoutInfo, index) => {
       if (layoutInfo) {
         usedLayouts.add(layoutInfo.path);
-        console.log(`Slide ${slides[index].id} uses layout: ${layoutInfo.path}`);
+        // console.log(`Slide ${slides[index].id} uses layout: ${layoutInfo.path}`); // Keep logging if needed
+      } else {
+        console.warn(`Could not determine layout for slide: ${slides[index].path}`);
       }
     });
-    
-    console.log(`Found ${usedLayouts.size} used layouts`);
-    
-    // 3. 并行获取所有使用的母版
-    const masterPromises = Array.from(usedLayouts).map(layoutPath => getLayoutMaster(zip, layoutPath));
+    console.log(`Found ${usedLayouts.size} unique used layouts`);
+
+    // 3. Get used masters using memFS
+    const masterPromises = Array.from(usedLayouts).map(layoutPath => getLayoutMaster(memFS, layoutPath)); // Pass memFS
     const masterResults = await Promise.all(masterPromises);
-    
+
     const usedMasters = new Set();
-    masterResults.forEach((masterInfo, index) => {
+    masterResults.forEach(masterInfo => {
       if (masterInfo) {
         usedMasters.add(masterInfo.path);
-        const layoutPath = Array.from(usedLayouts)[index];
-        console.log(`Layout ${layoutPath} uses master: ${masterInfo.path}`);
       }
     });
-    
-    console.log(`Found ${usedMasters.size} used masters`);
-    
-    // 4. 获取所有布局和母版文件
-    const allLayoutFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/slideLayouts/') && !path.includes('_rels'));
-    
-    const allMasterFiles = Object.keys(zip.files)
-      .filter(path => path.startsWith('ppt/slideMasters/') && !path.includes('_rels'));
-    
-    // 调试输出所有布局文件和已使用的布局文件
-    console.log('All layout files:', allLayoutFiles);
-    console.log('Used layout paths:', Array.from(usedLayouts));
-    
-    console.log(`Total layouts: ${allLayoutFiles.length}, Total masters: ${allMasterFiles.length}`);
-    
+    console.log(`Found ${usedMasters.size} unique used masters`);
+
+    // 4. Get all layout and master files using memFS
+    const allLayoutFiles = listFilesFromMemFS(memFS, 'ppt/slideLayouts/')
+        .filter(path => !path.includes('_rels') && path.endsWith('.xml')); // Ensure XML files
+
+    const allMasterFiles = listFilesFromMemFS(memFS, 'ppt/slideMasters/')
+        .filter(path => !path.includes('_rels') && path.endsWith('.xml')); // Ensure XML files
+
+    // ... (logging remains similar) ...
+
     onProgress('init', { percentage: 60, status: 'Removing unused layouts...' });
-    
-    // 我们只保留幻灯片直接使用的布局，不再将母版引用的布局添加到保留列表中
-    // 这样可以删除更多未使用的布局，提高清理效率
-    console.log('直接使用的布局:', Array.from(usedLayouts));
-    
-    // 删除未使用的布局（只保留幻灯片直接使用的布局）
+
+    // 5. Remove unused layouts using memFS
     const unusedLayouts = allLayoutFiles.filter(path => !usedLayouts.has(path));
     console.log(`Found ${unusedLayouts.length} unused layouts to remove`);
-    
+
     for (const layoutPath of unusedLayouts) {
       console.log(`Removing unused layout: ${layoutPath}`);
-      zip.remove(layoutPath);
-      
-      // 删除相关的关系文件
+      deleteFileFromMemFS(memFS, layoutPath); // Use deleteFileFromMemFS
+
+      // Remove related rels file using memFS
       const layoutRelsPath = layoutPath.replace('ppt/slideLayouts/', 'ppt/slideLayouts/_rels/') + '.rels';
-      if (zip.file(layoutRelsPath)) {
+      if (fileExistsInMemFS(memFS, layoutRelsPath)) { // Use fileExistsInMemFS
         console.log(`Removing layout relationship file: ${layoutRelsPath}`);
-        zip.remove(layoutRelsPath);
+        deleteFileFromMemFS(memFS, layoutRelsPath); // Use deleteFileFromMemFS
       }
     }
-    
+
     onProgress('init', { percentage: 70, status: 'Removing unused masters...' });
-    
-    // 6. 删除未使用的母版
+
+    // 6. Remove unused masters using memFS
     const unusedMasters = allMasterFiles.filter(path => !usedMasters.has(path));
     console.log(`Found ${unusedMasters.length} unused masters to remove`);
-    
+
     for (const masterPath of unusedMasters) {
       console.log(`Removing unused master: ${masterPath}`);
-      zip.remove(masterPath);
-      
-      // 删除相关的关系文件
+      deleteFileFromMemFS(memFS, masterPath); // Use deleteFileFromMemFS
+
+      // Remove related rels file using memFS
       const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
-      if (zip.file(masterRelsPath)) {
+      if (fileExistsInMemFS(memFS, masterRelsPath)) { // Use fileExistsInMemFS
         console.log(`Removing master relationship file: ${masterRelsPath}`);
-        zip.remove(masterRelsPath);
+        deleteFileFromMemFS(memFS, masterRelsPath); // Use deleteFileFromMemFS
       }
     }
-    
-    // 7. 更新presentation.xml中的引用
-    await updatePresentationReferences(zip, usedLayouts, usedMasters);
-    
-    // 8. 更新[Content_Types].xml
-    await updateContentTypes(zip);
-    
-    // 9. 更新母版中的布局引用
+
+    // 7. Update presentation.xml references using memFS
+    memFS = await updatePresentationReferences(memFS, usedLayouts, usedMasters); // Pass memFS, update memFS
+
+    // 8. Update [Content_Types].xml using memFS
+    memFS = await updateContentTypes(memFS); // Pass memFS, update memFS
+
+    // 9. Update master layout references using memFS
     for (const masterPath of usedMasters) {
-      await updateMasterLayoutReferences(zip, masterPath, usedLayouts);
+      memFS = await updateMasterLayoutReferences(memFS, masterPath, usedLayouts); // Pass memFS, update memFS
     }
-    
-    // 在删除布局后添加验证逻辑
-    console.log('删除后剩余布局文件:', Object.keys(zip.files).filter(p => p.startsWith('ppt/slideLayouts/')));
-    // 验证内容类型
-    const contentTypes = await zip.file('[Content_Types].xml')?.async('string');
+
+    // ... (validation logging can use listFilesFromMemFS and readFileFromMemFS) ...
+    console.log('删除后剩余布局文件:', listFilesFromMemFS(memFS, 'ppt/slideLayouts/').filter(p => p.endsWith('.xml')));
+    const contentTypes = readFileFromMemFS(memFS, '[Content_Types].xml', 'string');
     console.log('内容类型中的布局引用:', contentTypes?.match(/slideLayout/g) || []);
-    
-    console.log('Layout cleanup completed successfully');
-    return true;
+
+
+    console.log('Layout cleanup completed successfully using memFS');
+    return memFS; // Return the modified memFS
   } catch (error) {
-    console.error('Error removing unused layouts:', error);
-    return false;
+    console.error('Error removing unused layouts with memFS:', error);
+    // Decide error handling: return original memFS? throw?
+    // For now, rethrow to indicate failure
+    throw error;
+    // return memFS; // Or return potentially partially modified memFS
   }
 }
 
 /**
- * Get all slides from the presentation
- * @param {JSZip} zip PPTX ZIP object
+ * Get all slides from the presentation using memFS
+ * @param {Object} memFS Memory File System object
+ * @returns {Promise<Array<Object>>} Array of slide info objects { id, rId, path? }
  */
-async function getAllSlides(zip) {
+// Modify function signature and logic for memFS
+async function getAllSlides(memFS) {
   try {
-    const presentationXml = await zip.file('ppt/presentation.xml')?.async('string');
-    if (!presentationXml) return [];
-    
-    const presentationObj = await parseXmlWithNamespaces(presentationXml);
-    const slidesList = presentationObj?.p_presentation?.p_sldIdLst?.p_sldId;
-    
+    // Read presentation.xml from memFS
+    const presentationXml = readFileFromMemFS(memFS, PRESENTATION_PATH, 'string');
+    if (!presentationXml) {
+        console.warn(`${PRESENTATION_PATH} not found in memFS.`);
+        return [];
+    }
+
+    // Parse using the updated parseXml
+    const presentationObj = await parseXml(presentationXml);
+    // Adjust path based on fast-xml-parser structure if needed
+    const slidesList = presentationObj?.['p:presentation']?.['p:sldIdLst']?.['p:sldId'];
+
     if (!slidesList) return [];
-    
+
     const slides = Array.isArray(slidesList) ? slidesList : [slidesList];
-    
+
+    // Read presentation rels to map rId to path
+    const presentationRelsPath = 'ppt/_rels/presentation.xml.rels';
+    const presentationRelsXml = readFileFromMemFS(memFS, presentationRelsPath, 'string');
+    let relationshipsMap = new Map();
+    if (presentationRelsXml) {
+        const relsObj = await parseXml(presentationRelsXml);
+        const relationships = Array.isArray(relsObj?.Relationships?.Relationship)
+            ? relsObj.Relationships.Relationship
+            : [relsObj?.Relationships?.Relationship].filter(Boolean);
+
+        relationships.forEach(rel => {
+            const rId = rel['@_Id'] || rel.Id;
+            const target = rel['@_Target'] || rel.Target;
+            const type = rel['@_Type'] || rel.Type;
+            if (rId && target && type && type.includes('/slide')) {
+                relationshipsMap.set(rId, `ppt/${target.replace('../', '')}`);
+            }
+        });
+    } else {
+        console.warn(`${presentationRelsPath} not found. Slide paths cannot be determined.`);
+    }
+
+
     return slides
-      .filter(slide => slide && slide.$ && slide.$.r_id)
+      // Adjust attribute access based on fast-xml-parser (@_ prefix)
+      .filter(slide => slide && slide['@_id'] && slide['@_r:id'])
       .map(slide => ({
-        id: slide.$.id,
-        rId: slide.$.r_id
-      }));
+        id: slide['@_id'], // Use @_id
+        rId: slide['@_r:id'], // Use @_r:id
+        path: relationshipsMap.get(slide['@_r:id']) // Add path if found
+      }))
+      .filter(slide => slide.path); // Only return slides where path could be determined
+
   } catch (error) {
-    console.error('Error getting all slides:', error);
+    console.error('Error getting all slides from memFS:', error);
     return [];
   }
 }
 
 /**
- * Get the layout used by a slide
- * @param {JSZip} zip PPTX ZIP object
- * @param {Object} slide Slide information
+ * Get the layout used by a slide using memFS
+ * @param {Object} memFS Memory File System object
+ * @param {Object} slide Slide information object (must include path)
+ * @returns {Promise<Object|null>} Layout info { path, rId } or null
  */
-async function getSlideLayout(zip, slide) {
+// Modify function signature and logic for memFS
+async function getSlideLayout(memFS, slide) {
+  // Ensure slide object has the path determined by getAllSlides
+  if (!slide || !slide.path) {
+      console.warn('getSlideLayout called with invalid slide object (missing path):', slide);
+      return null;
+  }
+  const slidePath = slide.path;
+
   try {
-    // 获取presentation关系文件
-    const relsPath = 'ppt/_rels/presentation.xml.rels';
-    const relsXml = await zip.file(relsPath)?.async('string');
-    if (!relsXml) {
-      console.warn(`Presentation relationships file not found: ${relsPath}`);
-      return null;
-    }
-    
-    const relsObj = await parseXml(relsXml);
-    if (!relsObj?.Relationships?.Relationship) {
-      console.warn('Invalid presentation relationships structure');
-      return null;
-    }
-    
-    const relationships = Array.isArray(relsObj.Relationships.Relationship)
-      ? relsObj.Relationships.Relationship
-      : [relsObj.Relationships.Relationship];
-    
-    // 找到幻灯片关系
-    const slideRel = relationships.find(rel => rel?.Id === slide.rId);
-    if (!slideRel?.Target) {
-      console.warn(`Slide relationship not found for rId: ${slide.rId}`);
-      return null;
-    }
-    
-    const slidePath = `ppt/${slideRel.Target.replace('../', '')}`;
-    
-    // 获取幻灯片关系文件
+    // Get slide relationship file path
     const slideRelsPath = slidePath.replace('slides/', 'slides/_rels/') + '.rels';
-    const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
+    // Read slide rels file from memFS
+    const slideRelsXml = readFileFromMemFS(memFS, slideRelsPath, 'string');
     if (!slideRelsXml) {
-      console.warn(`Slide relationships file not found: ${slideRelsPath}`);
+      console.warn(`Slide relationships file not found in memFS: ${slideRelsPath}`);
       return null;
     }
-    
+
+    // Parse using updated parseXml
     const slideRelsObj = await parseXml(slideRelsXml);
     if (!slideRelsObj?.Relationships?.Relationship) {
       console.warn(`Invalid slide relationships structure for: ${slidePath}`);
       return null;
     }
-    
+
     const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
       ? slideRelsObj.Relationships.Relationship
       : [slideRelsObj.Relationships.Relationship];
-    
-    // 找到布局关系
-    const layoutRel = slideRels.find(rel => 
-      rel?.Type && 
-      typeof rel.Type === 'string' && 
-      rel.Type.includes('/slideLayout') &&
-      rel.Target
-    );
-    
+
+    // Find layout relationship (adjust attribute access for fast-xml-parser)
+    const layoutRel = slideRels.find(rel => {
+        const type = rel['@_Type'] || rel.Type;
+        const target = rel['@_Target'] || rel.Target;
+        return type && typeof type === 'string' && type.includes('/slideLayout') && target;
+    });
+
+
     if (!layoutRel) {
       console.warn(`Layout relationship not found for slide: ${slidePath}`);
       return null;
     }
-    
+
+    const target = layoutRel['@_Target'] || layoutRel.Target;
+    const rId = layoutRel['@_Id'] || layoutRel.Id;
+
     return {
-      path: `ppt/${layoutRel.Target.replace('../', '')}`,
-      rId: layoutRel.Id
+      path: `ppt/${target.replace('../', '')}`, // Construct full path
+      rId: rId
     };
   } catch (error) {
-    console.error('Error getting slide layout:', {
-      error: error.message,
-      slide: slide,
-      stack: error.stack
-    });
+    console.error(`Error getting slide layout from memFS for slide ${slidePath}:`, error);
     return null;
   }
 }
 
 /**
- * Get the master used by a layout
- * @param {JSZip} zip PPTX ZIP object
+ * Get the master used by a layout using memFS
+ * @param {Object} memFS Memory File System object
  * @param {string} layoutPath Layout path
+ * @returns {Promise<Object|null>} Master info { path, rId } or null
  */
-export async function getLayoutMaster(zip, layoutPath) {
+// Modify function signature and logic for memFS
+export async function getLayoutMaster(memFS, layoutPath) {
   try {
-    // 获取布局关系文件
+    // Get layout relationship file path
     const layoutRelsPath = layoutPath.replace('ppt/slideLayouts/', 'ppt/slideLayouts/_rels/') + '.rels';
-    const layoutRelsXml = await zip.file(layoutRelsPath)?.async('string');
-    if (!layoutRelsXml) return null;
-    
-    console.log(`Getting master for layout: ${layoutPath}, using rels file: ${layoutRelsPath}`);
-    
+    // Read layout rels file from memFS
+    const layoutRelsXml = readFileFromMemFS(memFS, layoutRelsPath, 'string');
+    if (!layoutRelsXml) {
+        // console.warn(`Layout relationships file not found in memFS: ${layoutRelsPath}`); // Less verbose
+        return null;
+    }
+
+    // console.log(`Getting master for layout: ${layoutPath}, using rels file: ${layoutRelsPath}`); // Keep if needed
+
+    // Parse using updated parseXml
     const layoutRelsObj = await parseXml(layoutRelsXml);
+    // Check for existence before accessing Relationship
+    if (!layoutRelsObj?.Relationships?.Relationship) {
+        // console.warn(`No relationships found in ${layoutRelsPath}`);
+        return null;
+    }
     const layoutRels = Array.isArray(layoutRelsObj.Relationships.Relationship)
       ? layoutRelsObj.Relationships.Relationship
       : [layoutRelsObj.Relationships.Relationship];
-    
-    // 找到母版关系
-    const masterRel = layoutRels.find(rel => rel && rel.Type && rel.Type.includes('/slideMaster'));
+
+    // Find master relationship (adjust attribute access)
+    const masterRel = layoutRels.find(rel => {
+        const type = rel['@_Type'] || rel.Type;
+        return type && type.includes('/slideMaster');
+    });
+
     if (!masterRel) return null;
-    
+
+    const target = masterRel['@_Target'] || masterRel.Target;
+    const rId = masterRel['@_Id'] || masterRel.Id;
+
     return {
-      path: `ppt/${masterRel.Target.replace('../', '')}`,
-      rId: masterRel.Id
+      path: `ppt/${target.replace('../', '')}`, // Construct full path
+      rId: rId
     };
   } catch (error) {
-    console.error('Error getting layout master:', error);
+    console.error(`Error getting layout master from memFS for layout ${layoutPath}:`, error);
     return null;
   }
 }
 
-/**
- * Update presentation references to layouts and masters
- * @param {JSZip} zip PPTX ZIP object
- * @param {Set<string>} usedLayouts Set of used layout paths
- * @param {Set<string>} usedMasters Set of used master paths
- */
-/**
- * Get layouts referenced by masters
- * @param {JSZip} zip PPTX ZIP object
- * @param {Set<string>} usedMasters Set of used master paths
- * @returns {Promise<Set<string>>} Set of layout paths referenced by masters
- * @deprecated This function is no longer used in the main flow as we only keep layouts directly used by slides
- */
-async function getMasterReferencedLayouts(zip, usedMasters) {
-  const referencedLayouts = new Set();
-  
-  try {
-    // 遍历所有使用的母版
-    for (const masterPath of usedMasters) {
-      // 获取母版关系文件
-      const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
-      const masterRelsXml = await zip.file(masterRelsPath)?.async('string');
-      if (!masterRelsXml) continue;
-      
-      console.log(`Checking layouts referenced by master: ${masterPath}`);
-      
-      const masterRelsObj = await parseXml(masterRelsXml);
-      const relationships = Array.isArray(masterRelsObj.Relationships.Relationship)
-        ? masterRelsObj.Relationships.Relationship
-        : [masterRelsObj.Relationships.Relationship];
-      
-      // 找到布局关系
-      const layoutRels = relationships.filter(rel => rel.Type.includes('/slideLayout'));
-      
-      // 添加布局路径到引用集合
-      for (const layoutRel of layoutRels) {
-        const layoutPath = `ppt/${layoutRel.Target.replace('../', '')}`;
-        referencedLayouts.add(layoutPath);
-        console.log(`Master ${masterPath} references layout: ${layoutPath}`);
-      }
-      
-      // 检查母版XML中的布局引用
-      const masterXml = await zip.file(masterPath)?.async('string');
-      if (masterXml) {
-        const masterObj = await parseXmlWithNamespaces(masterXml);
-        
-        // 检查sldLayoutIdLst中的布局引用
-        if (masterObj?.p_sldMaster?.p_sldLayoutIdLst?.p_sldLayoutId) {
-          const layoutIds = Array.isArray(masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId)
-            ? masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId
-            : [masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId];
-          
-          console.log(`Master ${masterPath} has ${layoutIds.length} layout references in XML`);
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error getting master referenced layouts:', error);
-  }
-  
-  return referencedLayouts;
-}
+
+// Remove the deprecated getMasterReferencedLayouts function entirely
+/*
+async function getMasterReferencedLayouts(memFS, usedMasters) { ... }
+*/
 
 /**
- * Update presentation references to layouts and masters
- * @param {JSZip} zip PPTX ZIP object
+ * Update presentation references to layouts and masters using memFS
+ * @param {Object} memFS Memory File System object
  * @param {Set<string>} usedLayouts Set of used layout paths
  * @param {Set<string>} usedMasters Set of used master paths
+ * @returns {Promise<Object>} Modified memFS object
  */
-export async function updatePresentationReferences(zip, usedLayouts, usedMasters) {
+// Modify function signature and logic for memFS
+export async function updatePresentationReferences(memFS, usedLayouts, usedMasters) {
+  const relsPath = 'ppt/_rels/presentation.xml.rels';
   try {
-    console.log('Updating presentation references...');
-    const relsPath = 'ppt/_rels/presentation.xml.rels';
-    const relsXml = await zip.file(relsPath)?.async('string');
+    console.log('Updating presentation references in memFS...');
+    // Read from memFS
+    const relsXml = readFileFromMemFS(memFS, relsPath, 'string');
     if (!relsXml) {
-      console.log('No presentation relationships file found');
-      return;
+      console.log('No presentation relationships file found in memFS');
+      return memFS; // Return unmodified memFS
     }
-    
+
+    // Parse using updated parseXml
     const relsObj = await parseXml(relsXml);
+    if (!relsObj?.Relationships?.Relationship) {
+        console.warn(`Invalid structure in ${relsPath}`);
+        return memFS;
+    }
     const relationships = Array.isArray(relsObj.Relationships.Relationship)
       ? relsObj.Relationships.Relationship
       : [relsObj.Relationships.Relationship];
-    
-    console.log(`Found ${relationships.length} relationships in presentation`);
-    
-    // Filter unused layouts and masters relationships
+
+    // console.log(`Found ${relationships.length} relationships in presentation`); // Keep if needed
+
+    // Filter unused layouts and masters relationships (adjust attribute access)
     const filteredRelationships = relationships.filter(rel => {
       if (!rel || typeof rel !== 'object') return false;
-      
-      // Keep relationships without Type or Target
-      if (!rel.Type || !rel.Target) return true;
-      
+
+      const type = rel['@_Type'] || rel.Type;
+      const target = rel['@_Target'] || rel.Target;
+
+      // Keep relationships without Type or Target (or adjust based on actual needs)
+      if (!type || !target) return true;
+
       // Keep non-layout and non-master relationships
-      if (!rel.Type.includes('/slideLayout') && !rel.Type.includes('/slideMaster')) {
+      if (!type.includes('/slideLayout') && !type.includes('/slideMaster')) {
         return true;
       }
-      
+
       // Check if layout is used
-      if (rel.Type.includes('/slideLayout')) {
-        const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
+      if (type.includes('/slideLayout')) {
+        const layoutPath = `ppt/${target.replace('../', '')}`;
         return usedLayouts.has(layoutPath);
       }
-      
+
       // Check if master is used
-      if (rel.Type.includes('/slideMaster')) {
-        const masterPath = `ppt/${rel.Target.replace('../', '')}`;
+      if (type.includes('/slideMaster')) {
+        const masterPath = `ppt/${target.replace('../', '')}`;
         return usedMasters.has(masterPath);
       }
-      
-      return false;
+
+      return false; // Should not happen if type includes layout/master
     });
-    
-    // Update relationships
-    relsObj.Relationships.Relationship = filteredRelationships;
-    
-    // Update relationships file
-    const updatedRelsXml = buildXml(relsObj);
-    zip.file(relsPath, updatedRelsXml);
-    
-    console.log(`Updated presentation references: removed ${relationships.length - filteredRelationships.length} unused references`);
+
+    // Update relationships only if changes were made
+    if (filteredRelationships.length < relationships.length) {
+        relsObj.Relationships.Relationship = filteredRelationships.length > 0 ? filteredRelationships : undefined; // Handle empty case
+
+        // Build XML using updated buildXml
+        const updatedRelsXml = buildXml(relsObj);
+        // Write back to memFS
+        writeFileToMemFS(memFS, relsPath, updatedRelsXml);
+
+        console.log(`Updated presentation references: removed ${relationships.length - filteredRelationships.length} unused references`);
+    } else {
+        console.log('No presentation references needed removal.');
+    }
+    return memFS; // Return modified (or original) memFS
   } catch (error) {
-    console.error('Error updating presentation references:', error);
+    console.error('Error updating presentation references in memFS:', error);
+    throw error; // Rethrow or return original memFS
   }
 }
 
 /**
- * Update [Content_Types].xml to remove references to deleted files
- * @param {JSZip} zip PPTX ZIP object
+ * Update [Content_Types].xml to remove references to deleted files using memFS
+ * @param {Object} memFS Memory File System object
+ * @returns {Promise<Object>} Modified memFS object
  */
-export async function updateContentTypes(zip) {
+// Modify function signature and logic for memFS, fix nested function
+export async function updateContentTypes(memFS) {
+  const contentTypesPath = '[Content_Types].xml';
   try {
-    console.log('Updating content types...');
-    const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
+    console.log('Updating content types in memFS...');
+    // Read from memFS
+    const contentTypesXml = readFileFromMemFS(memFS, contentTypesPath, 'string');
     if (!contentTypesXml) {
-      console.warn('No content types file found');
-      return;
+      console.warn('No content types file found in memFS');
+      return memFS; // Return unmodified memFS
     }
-    
-    // 添加安全的 XML 解析函数
-    async function parseXmlSafely(xmlString) {
-      try {
-        return await parseXml(xmlString);
-      } catch (error) {
-        console.error('XML parsing error:', error.message);
-        // 返回空对象而不是抛出错误
-        return { Types: { Override: [] } };
-      }
+
+    // Parse using updated parseXml
+    const contentTypesObj = await parseXml(contentTypesXml);
+    // Adjust path based on fast-xml-parser structure
+    if (!contentTypesObj?.Types?.Override) {
+      console.warn('Invalid content types structure');
+      return memFS;
     }
-    
-    // 在 updateContentTypes 函数中使用安全解析
-    async function updateContentTypes(zip) {
-      try {
-        console.log('Updating content types...');
-        const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
-        if (!contentTypesXml) {
-          console.warn('No content types file found');
-          return;
-        }
-        
-        // 使用安全解析
-        const contentTypesObj = await parseXmlSafely(contentTypesXml);
-        if (!contentTypesObj?.Types?.Override) {
-          console.warn('Invalid content types structure');
-          return;
-        }
-        
-        const overrides = Array.isArray(contentTypesObj.Types.Override)
-          ? contentTypesObj.Types.Override
-          : [contentTypesObj.Types.Override];
-        
-        console.log(`Found ${overrides.length} content type overrides`);
-        
-        // 过滤出存在的文件的覆盖
-        const filteredOverrides = overrides.filter(override => {
-          // 检查override对象是否有效
-          if (!override || typeof override !== 'object') {
-            console.log('Invalid override object:', override);
-            return false;
-          }
-          
-          // 尝试多种方式获取PartName属性
-          let partName = override.PartName || 
-                        override['@_PartName'] || 
-                        (override.$ && override.$['PartName']) || 
-                        (override._attributes && override._attributes['PartName']);
-          
-          // 检查PartName属性是否存在
-          if (!partName || typeof partName !== 'string') {
-            console.log('Override missing PartName attribute:', override);
-            return false; // 不再保留无法确定路径的覆盖
-          }
-          
-          const path = partName.replace(/^\//, '');
-          const exists = zip.file(path) !== null;
-          if (!exists) console.log(`Removing content type for deleted file: ${path}`);
-          return exists;
-        });
-        
-        // 如果有覆盖被移除
-        if (filteredOverrides.length < overrides.length) {
-          // 更新覆盖
-          contentTypesObj.Types.Override = filteredOverrides;
-          
-          // 更新内容类型文件
-          const updatedContentTypesXml = buildXml(contentTypesObj);
-          zip.file('[Content_Types].xml', updatedContentTypesXml);
-          
-          console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
-        } else {
-          console.log('No content type references needed to be removed');
-        }
-      } catch (error) {
-        console.error('Error updating content types:', error);
-        // 不要抛出错误，让流程继续
-      }
-    }
-    
+
     const overrides = Array.isArray(contentTypesObj.Types.Override)
       ? contentTypesObj.Types.Override
       : [contentTypesObj.Types.Override];
-    
-    console.log(`Found ${overrides.length} content type overrides`);
-    
-    // 过滤出存在的文件的覆盖
+
+    // console.log(`Found ${overrides.length} content type overrides`); // Keep if needed
+
+    // Filter overrides for files existing in memFS (adjust attribute access)
     const filteredOverrides = overrides.filter(override => {
-      // 检查override对象是否有效
       if (!override || typeof override !== 'object') {
-        console.log('Invalid override object:', override);
+        // console.log('Invalid override object:', override); // Less verbose
         return false;
       }
-      
-      // 尝试多种方式获取PartName属性
-      let partName = override.PartName || 
-                    override['@_PartName'] || 
-                    (override.$ && override.$['PartName']) || 
-                    (override._attributes && override._attributes['PartName']);
-      
-      // 检查PartName属性是否存在
+
+      // Use @_PartName prefix
+      const partName = override['@_PartName'];
+
       if (!partName || typeof partName !== 'string') {
-        console.log('Override missing PartName attribute:', override);
-        return false; // 不再保留无法确定路径的覆盖
+        // console.log('Override missing PartName attribute:', override); // Less verbose
+        return false;
       }
-      
-      const path = partName.replace(/^\//, '');
-      const exists = zip.file(path) !== null;
-      if (!exists) console.log(`Removing content type for deleted file: ${path}`);
+
+      // Remove leading slash if present
+      const path = partName.startsWith('/') ? partName.substring(1) : partName;
+      // Check existence using fileExistsInMemFS
+      const exists = fileExistsInMemFS(memFS, path);
+      // if (!exists) console.log(`Removing content type for deleted file: ${path}`); // Keep if needed
       return exists;
     });
-    
-    // 如果有覆盖被移除
+
+    // Update content types file only if changes were made
     if (filteredOverrides.length < overrides.length) {
-      // 更新覆盖
-      contentTypesObj.Types.Override = filteredOverrides;
-      
-      // 更新内容类型文件
+      contentTypesObj.Types.Override = filteredOverrides.length > 0 ? filteredOverrides : undefined; // Handle empty case
+
+      // Build XML using updated buildXml
       const updatedContentTypesXml = buildXml(contentTypesObj);
-      zip.file('[Content_Types].xml', updatedContentTypesXml);
-      
+      // Write back to memFS
+      writeFileToMemFS(memFS, contentTypesPath, updatedContentTypesXml);
+
       console.log(`Updated [Content_Types].xml: removed ${overrides.length - filteredOverrides.length} references to deleted files`);
     } else {
       console.log('No content type references needed to be removed');
     }
+    return memFS; // Return modified (or original) memFS
   } catch (error) {
-    console.error('Error updating content types:', error);
+    console.error('Error updating content types in memFS:', error);
+    throw error; // Rethrow or return original memFS
   }
 }
 
+
 /**
- * Update master layout references
- * @param {JSZip} zip PPTX ZIP object
+ * Update master layout references using memFS
+ * @param {Object} memFS Memory File System object
  * @param {string} masterPath Master path
  * @param {Set<string>} usedLayouts Set of used layout paths
+ * @returns {Promise<Object>} Modified memFS object
  */
-async function updateMasterLayoutReferences(zip, masterPath, usedLayouts) {
+// Modify function signature and logic for memFS
+async function updateMasterLayoutReferences(memFS, masterPath, usedLayouts) {
+  // Get master relationship file path
+  const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
   try {
-    // 获取母版关系文件
-    const masterRelsPath = masterPath.replace('ppt/slideMasters/', 'ppt/slideMasters/_rels/') + '.rels';
-    const masterRelsXml = await zip.file(masterRelsPath)?.async('string');
+    // Read master rels file from memFS
+    const masterRelsXml = readFileFromMemFS(memFS, masterRelsPath, 'string');
     if (!masterRelsXml) {
-      console.warn(`Master relationships file not found: ${masterRelsPath}`);
-      return;
+      // console.warn(`Master relationships file not found: ${masterRelsPath}`); // Less verbose
+      return memFS; // Return unmodified memFS
     }
-    
-    console.log(`Updating master layout references for: ${masterPath}`);
-    
+
+    // console.log(`Updating master layout references for: ${masterPath}`); // Keep if needed
+
+    // Parse using updated parseXml
     const masterRelsObj = await parseXml(masterRelsXml);
     if (!masterRelsObj?.Relationships?.Relationship) {
-      console.warn(`Invalid master relationships structure for: ${masterPath}`);
-      return;
+      // console.warn(`Invalid master relationships structure for: ${masterPath}`); // Less verbose
+      return memFS;
     }
-    
+
     const relationships = Array.isArray(masterRelsObj.Relationships.Relationship)
       ? masterRelsObj.Relationships.Relationship
       : [masterRelsObj.Relationships.Relationship];
-    
-    // 过滤出未使用的布局关系
+
+    // Filter unused layout relationships (adjust attribute access)
     const filteredRelationships = relationships.filter(rel => {
-      // 检查rel对象是否有效
-      if (!rel || typeof rel !== 'object') {
-        console.warn('Invalid relationship object');
-        return false;
-      }
-      
-      // 检查Type属性是否存在且有效
-      if (!rel.Type || typeof rel.Type !== 'string') {
-        console.warn('Invalid relationship type:', rel);
-        return false;
-      }
-      
-      // 检查Target属性是否存在且有效
-      if (!rel.Target || typeof rel.Target !== 'string') {
-        console.warn('Invalid relationship target:', rel);
-        return false;
-      }
-      
-      // 保留非布局关系
-      if (!rel.Type.includes('/slideLayout')) {
+      if (!rel || typeof rel !== 'object') return false;
+
+      const type = rel['@_Type'] || rel.Type;
+      const target = rel['@_Target'] || rel.Target;
+
+      if (!type || !target) return false; // Invalid relationship
+
+      // Keep non-layout relationships
+      if (!type.includes('/slideLayout')) {
         return true;
       }
-      
-      // 检查布局是否使用
-      const layoutPath = `ppt/${rel.Target.replace('../', '')}`;
+
+      // Check if layout is used
+      const layoutPath = `ppt/${target.replace('../', '')}`;
       const isUsed = usedLayouts.has(layoutPath);
-      if (!isUsed) {
-        console.log(`Removing unused layout reference: ${layoutPath} from master: ${masterPath}`);
-      }
+      // if (!isUsed) console.log(`Removing unused layout reference: ${layoutPath} from master: ${masterPath}`); // Keep if needed
       return isUsed;
     });
-    
-    // 如果有关系被移除
+
+    // Update relationships file only if changes were made
     if (filteredRelationships.length < relationships.length) {
-      // 更新关系
-      masterRelsObj.Relationships.Relationship = filteredRelationships;
-      
-      // 更新关系文件
+      masterRelsObj.Relationships.Relationship = filteredRelationships.length > 0 ? filteredRelationships : undefined; // Handle empty case
+
+      // Build XML using updated buildXml
       const updatedRelsXml = buildXml(masterRelsObj);
-      zip.file(masterRelsPath, updatedRelsXml);
-      
+      // Write back to memFS
+      writeFileToMemFS(memFS, masterRelsPath, updatedRelsXml);
+
       console.log(`Updated master ${masterPath} references: removed ${relationships.length - filteredRelationships.length} unused layout references`);
-      
-      // 更新母版XML中的布局引用
-      await updateMasterXml(zip, masterPath, filteredRelationships);
+
+      // Update master XML as well
+      memFS = await updateMasterXml(memFS, masterPath, filteredRelationships); // Pass memFS, update memFS
     }
+    return memFS; // Return modified (or original) memFS
   } catch (error) {
-    console.error(`Error updating master layout references for ${masterPath}:`, error);
+    console.error(`Error updating master layout references for ${masterPath} in memFS:`, error);
+    throw error; // Rethrow or return original memFS
   }
 }
 
 /**
- * Update master XML to remove references to unused layouts
- * @param {JSZip} zip PPTX ZIP object
+ * Update master XML to remove references to unused layouts using memFS
+ * @param {Object} memFS Memory File System object
  * @param {string} masterPath Master path
- * @param {Array} validRelationships Valid relationships
+ * @param {Array} validRelationships Valid relationships from the .rels file
+ * @returns {Promise<Object>} Modified memFS object
  */
-async function updateMasterXml(zip, masterPath, validRelationships) {
+// Modify function signature and logic for memFS
+async function updateMasterXml(memFS, masterPath, validRelationships) {
   try {
-    const masterXml = await zip.file(masterPath)?.async('string');
-    if (!masterXml) return;
-    
-    const masterObj = await parseXmlWithNamespaces(masterXml);
-    
-    // 获取有效的布局ID
-    const validLayoutIds = validRelationships
-      .filter(rel => rel.Type.includes('/slideLayout'))
-      .map(rel => rel.Id);
-    
-    // 更新sldLayoutIdLst
-    if (masterObj?.p_sldMaster?.p_sldLayoutIdLst?.p_sldLayoutId) {
-      const layoutIds = Array.isArray(masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId)
-        ? masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId
-        : [masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId];
-      
-      // 过滤出有效的布局ID
-      const filteredLayoutIds = layoutIds.filter(layout => 
-        layout && layout.$ && validLayoutIds.includes(layout.$.r_id)
-      );
-      
-      // 更新布局ID列表
-      if (filteredLayoutIds.length < layoutIds.length) {
-        masterObj.p_sldMaster.p_sldLayoutIdLst.p_sldLayoutId = filteredLayoutIds.length > 0
-          ? filteredLayoutIds
-          : undefined;
-        
-        // 更新母版XML
+    // Read master XML from memFS
+    const masterXml = readFileFromMemFS(memFS, masterPath, 'string');
+    if (!masterXml) return memFS; // Return unmodified memFS
+
+    // Parse using updated parseXml
+    const masterObj = await parseXml(masterXml);
+
+    // Get valid layout rIds from the valid relationships (adjust attribute access)
+    const validLayoutIds = new Set(validRelationships
+      .filter(rel => (rel['@_Type'] || rel.Type)?.includes('/slideLayout'))
+      .map(rel => rel['@_Id'] || rel.Id)
+      .filter(Boolean) // Filter out any null/undefined IDs
+    );
+
+
+    // Update sldLayoutIdLst (adjust path and attribute access)
+    const layoutIdLstPath = ['p:sldMaster', 'p:sldLayoutIdLst']; // Path to the list
+    let layoutIdLst = masterObj;
+    for (const key of layoutIdLstPath) {
+        if (layoutIdLst && typeof layoutIdLst === 'object' && key in layoutIdLst) {
+            layoutIdLst = layoutIdLst[key];
+        } else {
+            layoutIdLst = null; // Path not found
+            break;
+        }
+    }
+
+    // Check if the layout list exists and has entries
+    if (layoutIdLst && layoutIdLst['p:sldLayoutId']) {
+      const originalLayoutIds = Array.isArray(layoutIdLst['p:sldLayoutId'])
+        ? layoutIdLst['p:sldLayoutId']
+        : [layoutIdLst['p:sldLayoutId']];
+
+      // Filter the list based on valid rIds (adjust attribute access)
+      const filteredLayoutIds = originalLayoutIds.filter(layoutId => {
+        if (!layoutId || typeof layoutId !== 'object') return false;
+        const rId = layoutId['@_r:id']; // Use @_r:id
+        return rId && validLayoutIds.has(rId);
+      });
+
+      // Update the master object only if changes were made
+      if (filteredLayoutIds.length < originalLayoutIds.length) {
+        // Update the list in the master object
+        // Handle cases where the list might become empty
+        if (filteredLayoutIds.length > 0) {
+          layoutIdLst['p:sldLayoutId'] = filteredLayoutIds;
+        } else {
+          // If the list becomes empty, remove the p:sldLayoutIdLst element entirely
+          // Navigate back up one level to delete the parent key
+          let parent = masterObj;
+          for (let i = 0; i < layoutIdLstPath.length - 1; i++) {
+              parent = parent[layoutIdLstPath[i]];
+          }
+          delete parent[layoutIdLstPath[layoutIdLstPath.length - 1]];
+          console.log(`Removed empty p:sldLayoutIdLst from ${masterPath}`);
+        }
+
+        // Build XML using updated buildXml
         const updatedMasterXml = buildXml(masterObj);
-        zip.file(masterPath, updatedMasterXml);
-        
-        console.log(`Updated master XML ${masterPath}: removed ${layoutIds.length - filteredLayoutIds.length} unused layout references`);
+        // Write back to memFS
+        writeFileToMemFS(memFS, masterPath, updatedMasterXml);
+        console.log(`Updated master XML ${masterPath}: removed ${originalLayoutIds.length - filteredLayoutIds.length} unused layout references`);
       }
     }
+    return memFS; // Return modified (or original) memFS
   } catch (error) {
-    console.error(`Error updating master XML for ${masterPath}:`, error);
+    console.error(`Error updating master XML ${masterPath} in memFS:`, error);
+    throw error; // Rethrow or return original memFS
   }
 }
 
-export async function getUsedLayoutsAndMasters(zip, usedSlides) {
-  const usedLayouts = new Set();
-  const usedMasters = new Set();
-  
-  try {
-    // Process each slide
-    for (const slide of usedSlides) {
-      const slideXml = await zip.file(slide.path)?.async('string');
-      if (!slideXml) continue;
-      
-      // Get slide relationship file
-      const slideRelsPath = slide.path.replace('slides/', 'slides/_rels/') + '.rels';
-      const slideRelsXml = await zip.file(slideRelsPath)?.async('string');
-      if (!slideRelsXml) continue;
-      
-      const slideRelsObj = await parseXml(slideRelsXml);
-      
-      if (!slideRelsObj?.Relationships?.Relationship) continue;
-      
-      const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
-        ? slideRelsObj.Relationships.Relationship
-        : [slideRelsObj.Relationships.Relationship];
-      
-      // Find layout relationship
-      const layoutRel = slideRels.find(rel => {
-        const relType = rel['@_Type'] || rel.Type;
-        return relType && relType.includes('/slideLayout');
-      });
-      
-      if (!layoutRel) continue;
-      
-      const target = layoutRel['@_Target'] || layoutRel.Target;
-      if (!target) continue;
-      
-      const layoutPath = `ppt/${target.replace('../', '')}`;
-      usedLayouts.add(layoutPath);
-      
-      // Get master used by the layout using the imported function from layout-cleaner.js
-      const masterInfo = await getLayoutMaster(zip, layoutPath);
-      if (masterInfo && masterInfo.path) {
-        usedMasters.add(masterInfo.path);
-      }
-    }
-    
-    return { usedLayouts, usedMasters };
-  } catch (error) {
-    console.error('Error getting used layouts and masters:', error);
-    return { usedLayouts: new Set(), usedMasters: new Set() };
-  }
-}
+// Removed the getUsedLayoutsAndMasters function as its logic is now integrated into removeUnusedLayouts
+/*
+async function getUsedLayoutsAndMasters(memFS, usedSlides) { ... }
+*/

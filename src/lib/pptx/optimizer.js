@@ -1,331 +1,139 @@
 import JSZip from 'jszip';
-import { validateFile } from '../utils/validation';
+// import { validateFile } from '../utils/validation'; // Assuming validation happens elsewhere or is not needed here
 import { compressImage } from '../utils/image';
-import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
-import { findMediaFiles, processMediaFile } from './pptx-utils';
-import { removeHiddenSlides } from './slides';
-import { removeUnusedLayouts } from './layout-cleaner';
-import { cleanUnusedResources } from './cleaner';
+// import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants'; // SUPPORTED_IMAGE_EXTENSIONS might be needed if compressImage doesn't handle type checks
+import { findMediaFiles } from './media'; // Keep findMediaFiles, now expects memFS
+// import { processMediaFile } from './pptx-utils'; // processMediaFile is likely replaced by direct read/compress/write logic
+// import { removeHiddenSlides } from './slides'; // Assuming slide removal is part of cleaner or not implemented here
+// import { removeUnusedLayouts } from './layout-cleaner'; // This is called within cleaner
+import { cleanUnusedResources } from './cleaner'; // Expects memFS, returns { success, memFS, error? }
+import { zipToMemFS, memFSToZip, readFileFromMemFS, writeFileToMemFS } from './zip-fs'; // Import memFS helpers
 
-// Function to preprocess images
-async function preprocessImages(zip, options = {}) {
+// Remove preprocessImages and simpleHash as they are not integrated with memFS
+/*
+async function preprocessImages(zip, options = {}) { ... }
+function simpleHash(data) { ... }
+*/
+
+export async function optimizePPTX(file, options = {}) {
+  let memFS = {}; // Initialize memFS
+  let usedMedia = new Set();
+  const onProgress = options.onProgress || (() => {}); // Get onProgress callback
+  const originalSize = file.size; // Store original size
+
   try {
-    const mediaFiles = findMediaFiles(zip);
-    const mediaContents = {};
-    const duplicates = new Map();
-    
-    // Step 1: Collect all media file contents for comparison
-    for (const mediaPath of mediaFiles) {
-      const file = zip.file(mediaPath);
-      if (!file) continue;
-      
-      const fileExtension = mediaPath.split('.').pop().toLowerCase();
-      if (!SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension)) continue;
-      
-      const data = await file.async('uint8array');
-      // Use a simple hash to identify similar images
-      const hash = simpleHash(data);
-      mediaContents[mediaPath] = { data, hash, size: data.byteLength };
-      
-      // Detect duplicate images
-      if (options.removeDuplicateImages) {
-        if (duplicates.has(hash)) {
-          duplicates.get(hash).push(mediaPath);
-        } else {
-          duplicates.set(hash, [mediaPath]);
-        }
-      }
-    }
-    
-    // Step 2: Process duplicate images
-    if (options.removeDuplicateImages) {
-      for (const [hash, paths] of duplicates.entries()) {
-        if (paths.length > 1) {
-          // Keep the first image, remove the rest
-          const originalPath = paths[0];
-          const duplicatePaths = paths.slice(1);
-          
-          for (const dupPath of duplicatePaths) {
-            // Don't directly delete files, but replace them with references to the original file
-            // This requires modifying PPT XML references, simplified handling here
-            console.log(`Found duplicate image: ${dupPath} (same as ${originalPath})`);
-          }
-        }
-      }
-    }
-    
-    return true;
-  } catch (error) {
-    console.error('Image preprocessing failed:', error);
-    return false;
-  }
-}
+    // Step 1: Load PPTX and convert to memFS
+    console.log('Loading PPTX file...');
+    const zip = await JSZip.loadAsync(file);
+    console.log('Converting ZIP to memory file system...');
+    memFS = await zipToMemFS(zip);
+    console.log(`memFS created with ${Object.keys(memFS).length} entries.`);
 
-// Add a simple hash function for image comparison
-function simpleHash(data) {
-  // Simplified hash algorithm, for demonstration only
-  // In production, use a more reliable hash algorithm
-  let hash = 0;
-  const step = Math.max(1, Math.floor(data.length / 1000)); // Sample to improve performance
-  for (let i = 0; i < data.length; i += step) {
-    hash = ((hash << 5) - hash) + data[i];
-    hash |= 0; // Convert to 32-bit integer
-  }
-  return hash.toString(16);
-}
+    // Step 2: Clean unused resources using memFS
+    if (options.cleanUnusedResources !== false) { // Default to true unless explicitly false
+      console.log('Starting resource cleaning...');
+      const cleanResult = await cleanUnusedResources(memFS, options.onProgress || (() => {}), {
+        removeUnusedLayouts: options.removeUnusedLayouts !== false,
+        // cleanMediaInUnusedLayouts: options.cleanMediaInUnusedLayouts
+      });
 
-// In the optimizePPTX function
-async function optimizePPTX(file, options = {}) {
-  try {
-    validateFile(file);
-    
-    const { onProgress = () => {} } = options;
-    const startTime = Date.now();
-    
-    // Safely check hardware concurrency - declare only once
-    const hasHardwareConcurrency = typeof navigator !== 'undefined' && 
-                                  'hardwareConcurrency' in navigator && 
-                                  typeof navigator.hardwareConcurrency === 'number';
-    
-    const cpuCount = hasHardwareConcurrency ? navigator.hardwareConcurrency : 4;
-    
-    // Send initial file info
-    onProgress('fileInfo', {
-      name: file.name,
-      size: file.size
-    });
-    
-    let zip;
-    try {
-      zip = await JSZip.loadAsync(file);
-    } catch (zipError) {
-      // Specific handling for ZIP loading errors
-      console.error('ZIP loading error:', zipError);
-      const errorMessage = zipError.message.includes('invalid') 
-        ? 'Invalid or corrupted file format. Please ensure you upload a valid PowerPoint file.' 
-        : `Failed to load file: ${zipError.message}`;
-      
-      onProgress('error', { 
-        message: errorMessage,
-        details: zipError.message
-      });
-      throw new Error(errorMessage);
-    }
-    
-    // 添加调试选项
-    const debug = options.debug || false;
-    if (debug) {
-      zip.debug = true;
-      console.log('Debug mode enabled');
-    }
-    
-    // 第一步：删除隐藏幻灯片
-    if (options.removeHiddenSlides) {
-      onProgress('init', { percentage: 10, status: '删除隐藏幻灯片...' });
-      console.log('Starting to call removeHiddenSlides function...');
-      try {
-        await removeHiddenSlides(zip);
-        console.log('removeHiddenSlides function call completed');
-      } catch (error) {
-        console.error('Error calling removeHiddenSlides function:', error);
+      if (!cleanResult.success) {
+        console.warn("Resource cleaning failed. Proceeding with potentially partially cleaned state.");
+        memFS = cleanResult.memFS;
+      } else {
+        console.log("Resource cleaning successful.");
+        memFS = cleanResult.memFS;
       }
-    }
-    
-    // 第二步：清理未使用资源
-    if (options.cleanUnusedResources) {
-      onProgress('init', { percentage: 25, status: '清理未使用资源...' });
-      await cleanUnusedResources(zip, onProgress, {
-        removeUnusedLayouts: true,  // 删除未使用的布局
-        cleanMediaInUnusedLayouts: true  // 清理未使用布局中的媒体文件
-      });
-    }
-    
-    
-    // 第三步：预处理图片
-    if (options.preprocessImages) {
-      onProgress('init', { percentage: 35, status: '预处理图片...' });
-      await preprocessImages(zip, {
-        removeDuplicateImages: options.preprocessImages.removeDuplicateImages || false,
-        mergeSimilarImages: options.preprocessImages.mergeSimilarImages || false
-      });
-    }
-    
-    // 第四步：删除未使用布局和母版
-    if (options.removeUnusedLayouts) {
-      onProgress('init', { percentage: 50, status: '删除未使用布局和母版...' });
-      try {
-        if (debug) console.log('Starting layout cleanup...');
-        const result = await removeUnusedLayouts(zip, onProgress);
-        if (!result) {
-          console.warn('Failed to remove unused layouts and masters');
-        } else if (debug) {
-          console.log('Successfully removed unused layouts and masters');
-        }
-      } catch (error) {
-        console.error('Error during layout cleanup:', error);
-      }
+      // 新增：获取 usedMedia
+      usedMedia = cleanResult.usedMedia || new Set(); // <-- 赋值到外部变量
+      console.log(`memFS now has ${Object.keys(memFS).length} entries after cleaning.`);
+    } else {
+      console.log('Skipping resource cleaning step.');
     }
 
-    // 第五步：压缩媒体文件
-    const mediaFiles = findMediaFiles(zip);
-    onProgress('mediaCount', { count: mediaFiles.length });
-    
-    let totalOriginalSize = 0;
-    let totalCompressedSize = 0;
-    
-    // 移除重复的预处理步骤，避免重复执行
-    if (!options.preprocessImages) {
-      // 只有在之前没有执行过预处理的情况下才执行
-      await preprocessImages(zip, {
-          removeDuplicateImages: true, // Remove duplicate images
-          mergeSimilarImages: true    // Merge similar images
-      });
+    // Step 3: Compress images within memFS
+    if (options.compressImages !== false) { // Default to true unless explicitly false
+        console.log('Starting image compression...');
+        // 只压缩被引用的媒体文件
+        const mediaFiles = Array.from(usedMedia); // <-- 这里不会报错了
+        console.log(`Found ${mediaFiles.length} media files for potential compression.`);
+        let compressedCount = 0;
+
+        // Use Promise.all for potentially parallel compression (if compressImage is truly async)
+        await Promise.all(mediaFiles.map(async (mediaPath) => {
+            try {
+                // Read image data from memFS
+                const data = readFileFromMemFS(memFS, mediaPath, 'uint8array');
+                if (!data) {
+                    console.warn(`Media file ${mediaPath} not found in memFS during compression, skipping.`);
+                    return;
+                }
+
+                // Compress the image
+                // 从 options 中获取 imageQuality，如果未提供，则使用默认值（例如 0.8）
+                const imageQuality = options.imageQuality !== undefined ? options.imageQuality : 0.8; // 或者从 COMPRESSION_SETTINGS 获取默认值
+                const compressedResult = await compressImage(data, imageQuality); // <-- 直接传递 quality 数字
+
+                // Write compressed data back to memFS if compression occurred and was successful
+                if (compressedResult && compressedResult.data && compressedResult.data.byteLength < data.byteLength) {
+                    writeFileToMemFS(memFS, mediaPath, compressedResult.data);
+                    compressedCount++;
+                    console.log(`Compressed ${mediaPath} (saved ${data.byteLength - compressedResult.data.byteLength} bytes)`);
+                } else if (compressedResult && compressedResult.data) {
+                    console.log(`Skipping update for ${mediaPath}, compressed size not smaller.`);
+                } else {
+                    console.warn(`Compression result for ${mediaPath} is invalid, skipping update.`);
+                }
+            } catch (compressError) {
+                console.error(`Error compressing media file ${mediaPath}:`, compressError);
+                // Decide whether to continue or stop on error
+            }
+        }));
+        console.log(`Image compression finished. Compressed ${compressedCount} files.`);
+    } else {
+        console.log('Skipping image compression step.');
     }
-    
-    // Change sequential processing to batch processing
-    // Dynamically adjust batch size based on CPU core count
-    // Remove duplicate declaration here, use the variable declared above
-    
-    const batchSize = Math.min(
-      mediaFiles.length,
-      Math.max(4, cpuCount)
-    );
-    
-    // Use more efficient parallel processing
-    for (let i = 0; i < mediaFiles.length; i += batchSize) {
-      const batch = mediaFiles.slice(i, i + batchSize);
-      const batchPromises = batch.map(mediaPath => {
-        return (async () => {
-          try {
-            const fileExtension = mediaPath.split('.').pop().toLowerCase();
-            const isImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
-            
-            let result = { originalSize: 0, compressedSize: 0 };
-            
-            await processMediaFile(zip, mediaPath, async (data) => {
-              if (isImage) {
-                result.originalSize = data.byteLength;
-                
-                const adjustedQuality = options.compressImages?.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-                const compressResult = await compressImage(data, adjustedQuality);
-                
-                result.compressedSize = compressResult.data.byteLength;
-                return compressResult.data;
-              }
-              return data;
-            });
-            
-            return {
-              path: mediaPath,
-              ...result,
-              success: true
-            };
-          } catch (error) {
-            console.error(`Failed to process media file: ${mediaPath}`, {
-              error: error.message,
-              stack: error.stack,
-              timestamp: new Date().toISOString()
-            });
-            return {
-              path: mediaPath,
-              success: false,
-              error: error.message
-            };
-          }
-        })();
-      });
-      
-      const batchResults = await Promise.all(batchPromises);
-      
-      // Update progress and statistics
-      const successfulBatches = batchResults.filter(r => r.success);
-      successfulBatches.forEach(result => {
-        totalOriginalSize += result.originalSize;
-        totalCompressedSize += result.compressedSize;
-      });
-      
-      // Calculate estimated time remaining
-      const elapsed = Date.now() - startTime;
-      const processedCount = Math.min(i + batchSize, mediaFiles.length);
-      const estimatedTotal = mediaFiles.length > 0 ? (elapsed / processedCount) * mediaFiles.length : 0;
-      const estimatedRemaining = Math.max(0, estimatedTotal - elapsed);
-      
-      onProgress('media', {
-        fileIndex: processedCount,
-        totalFiles: mediaFiles.length,
-        processedFiles: batchResults.map(r => r.path.split('/').pop()),
-        estimatedTimeRemaining: Math.round(estimatedRemaining / 1000) // seconds
-      });
-    }
-    
-    const savedMediaSize = totalOriginalSize - totalCompressedSize;
-    const savedMediaPercentage = totalOriginalSize > 0 ? (savedMediaSize / totalOriginalSize * 100).toFixed(1) : 0;
-    
-    onProgress('finalize', { 
-      status: `Rebuilding presentation...`,
-      stats: {
-        originalSize: file.size,
-        compressedSize: null, // Will be updated after zip generation
-        originalMediaSize: totalOriginalSize,
-        compressedMediaSize: totalCompressedSize,
-        savedMediaSize: savedMediaSize,
-        savedMediaPercentage: savedMediaPercentage
-      }
-    });
-    
-    const compressedBlob = await zip.generateAsync({
+
+
+    // Step 4: Convert final memFS back to Zip
+    console.log('Converting memory file system back to ZIP...');
+    const finalZip = await memFSToZip(memFS);
+    console.log('ZIP creation complete.');
+
+    // Step 5: Generate Blob
+    console.log('Generating final PPTX blob...');
+    const blob = await finalZip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
-      compressionOptions: {
-          level: 9, // Already at maximum level
-          mem: 12,  // Increase memory usage to improve compression ratio
-          strategy: 2 // Use RLE strategy to handle repeated data
+      compressionOptions: { level: 9 }
+    });
+    console.log('PPTX optimization complete.');
+
+    // Step 6: Report completion via onProgress
+    const compressedSize = blob.size;
+    const savedSize = originalSize - compressedSize;
+    const savedPercentage = originalSize > 0 ? ((savedSize / originalSize) * 100).toFixed(2) : 0;
+
+    onProgress('complete', { // <-- Call onProgress with 'complete' phase
+      status: 'Compression complete!',
+      stats: {
+        originalSize: originalSize,
+        compressedSize: compressedSize,
+        savedSize: savedSize,
+        savedPercentage: parseFloat(savedPercentage) // Ensure it's a number
+        // Include other relevant stats if available
       }
     });
-    
-    // Calculate final statistics
-    const finalStats = {
-      originalSize: file.size,
-      compressedSize: compressedBlob.size,
-      savedSize: file.size - compressedBlob.size,
-      savedPercentage: ((file.size - compressedBlob.size) / file.size * 100).toFixed(1),
-      originalMediaSize: totalOriginalSize,
-      compressedMediaSize: totalCompressedSize,
-      savedMediaSize: savedMediaSize,
-      savedMediaPercentage: savedMediaPercentage,
-      processingTime: (Date.now() - startTime) / 1000 // Total processing time (seconds)
-    };
-    
-    // Report completion with final stats
-    onProgress('complete', {
-      stats: finalStats
-    });
-    
-    return compressedBlob;
-    
+
+    return blob; // Return the final blob
+
   } catch (error) {
-    console.error('Optimization error:', error);
-    
-    // Provide more user-friendly error messages
-    let userFriendlyMessage = 'An error occurred while processing the file';
-    
-    if (error.message.includes('file size')) {
-      userFriendlyMessage = 'File is too large, please try splitting it into multiple smaller files';
-    } else if (error.message.includes('memory')) {
-      userFriendlyMessage = 'Browser memory insufficient, please close other tabs and try again';
-    } else if (error.message.includes('format')) {
-      userFriendlyMessage = 'File format not supported, please ensure you upload a valid PowerPoint file';
-    }
-    
-    if (typeof onProgress === 'function') {
-      onProgress('error', { 
-        message: userFriendlyMessage,
-        details: error.message
-      });
-    }
-    
-    throw error;
+    console.error('Error during PPTX optimization process:', error);
+    onProgress('error', { // <-- Report error via onProgress
+        message: error.message || 'An unknown error occurred during optimization.',
+        error: error,
+        percentage: 99 // Or estimate progress based on where it failed
+    });
+    throw error; // Rethrowing for now
   }
 }
-
-export { optimizePPTX };

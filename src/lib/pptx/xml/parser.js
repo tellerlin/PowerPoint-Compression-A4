@@ -1,211 +1,106 @@
 import { XMLParser, XMLBuilder } from 'fast-xml-parser';
+// Removed import for xml2js if it existed
 
 /**
- * Parse XML content
- * @param {string} xmlContent - XML string to parse
- * @returns {Object} - Parsed JavaScript object
+ * Parse XML content using fast-xml-parser.
+ * This function handles attributes and attempts to correctly identify arrays for common PPTX elements.
+ * @param {string} xmlContent - XML string to parse. Should be a valid XML string.
+ * @returns {Object} - Parsed JavaScript object.
+ * @throws {Error} Throws an error if parsing fails.
  */
 export function parseXmlSync(xmlContent) {
+  // Input validation
+  if (typeof xmlContent !== 'string' || xmlContent.trim().length === 0) {
+    console.warn('Attempted to parse empty or invalid XML content.');
+    // Depending on requirements, either return null/empty object or throw
+    throw new Error('Invalid XML content provided for parsing.');
+  }
   try {
     const options = {
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
+      // Define which tags should always be treated as arrays
       isArray: (name, jpath, isLeafNode, isAttribute) => {
-        // Some elements should always be treated as arrays, even if there's only one element
-        const arrayElements = ['p:sp', 'p:pic', 'a:p', 'a:r', 'p:nvSpPr', 'p:cNvPr', 'p:cNvSpPr', 
-                              'p:spPr', 'a:xfrm', 'a:off', 'a:ext', 'p:txBody', 'a:bodyPr', 
-                              'a:lstStyle', 'a:pPr', 'a:rPr', 'a:t', 'Relationship'];
+        const arrayElements = [
+          'p:sldId', 'p:sldLayoutId', 'p:txBody', 'p:sp', 'p:pic', 'p:graphicFrame', 'p:grpSp', 'p:AlternateContent', // PresentationML specific
+          'a:p', 'a:r', 'a:t', 'a:br', 'a:fld', // DrawingML text related
+          'a:off', 'a:ext', 'a:prstGeom', 'a:custGeom', 'a:pathLst', 'a:path', // DrawingML shapes/geometry
+          'a:gsLst', 'a:gs', // DrawingML gradients
+          'a:ln', 'a:fillRef', 'a:effectRef', 'a:fontRef', // DrawingML references
+          'Relationship', // Relationship files
+          // Add other tags known to appear multiple times even if single
+        ];
+        // Simple check if the tag name exists in our list
         return arrayElements.includes(name);
-      }
+      },
+      // Optional: Configure handling of text nodes if needed
+      // textNodeName: "#text",
+      // trimValues: true, // Trim whitespace from values
+      // processEntities: true, // Decode HTML entities
+      // htmlEntities: true,
     };
-    
+
     const parser = new XMLParser(options);
-    return parser.parse(xmlContent);
+    const result = parser.parse(xmlContent);
+    // Optional: Add a check for minimal structure if needed, e.g., check if root element exists
+    if (Object.keys(result).length === 0) {
+        console.warn(`XML parsing resulted in an empty object for content starting with: ${xmlContent.substring(0, 50)}...`);
+        // Decide if this is an error or acceptable
+    }
+    return result;
   } catch (error) {
-    console.error('Error parsing XML:', error);
-    throw error;
+    console.error('Error parsing XML with fast-xml-parser:', error.message);
+    // Provide more context if possible
+    console.error(`XML content snippet (first 100 chars): ${xmlContent.substring(0, 100)}...`);
+    // Re-throw the error to be handled by the caller
+    throw new Error(`XML parsing failed: ${error.message}`);
   }
 }
 
-// For backward compatibility
+// Export parseXmlSync as the primary XML parsing function
 export const parseXml = parseXmlSync;
 
-/**
- * Parse XML content with namespaces
- * @param {string} xmlContent - XML string to parse
- * @returns {Object} - Parsed JavaScript object
- */
-// Enhanced XML parsing function with error handling
-
-export async function parseXmlWithNamespaces(xmlString) {
-  try {
-    // Use the sync version for consistency
-    const result = parseXmlSync(xmlString);
-    return result;
-  } catch (error) {
-    console.error('XML parsing error:', error);
-    
-    // Try to fix common XML issues
-    try {
-      // 1. Fix unclosed tags
-      const fixedXml = fixUnclosedTags(xmlString);
-      
-      // 2. Fix invalid characters
-      const sanitizedXml = sanitizeXmlString(fixedXml);
-      
-      // Try parsing again with the sync version
-      return parseXmlSync(sanitizedXml);
-    } catch (secondError) {
-      console.error('XML parsing still failed after fixes:', secondError);
-      // Return a minimal usable object to avoid null reference errors
-      return { _parseFailed: true };
-    }
-  }
-}
-
-// Helper function to fix unclosed tags
-function fixUnclosedTags(xmlString) {
-  // Simple implementation, more complex logic might be needed in real applications
-  const tagStack = [];
-  const regex = /<\/?([a-zA-Z0-9:]+)[^>]*>/g;
-  let match;
-  
-  while ((match = regex.exec(xmlString)) !== null) {
-    const fullTag = match[0];
-    const tagName = match[1];
-    
-    if (fullTag.startsWith('</')) {
-      // Closing tag
-      if (tagStack.length > 0 && tagStack[tagStack.length - 1] === tagName) {
-        tagStack.pop();
-      }
-    } else if (!fullTag.endsWith('/>')) {
-      // Opening tag
-      tagStack.push(tagName);
-    }
-  }
-  
-  // Add missing closing tags
-  let result = xmlString;
-  while (tagStack.length > 0) {
-    const tagName = tagStack.pop();
-    result += `</${tagName}>`;
-  }
-  
-  return result;
-}
-
-// Clean invalid characters from XML string
-function sanitizeXmlString(xmlString) {
-  // Remove control characters not allowed in XML
-  return xmlString.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-}
-
-// Enhanced parseXml function with safety checks
-function parseXmlSafely(xmlString) {
-  if (!xmlString || typeof xmlString !== 'string') {
-    console.warn('Attempted to parse invalid XML content:', xmlString);
-    return { _invalid: true };
-  }
-  
-  try {
-    // Use the sync version
-    return parseXmlSync(xmlString);
-  } catch (error) {
-    console.error('XML parsing error:', error);
-    return { _parseFailed: true, _error: error.message };
-  }
-}
+// Removed the complex parseXmlWithNamespaces function and its helpers (fixUnclosedTags, sanitizeXmlString)
+// Removed parseXmlSafely function
 
 /**
- * Convert JavaScript object to XML string
- * @param {Object} jsObject - JavaScript object to convert
- * @returns {string} - Generated XML string
+ * Convert JavaScript object back to XML string using fast-xml-parser.
+ * @param {Object} jsObject - JavaScript object to convert. Should be in the format expected by fast-xml-parser.
+ * @returns {string} - Generated XML string.
+ * @throws {Error} Throws an error if building fails.
  */
 export function buildXml(jsObject) {
+  // Input validation
+  if (typeof jsObject !== 'object' || jsObject === null || Object.keys(jsObject).length === 0) {
+      console.warn('Attempted to build XML from invalid or empty object.');
+      throw new Error('Invalid JavaScript object provided for building XML.');
+  }
   try {
     const options = {
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
-      format: true,
-      indentBy: '  '
+      format: true, // Enable pretty printing
+      indentBy: '  ', // Indentation string
+      // Optional: Configure handling of text nodes if needed
+      // textNodeName: "#text",
+      // suppressEmptyNode: true, // Remove empty tags like <a:pPr/>
+      // processEntities: true, // Encode special characters to entities
     };
-    
+
     const builder = new XMLBuilder(options);
-    const xmlContent = builder.build(jsObject);
-    return xmlContent;
-  } catch (error) {
-    console.error('Error building XML:', error);
-    throw error;
-  }
-}
-
-/**
- * Read and parse XML file from ZIP
- * @param {JSZip} zip - JSZip instance
- * @param {string} path - File path within ZIP
- * @returns {Promise<Object>} - Parsed JavaScript object
- */
-export async function parseXmlFromZip(zip, path) {
-  try {
-    const file = zip.file(path);
-    if (!file) {
-      console.warn(`File does not exist: ${path}`);
-      return null;
+    let xml = builder.build(jsObject);
+    // 修正：只在没有声明时添加
+    if (!xml.trim().startsWith('<?xml')) {
+      xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + xml;
     }
-    
-    const content = await file.async('text');
-    return parseXml(content);
+    return xml;
   } catch (error) {
-    console.error(`Error parsing XML file from ZIP (${path}):`, error);
-    throw error;
+    console.error('Error building XML with fast-xml-parser:', error.message);
+    console.error('Input JS Object (structure):', JSON.stringify(jsObject, null, 2).substring(0, 200) + '...'); // Log structure safely
+    throw new Error(`XML building failed: ${error.message}`);
   }
 }
 
-/**
- * Read and parse XML file with namespaces from ZIP
- * @param {JSZip} zip - JSZip instance
- * @param {string} path - File path within ZIP
- * @returns {Promise<Object>} - Parsed JavaScript object
- */
-export async function parseXmlWithNamespacesFromZip(zip, path) {
-  try {
-    const file = zip.file(path);
-    if (!file) {
-      console.warn(`File does not exist: ${path}`);
-      return null;
-    }
-    
-    const content = await file.async('text');
-    return parseXmlWithNamespaces(content);
-  } catch (error) {
-    console.error('Error parsing XML:', error);
-    throw error;
-  }
-}
-
-// Rename the async version to avoid conflict
-export async function parseXmlAsync(xmlString) {
-  try {
-    // Try to fix unclosed tags
-    const fixedXml = fixUnclosedTags(xmlString);
-    const result = await xml2js.parseStringPromise(fixedXml, {
-      explicitArray: false,
-      normalizeTags: false
-    });
-    return result;
-  } catch (error) {
-    console.error('XML parsing error:', error.message);
-    // Add more detailed error information
-    const errorInfo = {
-      message: error.message,
-      xmlPreview: xmlString.length > 100 ? xmlString.substring(0, 100) + '...' : xmlString,
-      errorPosition: error.line ? `Line ${error.line}, Column ${error.column}` : 'Unknown position'
-    };
-    
-    // Throw enhanced error object
-    const enhancedError = new Error(`XML parsing failed: ${error.message}`);
-    enhancedError.details = errorInfo;
-    throw enhancedError;
-  }
-}
+// Removed parseXmlFromZip function
+// Removed parseXmlWithNamespacesFromZip function
+// Removed parseXmlAsync (xml2js based) function
