@@ -2,18 +2,19 @@ import JSZip from 'jszip';
 import { validateFile } from '../utils/validation';
 import { compressImage } from '../utils/image';
 import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
-import { findMediaFiles, processMediaFile, removeHiddenSlides } from './pptx-utils';
+import { findMediaFiles, processMediaFile } from './pptx-utils';
+import { removeHiddenSlides } from './slides';
 import { removeUnusedLayouts } from './layout-cleaner';
 import { cleanUnusedResources } from './cleaner';
 
-// 添加预处理图片的函数
+// Function to preprocess images
 async function preprocessImages(zip, options = {}) {
   try {
     const mediaFiles = findMediaFiles(zip);
     const mediaContents = {};
     const duplicates = new Map();
     
-    // 第一步：收集所有媒体文件内容用于比较
+    // Step 1: Collect all media file contents for comparison
     for (const mediaPath of mediaFiles) {
       const file = zip.file(mediaPath);
       if (!file) continue;
@@ -22,11 +23,11 @@ async function preprocessImages(zip, options = {}) {
       if (!SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension)) continue;
       
       const data = await file.async('uint8array');
-      // 使用简单的哈希来标识相似图片
+      // Use a simple hash to identify similar images
       const hash = simpleHash(data);
       mediaContents[mediaPath] = { data, hash, size: data.byteLength };
       
-      // 检测重复图片
+      // Detect duplicate images
       if (options.removeDuplicateImages) {
         if (duplicates.has(hash)) {
           duplicates.get(hash).push(mediaPath);
@@ -36,17 +37,17 @@ async function preprocessImages(zip, options = {}) {
       }
     }
     
-    // 第二步：处理重复图片
+    // Step 2: Process duplicate images
     if (options.removeDuplicateImages) {
       for (const [hash, paths] of duplicates.entries()) {
         if (paths.length > 1) {
-          // 保留第一个图片，删除其余重复的
+          // Keep the first image, remove the rest
           const originalPath = paths[0];
           const duplicatePaths = paths.slice(1);
           
           for (const dupPath of duplicatePaths) {
-            // 不直接删除文件，而是将其替换为对原始文件的引用
-            // 这需要修改PPT的XML引用，这里简化处理
+            // Don't directly delete files, but replace them with references to the original file
+            // This requires modifying PPT XML references, simplified handling here
             console.log(`Found duplicate image: ${dupPath} (same as ${originalPath})`);
           }
         }
@@ -60,20 +61,20 @@ async function preprocessImages(zip, options = {}) {
   }
 }
 
-// 添加简单的哈希函数用于图片比较
+// Add a simple hash function for image comparison
 function simpleHash(data) {
-  // 简化的哈希算法，仅用于演示
-  // 实际应用中应使用更可靠的哈希算法
+  // Simplified hash algorithm, for demonstration only
+  // In production, use a more reliable hash algorithm
   let hash = 0;
-  const step = Math.max(1, Math.floor(data.length / 1000)); // 采样以提高性能
+  const step = Math.max(1, Math.floor(data.length / 1000)); // Sample to improve performance
   for (let i = 0; i < data.length; i += step) {
     hash = ((hash << 5) - hash) + data[i];
-    hash |= 0; // 转换为32位整数
+    hash |= 0; // Convert to 32-bit integer
   }
   return hash.toString(16);
 }
 
-// 在 optimizePPTX 函数中
+// In the optimizePPTX function
 async function optimizePPTX(file, options = {}) {
   try {
     validateFile(file);
@@ -81,7 +82,7 @@ async function optimizePPTX(file, options = {}) {
     const { onProgress = () => {} } = options;
     const startTime = Date.now();
     
-    // 安全检查硬件并发能力 - 只在这里声明一次
+    // Safely check hardware concurrency - declare only once
     const hasHardwareConcurrency = typeof navigator !== 'undefined' && 
                                   'hardwareConcurrency' in navigator && 
                                   typeof navigator.hardwareConcurrency === 'number';
@@ -111,16 +112,16 @@ async function optimizePPTX(file, options = {}) {
       throw new Error(errorMessage);
     }
     
-    // 添加清理未使用资源的功能
+    // Add functionality to clean unused resources
     if (options.cleanUnusedResources) {
       onProgress('init', { percentage: 25, status: 'Cleaning unused resources...' });
       await cleanUnusedResources(zip, onProgress);
     }
     
-    // 添加调试选项
+    // Add debug options
     const debug = options.debug || false;
     
-    // 添加预处理步骤
+    // Add preprocessing step
     if (options.preprocessImages) {
       onProgress('init', { percentage: 35, status: 'Preprocessing images...' });
       await preprocessImages(zip, {
@@ -129,7 +130,7 @@ async function optimizePPTX(file, options = {}) {
       });
     }
     
-    // 添加删除未使用布局和母版的功能
+    // Add functionality to remove unused layouts and masters
     if (options.removeUnusedLayouts) {
       onProgress('init', { percentage: 50, status: 'Removing unused layouts and masters...' });
       try {
@@ -145,9 +146,16 @@ async function optimizePPTX(file, options = {}) {
       }
     }
 
+    // Add debug logs when calling
     if (options.removeHiddenSlides) {
       onProgress('init', { percentage: 75, status: 'Removing hidden slides...' });
-      await removeHiddenSlides(zip);
+      console.log('Starting to call removeHiddenSlides function...');
+      try {
+        await removeHiddenSlides(zip);
+        console.log('removeHiddenSlides function call completed');
+      } catch (error) {
+        console.error('Error calling removeHiddenSlides function:', error);
+      }
     }
     
     const mediaFiles = findMediaFiles(zip);
@@ -156,22 +164,22 @@ async function optimizePPTX(file, options = {}) {
     let totalOriginalSize = 0;
     let totalCompressedSize = 0;
     
-    // 在处理媒体文件前添加预处理步骤
+    // Add preprocessing step before processing media files
     await preprocessImages(zip, {
-        removeDuplicateImages: true, // 移除重复图片
-        mergeSimilarImages: true    // 合并相似图片
+        removeDuplicateImages: true, // Remove duplicate images
+        mergeSimilarImages: true    // Merge similar images
     });
     
-    // 将顺序处理改为批处理
-    // 动态调整批量大小，基于CPU核心数
-    // 删除这里的重复声明，使用上面已经声明的变量
+    // Change sequential processing to batch processing
+    // Dynamically adjust batch size based on CPU core count
+    // Remove duplicate declaration here, use the variable declared above
     
     const batchSize = Math.min(
       mediaFiles.length,
       Math.max(4, cpuCount)
     );
     
-    // 使用更高效的并行处理方式
+    // Use more efficient parallel processing
     for (let i = 0; i < mediaFiles.length; i += batchSize) {
       const batch = mediaFiles.slice(i, i + batchSize);
       const batchPromises = batch.map(mediaPath => {
@@ -201,7 +209,7 @@ async function optimizePPTX(file, options = {}) {
               success: true
             };
           } catch (error) {
-            console.error(`处理媒体文件失败: ${mediaPath}`, {
+            console.error(`Failed to process media file: ${mediaPath}`, {
               error: error.message,
               stack: error.stack,
               timestamp: new Date().toISOString()
@@ -217,14 +225,14 @@ async function optimizePPTX(file, options = {}) {
       
       const batchResults = await Promise.all(batchPromises);
       
-      // 更新进度和统计信息
+      // Update progress and statistics
       const successfulBatches = batchResults.filter(r => r.success);
       successfulBatches.forEach(result => {
         totalOriginalSize += result.originalSize;
         totalCompressedSize += result.compressedSize;
       });
       
-      // 计算剩余时间估计
+      // Calculate estimated time remaining
       const elapsed = Date.now() - startTime;
       const processedCount = Math.min(i + batchSize, mediaFiles.length);
       const estimatedTotal = mediaFiles.length > 0 ? (elapsed / processedCount) * mediaFiles.length : 0;
@@ -234,7 +242,7 @@ async function optimizePPTX(file, options = {}) {
         fileIndex: processedCount,
         totalFiles: mediaFiles.length,
         processedFiles: batchResults.map(r => r.path.split('/').pop()),
-        estimatedTimeRemaining: Math.round(estimatedRemaining / 1000) // 秒
+        estimatedTimeRemaining: Math.round(estimatedRemaining / 1000) // seconds
       });
     }
     
@@ -257,9 +265,9 @@ async function optimizePPTX(file, options = {}) {
       type: 'blob',
       compression: 'DEFLATE',
       compressionOptions: {
-          level: 9, // 已经是最高级别
-          mem: 12,  // 增加内存使用以提高压缩率
-          strategy: 2 // 使用RLE策略处理重复数据
+          level: 9, // Already at maximum level
+          mem: 12,  // Increase memory usage to improve compression ratio
+          strategy: 2 // Use RLE strategy to handle repeated data
       }
     });
     
@@ -273,7 +281,7 @@ async function optimizePPTX(file, options = {}) {
       compressedMediaSize: totalCompressedSize,
       savedMediaSize: savedMediaSize,
       savedMediaPercentage: savedMediaPercentage,
-      processingTime: (Date.now() - startTime) / 1000 // 处理总时间（秒）
+      processingTime: (Date.now() - startTime) / 1000 // Total processing time (seconds)
     };
     
     // Report completion with final stats
@@ -286,15 +294,15 @@ async function optimizePPTX(file, options = {}) {
   } catch (error) {
     console.error('Optimization error:', error);
     
-    // 提供更友好的错误信息
-    let userFriendlyMessage = '处理文件时发生错误';
+    // Provide more user-friendly error messages
+    let userFriendlyMessage = 'An error occurred while processing the file';
     
     if (error.message.includes('file size')) {
-      userFriendlyMessage = '文件过大，请尝试分割为多个较小的文件';
+      userFriendlyMessage = 'File is too large, please try splitting it into multiple smaller files';
     } else if (error.message.includes('memory')) {
-      userFriendlyMessage = '浏览器内存不足，请关闭其他标签页后重试';
+      userFriendlyMessage = 'Browser memory insufficient, please close other tabs and try again';
     } else if (error.message.includes('format')) {
-      userFriendlyMessage = '文件格式不支持，请确保上传有效的 PowerPoint 文件';
+      userFriendlyMessage = 'File format not supported, please ensure you upload a valid PowerPoint file';
     }
     
     if (typeof onProgress === 'function') {
