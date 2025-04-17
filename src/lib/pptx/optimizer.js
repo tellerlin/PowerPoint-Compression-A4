@@ -134,8 +134,12 @@ async function optimizePPTX(file, options = {}) {
     // 第二步：清理未使用资源
     if (options.cleanUnusedResources) {
       onProgress('init', { percentage: 25, status: '清理未使用资源...' });
-      await cleanUnusedResources(zip, onProgress);
+      await cleanUnusedResources(zip, onProgress, {
+        removeUnusedLayouts: true,  // 删除未使用的布局
+        cleanMediaInUnusedLayouts: true  // 清理未使用布局中的媒体文件
+      });
     }
+    
     
     // 第三步：预处理图片
     if (options.preprocessImages) {
