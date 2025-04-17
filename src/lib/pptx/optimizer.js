@@ -112,6 +112,13 @@ async function optimizePPTX(file, options = {}) {
       throw new Error(errorMessage);
     }
     
+    // 添加调试选项
+    const debug = options.debug || false;
+    if (debug) {
+      zip.debug = true;
+      console.log('Debug mode enabled');
+    }
+    
     // 第一步：删除隐藏幻灯片
     if (options.removeHiddenSlides) {
       onProgress('init', { percentage: 10, status: '删除隐藏幻灯片...' });
@@ -129,9 +136,6 @@ async function optimizePPTX(file, options = {}) {
       onProgress('init', { percentage: 25, status: '清理未使用资源...' });
       await cleanUnusedResources(zip, onProgress);
     }
-    
-    // Add debug options
-    const debug = options.debug || false;
     
     // 第三步：预处理图片
     if (options.preprocessImages) {
@@ -165,11 +169,14 @@ async function optimizePPTX(file, options = {}) {
     let totalOriginalSize = 0;
     let totalCompressedSize = 0;
     
-    // Add preprocessing step before processing media files
-    await preprocessImages(zip, {
-        removeDuplicateImages: true, // Remove duplicate images
-        mergeSimilarImages: true    // Merge similar images
-    });
+    // 移除重复的预处理步骤，避免重复执行
+    if (!options.preprocessImages) {
+      // 只有在之前没有执行过预处理的情况下才执行
+      await preprocessImages(zip, {
+          removeDuplicateImages: true, // Remove duplicate images
+          mergeSimilarImages: true    // Merge similar images
+      });
+    }
     
     // Change sequential processing to batch processing
     // Dynamically adjust batch size based on CPU core count

@@ -55,6 +55,9 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
   try {
     if (zip.debug) console.time('collectUsedMedia');
     
+    // 确保只处理非隐藏的幻灯片
+    console.log(`Processing ${usedSlides.length} non-hidden slides for media references`);
+    
     // 获取幻灯片中直接使用的媒体文件
     const slideMedia = await getUsedMedia(zip, usedSlides);
     slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
@@ -243,9 +246,9 @@ async function removeUnusedMedia(zip, usedMedia) {
     const unusedMedia = mediaFiles.filter(path => !usedMedia.has(path));
     console.log(`Found ${unusedMedia.length} unused media files to remove`);
     
-    // 安全检查，避免删除所有媒体文件
-    if (unusedMedia.length > 0 && unusedMedia.length === mediaFiles.length) {
-      console.warn('Safety check: Skipping removal - attempting to remove all media files');
+    // 使用安全检查函数
+    if (shouldSkipMediaRemoval(mediaFiles.length, unusedMedia.length)) {
+      console.warn('Safety check: Skipping media removal due to safety constraints');
       return;
     }
     
@@ -268,11 +271,10 @@ async function removeUnusedMedia(zip, usedMedia) {
   } catch (error) {
     console.error('Error removing unused media files:', error);
     console.error('Error details:', {
-      name: error.name,
       message: error.message,
-      stack: error.stack
+      stack: error.stack,
+      timestamp: new Date().toISOString()
     });
-    // 不抛出异常，让流程继续
   }
 }
 
