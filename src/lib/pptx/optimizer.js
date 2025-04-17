@@ -112,27 +112,39 @@ async function optimizePPTX(file, options = {}) {
       throw new Error(errorMessage);
     }
     
-    // Add functionality to clean unused resources
+    // 第一步：删除隐藏幻灯片
+    if (options.removeHiddenSlides) {
+      onProgress('init', { percentage: 10, status: '删除隐藏幻灯片...' });
+      console.log('Starting to call removeHiddenSlides function...');
+      try {
+        await removeHiddenSlides(zip);
+        console.log('removeHiddenSlides function call completed');
+      } catch (error) {
+        console.error('Error calling removeHiddenSlides function:', error);
+      }
+    }
+    
+    // 第二步：清理未使用资源
     if (options.cleanUnusedResources) {
-      onProgress('init', { percentage: 25, status: 'Cleaning unused resources...' });
+      onProgress('init', { percentage: 25, status: '清理未使用资源...' });
       await cleanUnusedResources(zip, onProgress);
     }
     
     // Add debug options
     const debug = options.debug || false;
     
-    // Add preprocessing step
+    // 第三步：预处理图片
     if (options.preprocessImages) {
-      onProgress('init', { percentage: 35, status: 'Preprocessing images...' });
+      onProgress('init', { percentage: 35, status: '预处理图片...' });
       await preprocessImages(zip, {
         removeDuplicateImages: options.preprocessImages.removeDuplicateImages || false,
         mergeSimilarImages: options.preprocessImages.mergeSimilarImages || false
       });
     }
     
-    // Add functionality to remove unused layouts and masters
+    // 第四步：删除未使用布局和母版
     if (options.removeUnusedLayouts) {
-      onProgress('init', { percentage: 50, status: 'Removing unused layouts and masters...' });
+      onProgress('init', { percentage: 50, status: '删除未使用布局和母版...' });
       try {
         if (debug) console.log('Starting layout cleanup...');
         const result = await removeUnusedLayouts(zip, onProgress);
@@ -146,18 +158,7 @@ async function optimizePPTX(file, options = {}) {
       }
     }
 
-    // Add debug logs when calling
-    if (options.removeHiddenSlides) {
-      onProgress('init', { percentage: 75, status: 'Removing hidden slides...' });
-      console.log('Starting to call removeHiddenSlides function...');
-      try {
-        await removeHiddenSlides(zip);
-        console.log('removeHiddenSlides function call completed');
-      } catch (error) {
-        console.error('Error calling removeHiddenSlides function:', error);
-      }
-    }
-    
+    // 第五步：压缩媒体文件
     const mediaFiles = findMediaFiles(zip);
     onProgress('mediaCount', { count: mediaFiles.length });
     
