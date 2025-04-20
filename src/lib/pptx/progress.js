@@ -42,17 +42,19 @@ export class ProgressManager {
     this.progressCallback = cb;
   }
 
+  // 修改 savePhases 方法中的注释
   savePhases() {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
         localStorage.setItem('progress_phases', JSON.stringify(this.phases));
       }
     } catch (error) {
-      // 处理隐私模式或存储已满的情况
+      // Handle privacy mode or storage full scenarios
       console.warn('Failed to save progress phases:', error);
     }
   }
-
+  
+  // 修改 loadPhases 方法中的注释
   loadPhases() {
     try {
       if (typeof window !== 'undefined' && window.localStorage) {
@@ -60,10 +62,25 @@ export class ProgressManager {
         if (data) return JSON.parse(data);
       }
     } catch (error) {
-      // 处理数据损坏或其他异常
+      // Handle corrupted data or other exceptions
       console.warn('Failed to load progress phases:', error);
     }
     return null;
+  }
+  
+  // 修改 endPhase 方法中的注释
+  endPhase(phase) {
+    if (this.phaseStartTimes[phase]) {
+      const duration = Date.now() - this.phaseStartTimes[phase];
+      this.phaseDurations[phase] = duration;
+      if (this.historicalData[phase]) {
+        this.historicalData[phase].push(duration);
+        // Keep only the most recent 10
+        if (this.historicalData[phase].length > 10) {
+          this.historicalData[phase].shift();
+        }
+      }
+    }
   }
 
   adjustWeights() {
@@ -193,20 +210,6 @@ export class ProgressManager {
   startPhase(phase) {
     this.currentPhase = phase;
     this.phaseStartTimes[phase] = Date.now();
-  }
-
-  endPhase(phase) {
-    if (this.phaseStartTimes[phase]) {
-      const duration = Date.now() - this.phaseStartTimes[phase];
-      this.phaseDurations[phase] = duration;
-      if (this.historicalData[phase]) {
-        this.historicalData[phase].push(duration);
-        // 只保留最近10次
-        if (this.historicalData[phase].length > 10) {
-          this.historicalData[phase].shift();
-        }
-      }
-    }
   }
 
   completeCompression(stats) {

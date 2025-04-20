@@ -74,9 +74,17 @@ export async function optimizePPTX(file, options = {}) {
             skippedCount++;
             return;
           }
+          
+          // Skip SVG files or handle them specially
+          if (mediaPath.toLowerCase().endsWith('.svg')) {
+            console.log(`Skipping SVG file ${mediaPath}`);
+            skippedCount++;
+            return;
+          }
+          
           const imageQuality = options.imageQuality !== undefined ? options.imageQuality : 0.8;
           const compressedResult = await compressImage(data, imageQuality);
-
+      
           if (compressedResult && compressedResult.data && compressedResult.data.byteLength < data.byteLength) {
             writeFileToMemFS(memFS, mediaPath, compressedResult.data);
             compressedCount++;
