@@ -8,9 +8,13 @@ export const SUPPORTED_IMAGE_EXTENSIONS = [
 ];
 
 export const COMPRESSION_SETTINGS = {
-  DEFAULT_QUALITY: 0.85, // Increased from 0.90 for better compression
-  MAX_IMAGE_SIZE: 1200,  // Increased from 1000 for better quality
-  ZIP_COMPRESSION_LEVEL: 9
+  DEFAULT_QUALITY: 0.82,  // 略微调整默认质量
+  MAX_IMAGE_SIZE: 1600,   // 调整最大图像尺寸
+  ZIP_COMPRESSION_LEVEL: 9,
+  // 添加更多细粒度控制
+  PHOTO_QUALITY: 0.80,    // 照片可以使用较低质量
+  DIAGRAM_QUALITY: 0.88,  // 图表需要更高质量
+  ICON_QUALITY: 0.90      // 图标需要最高质量
 };
 
 export const MEDIA_PATH_PREFIX = 'ppt/media/';

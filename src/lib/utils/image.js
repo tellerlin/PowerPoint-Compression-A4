@@ -25,8 +25,8 @@ const ImageType = {
 };
 
 // 添加图像类型分析函数
+// 改进图像类型分析
 function analyzeImageType(imageData) {
-  // 简化的图像类型检测
   const { width, height, data } = imageData;
   
   // 检查是否为图标（小尺寸，通常有透明度）
@@ -34,26 +34,79 @@ function analyzeImageType(imageData) {
     return ImageType.ICON;
   }
   
-  // 检查是否为图表/图形（有限的颜色数量，清晰的边缘）
+  // 计算边缘密度和颜色分布
   let colorCount = 0;
   const colorMap = new Map();
-  const sampleStep = Math.max(1, Math.floor((data.length / 4) / 1000));
+  const sampleStep = Math.max(1, Math.floor((data.length / 4) / 2000)); // 增加采样点
+  
+  let edgeCount = 0;
+  let transparentPixels = 0;
+  let lastR = 0, lastG = 0, lastB = 0;
   
   for (let i = 0; i < data.length; i += sampleStep * 4) {
     const r = data[i];
     const g = data[i + 1];
     const b = data[i + 2];
-    const colorKey = `${r},${g},${b}`;
+    const a = data[i + 3];
+    
+    // 检测透明像素
+    if (a < 250) {
+      transparentPixels++;
+    }
+    
+    // 简单的边缘检测 - 检查相邻像素的颜色变化
+    if (i > 0) {
+      const colorDiff = Math.abs(r - lastR) + Math.abs(g - lastG) + Math.abs(b - lastB);
+      if (colorDiff > 100) { // 阈值可以调整
+        edgeCount++;
+      }
+    }
+    
+    lastR = r;
+    lastG = g;
+    lastB = b;
+    
+    const colorKey = `${Math.floor(r/10)},${Math.floor(g/10)},${Math.floor(b/10)}`;
     
     if (!colorMap.has(colorKey)) {
       colorMap.set(colorKey, 1);
       colorCount++;
-      if (colorCount > 50) break; // 如果颜色太多，可能是照片
+    } else {
+      colorMap.set(colorKey, colorMap.get(colorKey) + 1);
     }
   }
   
-  if (colorCount < 50) {
-    return ImageType.DIAGRAM;
+  // 计算采样点总数
+  const totalSamples = Math.floor(data.length / (4 * sampleStep));
+  
+  // 计算边缘密度和透明度比例
+  const edgeDensity = edgeCount / totalSamples;
+  const transparencyRatio = transparentPixels / totalSamples;
+  
+  // 分析颜色分布 - 查找主要颜色
+  let dominantColors = 0;
+  let colorDistribution = [];
+  
+  for (const [color, count] of colorMap.entries()) {
+    const ratio = count / totalSamples;
+    colorDistribution.push({ color, ratio });
+    if (ratio > 0.05) { // 如果某个颜色占比超过5%
+      dominantColors++;
+    }
+  }
+  
+  // 根据特征判断图像类型
+  if (edgeDensity > 0.2 && colorCount < 100) {
+    return ImageType.DIAGRAM; // 高边缘密度，有限颜色 -> 图表/图形
+  }
+  
+  if (dominantColors < 10 && colorCount < 200) {
+    return ImageType.DIAGRAM; // 少量主要颜色 -> 可能是图表
+  }
+  
+  if (transparencyRatio > 0.1) {
+    // 有大量透明像素，可能是图标或图表
+    return colorCount < 100 ? ImageType.ICON : ImageType.DIAGRAM;
   }
   
   // 默认为照片
@@ -71,22 +124,54 @@ function analyzeImage(imageData) {
 }
 
 function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = 1920, maxHeight = 1080, imageType = ImageType.UNKNOWN) {
-  // 找出最短边和最长边
-  const shortestSide = Math.min(originalWidth, originalHeight);
-  const longestSide = Math.max(originalWidth, originalHeight);
+  // 对于不同类型的图像使用不同的缩放策略
   
-  // 如果最短边已经小于等于MAX_IMAGE_SIZE，保持原始尺寸
-  if (shortestSide <= 1920) {
+  // 如果是图标，保持原始尺寸或适当缩小
+  if (imageType === ImageType.ICON) {
+    if (originalWidth <= 256 && originalHeight <= 256) {
+      return { width: originalWidth, height: originalHeight };
+    }
+    // 对于大图标，缩小到合理尺寸
+    const scale = Math.min(1, 256 / Math.max(originalWidth, originalHeight));
+    return {
+      width: Math.round(originalWidth * scale),
+      height: Math.round(originalHeight * scale)
+    };
+  }
+  
+  // 对于图表/图形，保持较高分辨率以保证清晰度
+  if (imageType === ImageType.DIAGRAM) {
+    // 如果原始尺寸已经合理，保持不变
+    if (originalWidth <= maxWidth && originalHeight <= maxHeight) {
+      return { width: originalWidth, height: originalHeight };
+    }
+    
+    // 计算缩放比例，但对图表使用较高的最大尺寸
+    const diagramMaxWidth = Math.min(maxWidth * 1.2, 2400);
+    const diagramMaxHeight = Math.min(maxHeight * 1.2, 1800);
+    
+    const widthRatio = diagramMaxWidth / originalWidth;
+    const heightRatio = diagramMaxHeight / originalHeight;
+    const ratio = Math.min(widthRatio, heightRatio);
+    
+    return {
+      width: Math.round(originalWidth * ratio),
+      height: Math.round(originalHeight * ratio)
+    };
+  }
+  
+  // 对于照片，使用标准缩放策略
+  if (originalWidth <= maxWidth && originalHeight <= maxHeight) {
     return { width: originalWidth, height: originalHeight };
   }
   
-  // 计算缩放比例（基于最短边）
-  const scale = 1920 / shortestSide;
+  const widthRatio = maxWidth / originalWidth;
+  const heightRatio = maxHeight / originalHeight;
+  const ratio = Math.min(widthRatio, heightRatio);
   
-  // 等比例调整尺寸
   return {
-    width: Math.round(originalWidth * scale),
-    height: Math.round(originalHeight * scale)
+    width: Math.round(originalWidth * ratio),
+    height: Math.round(originalHeight * ratio)
   };
 }
 
@@ -231,8 +316,12 @@ export async function compressImage(imageData, quality = 0.8, options = {}) {
     
     // 根据图像类型调整质量
     let targetQuality = quality;
-    if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-      targetQuality = Math.min(quality, 0.75);
+    // 对于照片类型的图像，可以适当降低质量但保持视觉效果
+    if (imageType === ImageType.PHOTO) {
+      targetQuality = Math.min(quality, 0.85);
+    } else if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+      // 对于图表和图标，保持较高质量以保证清晰度
+      targetQuality = Math.min(quality, 0.9);
     }
     
     // 计算新尺寸
@@ -245,7 +334,7 @@ export async function compressImage(imageData, quality = 0.8, options = {}) {
     );
     
     // 如果图像已经很小且不需要调整大小，可以考虑跳过压缩
-    if (width === img.width && height === img.height && imageData.byteLength < 100 * 1024 && !forceCompress) {
+    if (width === img.width && height === img.height && imageData.byteLength < 50 * 1024 && !forceCompress) {
       return { data: imageData, width, height, skipped: true };
     }
     
@@ -254,10 +343,33 @@ export async function compressImage(imageData, quality = 0.8, options = {}) {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
+    
+    // 对于图表和图标，使用更适合的渲染设置
+    if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+      ctx.imageSmoothingQuality = 'high';
+      // 对于线条清晰的图像，禁用抗锯齿可能会更好
+      if (width < img.width / 2 || height < img.height / 2) {
+        ctx.imageSmoothingEnabled = false;
+      }
+    } else {
+      // 对于照片，使用默认的平滑设置
+      ctx.imageSmoothingQuality = 'medium';
+    }
+    
     ctx.drawImage(img, 0, 0, width, height);
     
     // 尝试多种格式，选择最佳结果
     const blobs = [];
+    
+    // 尝试AVIF (更高压缩率的现代格式)
+    try {
+      blobs.push({
+        type: 'avif',
+        blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/avif', targetQuality))
+      });
+    } catch (e) {
+      console.warn('AVIF compression failed:', e);
+    }
     
     // 尝试WebP (现代浏览器支持较好的格式)
     try {
@@ -272,9 +384,11 @@ export async function compressImage(imageData, quality = 0.8, options = {}) {
     // 如果没有透明通道，尝试JPEG
     if (!analysis.hasAlpha) {
       try {
+        // 对于照片类型，JPEG通常效果很好
+        const jpegQuality = imageType === ImageType.PHOTO ? targetQuality : Math.min(targetQuality + 0.1, 0.95);
         blobs.push({
           type: 'jpeg',
-          blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/jpeg', targetQuality))
+          blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/jpeg', jpegQuality))
         });
       } catch (e) {
         console.warn('JPEG compression failed:', e);
@@ -314,7 +428,7 @@ export async function compressImage(imageData, quality = 0.8, options = {}) {
     }
     
     // 如果压缩后大小没有显著减少，使用原始数据
-    if (best.blob.size > imageData.byteLength * 0.95 && !forceCompress) {
+    if (best.blob.size > imageData.byteLength * 0.9 && !forceCompress) {
       console.log(`Compression not beneficial, keeping original (${imageData.byteLength} bytes)`);
       return { data: imageData, width: img.width, height: img.height, skipped: true };
     }
