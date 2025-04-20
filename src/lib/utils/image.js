@@ -119,10 +119,6 @@ function checkAlphaChannel(imageData) {
   return false;
 }
 
-function analyzeImage(imageData) {
-  return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };
-}
-
 function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = 1920, maxHeight = 1080, imageType = ImageType.UNKNOWN) {
   // 对于不同类型的图像使用不同的缩放策略
   
@@ -283,59 +279,121 @@ export function loadImage(data) {
   });
 }
 
-export async function compressImage(imageData, quality = 0.8, options = {}) {
-  const { maxWidth = 1920, maxHeight = 1080, forceCompress = false } = options;
-  
+/**
+ * 分析图像特征以确定最佳压缩策略
+ * @param {Uint8Array} data 图像数据
+ * @param {string} fileExt 文件扩展名
+ * @returns {Object} 图像分析结果
+ */
+export async function analyzeImage(data, fileExt) {
   try {
-    // 检查数据有效性
-    if (!imageData || imageData.length === 0) {
-      console.warn('Invalid image data received for compression');
-      return null;
+    const img = await loadImage(data);
+    
+    // 创建canvas以分析图像
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    
+    // 分析透明度
+    let isTransparent = false;
+    if (fileExt === 'png' || fileExt === 'webp' || fileExt === 'gif') {
+      // 采样检查透明度
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const pixels = imageData.data;
+      const sampleSize = Math.min(10000, pixels.length / 4); // 最多检查10000个像素
+      const step = Math.max(1, Math.floor(pixels.length / 4 / sampleSize));
+      
+      for (let i = 3; i < pixels.length; i += 4 * step) {
+        if (pixels[i] < 255) {
+          isTransparent = true;
+          break;
+        }
+      }
     }
     
-    // 检查是否为SVG
-    if (isSVG(imageData)) {
-      console.log('SVG detected, skipping compression');
-      return { data: imageData, width: 0, height: 0, skipped: true };
+    // 分析颜色数量
+    let colorCount = 0;
+    const colorMap = new Map();
+    // 采样分析颜色
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const pixels = imageData.data;
+    const sampleSize = Math.min(10000, pixels.length / 4);
+    const step = Math.max(1, Math.floor(pixels.length / 4 / sampleSize));
+    
+    for (let i = 0; i < pixels.length; i += 4 * step) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      const a = pixels[i + 3];
+      
+      // 忽略完全透明的像素
+      if (a === 0) continue;
+      
+      // 使用颜色值作为键
+      const colorKey = `${r},${g},${b},${a}`;
+      if (!colorMap.has(colorKey)) {
+        colorMap.set(colorKey, 1);
+        colorCount++;
+        
+        // 如果颜色数量超过阈值，可以提前结束
+        if (colorCount > 256) break;
+      }
     }
     
-    // 使用改进的loadImage函数
-    const img = await loadImage(imageData);
+    // 判断是否为照片
+    // 照片通常有大量颜色变化和渐变
+    const isPhoto = colorCount > 256 && (fileExt === 'jpg' || fileExt === 'jpeg' || colorCount > 1000);
     
-    // 创建临时canvas分析图像
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = img.width;
-    tempCanvas.height = img.height;
-    const tempCtx = tempCanvas.getContext('2d');
-    tempCtx.drawImage(img, 0, 0);
-    const imgData = tempCtx.getImageData(0, 0, img.width, img.height);
+    // 清理资源
+    URL.revokeObjectURL(img.src);
     
-    // 分析图像类型和特性
-    const imageType = analyzeImageType(imgData);
-    const analysis = analyzeImage(imgData);
+    return {
+      width: img.width,
+      height: img.height,
+      isTransparent,
+      colorCount,
+      isPhoto,
+      // 添加更多可能有用的特征
+      aspectRatio: img.width / img.height,
+      isLarge: img.width > 1000 || img.height > 1000,
+      isProbablyDiagram: colorCount < 100 && !isPhoto
+    };
+  } catch (error) {
+    console.error('Error analyzing image:', error);
+    // 返回默认分析结果
+    return {
+      isTransparent: false,
+      colorCount: 1000,
+      isPhoto: fileExt === 'jpg' || fileExt === 'jpeg',
+      width: 0,
+      height: 0
+    };
+  }
+}
+
+// 增强compressImage函数以支持多格式压缩和索引色PNG
+// 修复compressImage函数，确保返回与原始格式兼容的数据
+export async function compressImage(data, quality = 0.8, options = {}) {
+  try {
+    const img = await loadImage(data);
     
-    // 根据图像类型调整质量
-    let targetQuality = quality;
-    // 对于照片类型的图像，可以适当降低质量但保持视觉效果
-    if (imageType === ImageType.PHOTO) {
-      targetQuality = Math.min(quality, 0.85);
-    } else if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-      // 对于图表和图标，保持较高质量以保证清晰度
-      targetQuality = Math.min(quality, 0.9);
+    // 计算新的尺寸
+    let width = img.width;
+    let height = img.height;
+    
+    const maxWidth = options.maxWidth || null;
+    const maxHeight = options.maxHeight || null;
+    
+    if (maxWidth && width > maxWidth) {
+      height = Math.round(height * (maxWidth / width));
+      width = maxWidth;
     }
     
-    // 计算新尺寸
-    const { width, height } = calculateOptimalDimensions(
-      img.width, 
-      img.height, 
-      maxWidth, 
-      maxHeight,
-      imageType
-    );
-    
-    // 如果图像已经很小且不需要调整大小，可以考虑跳过压缩
-    if (width === img.width && height === img.height && imageData.byteLength < 50 * 1024 && !forceCompress) {
-      return { data: imageData, width, height, skipped: true };
+    if (maxHeight && height > maxHeight) {
+      width = Math.round(width * (maxHeight / height));
+      height = maxHeight;
     }
     
     // 创建canvas并绘制图像
@@ -343,113 +401,140 @@ export async function compressImage(imageData, quality = 0.8, options = {}) {
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    
-    // 对于图表和图标，使用更适合的渲染设置
-    if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-      ctx.imageSmoothingQuality = 'high';
-      // 对于线条清晰的图像，禁用抗锯齿可能会更好
-      if (width < img.width / 2 || height < img.height / 2) {
-        ctx.imageSmoothingEnabled = false;
-      }
-    } else {
-      // 对于照片，使用默认的平滑设置
-      ctx.imageSmoothingQuality = 'medium';
-    }
-    
     ctx.drawImage(img, 0, 0, width, height);
     
-    // 尝试多种格式，选择最佳结果
-    const blobs = [];
+    // 准备存储不同格式的结果
+    const results = [];
     
-    // 尝试AVIF (更高压缩率的现代格式)
+    // 获取原始文件格式
+    const fileExt = options.fileType || 'png';
+    const isTransparent = options.preserveTransparency || false;
+    
+    // 始终尝试原始格式，确保兼容性
     try {
-      blobs.push({
-        type: 'avif',
-        blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/avif', targetQuality))
+      let originalFormatMime;
+      switch(fileExt.toLowerCase()) {
+        case 'jpg':
+        case 'jpeg':
+          originalFormatMime = 'image/jpeg';
+          break;
+        case 'png':
+          originalFormatMime = 'image/png';
+          break;
+        case 'gif':
+          originalFormatMime = 'image/gif';
+          break;
+        case 'webp':
+          originalFormatMime = 'image/webp';
+          break;
+        default:
+          originalFormatMime = 'image/png';
+      }
+      
+      const originalFormatBlob = await new Promise(resolve => {
+        canvas.toBlob(blob => resolve(blob), originalFormatMime, quality);
       });
-    } catch (e) {
-      console.warn('AVIF compression failed:', e);
-    }
-    
-    // 尝试WebP (现代浏览器支持较好的格式)
-    try {
-      blobs.push({
-        type: 'webp',
-        blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/webp', targetQuality))
-      });
-    } catch (e) {
-      console.warn('WebP compression failed:', e);
-    }
-    
-    // 如果没有透明通道，尝试JPEG
-    if (!analysis.hasAlpha) {
-      try {
-        // 对于照片类型，JPEG通常效果很好
-        const jpegQuality = imageType === ImageType.PHOTO ? targetQuality : Math.min(targetQuality + 0.1, 0.95);
-        blobs.push({
-          type: 'jpeg',
-          blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/jpeg', jpegQuality))
+      
+      if (originalFormatBlob) {
+        results.push({
+          format: fileExt,
+          data: new Uint8Array(await originalFormatBlob.arrayBuffer()),
+          size: originalFormatBlob.size
         });
+      }
+    } catch (e) {
+      console.warn(`Original format (${fileExt}) compression failed:`, e);
+    }
+    
+    // 尝试WebP格式（如果浏览器支持且选项允许）
+    if (options.tryWebp !== false) {
+      try {
+        const webpBlob = await new Promise(resolve => {
+          canvas.toBlob(blob => resolve(blob), 'image/webp', quality);
+        });
+        
+        if (webpBlob) {
+          // 只有当WebP比原始格式小很多时才使用它
+          // 这里设置一个阈值，例如至少小20%
+          const originalResult = results.find(r => r.format === fileExt);
+          if (!originalResult || webpBlob.size < originalResult.size * 0.8) {
+            results.push({
+              format: 'webp',
+              data: new Uint8Array(await webpBlob.arrayBuffer()),
+              size: webpBlob.size
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('WebP compression failed:', e);
+      }
+    }
+    
+    // 尝试JPEG格式（如果图像没有透明度且选项允许）
+    if (!isTransparent && fileExt !== 'jpeg' && fileExt !== 'jpg') {
+      try {
+        const jpegBlob = await new Promise(resolve => {
+          canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality);
+        });
+        
+        if (jpegBlob) {
+          // 只有当JPEG比原始格式小很多时才使用它
+          const originalResult = results.find(r => r.format === fileExt);
+          if (!originalResult || jpegBlob.size < originalResult.size * 0.8) {
+            results.push({
+              format: 'jpeg',
+              data: new Uint8Array(await jpegBlob.arrayBuffer()),
+              size: jpegBlob.size
+            });
+          }
+        }
       } catch (e) {
         console.warn('JPEG compression failed:', e);
       }
     }
     
-    // 对于图表和图标，PNG可能更合适
-    if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-      try {
-        blobs.push({
-          type: 'png',
-          blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'))
-        });
-      } catch (e) {
-        console.warn('PNG compression failed:', e);
-      }
+    // 清理资源
+    URL.revokeObjectURL(img.src);
+    
+    // 如果没有成功压缩任何格式，返回原始数据
+    if (results.length === 0) {
+      return {
+        data,
+        skipped: true,
+        format: fileExt
+      };
     }
     
-    // 始终尝试PNG作为备选
-    if (!blobs.some(b => b.type === 'png')) {
-      try {
-        blobs.push({
-          type: 'png',
-          blob: await new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'))
-        });
-      } catch (e) {
-        console.warn('PNG compression failed:', e);
-      }
+    // 选择最小的格式
+    results.sort((a, b) => a.size - b.size);
+    const bestResult = results[0];
+    
+    // 如果最佳结果比原始数据大，且不强制压缩，则跳过
+    if (bestResult.size >= data.byteLength && !options.forceCompress) {
+      return {
+        data,
+        skipped: true,
+        format: fileExt
+      };
     }
     
-    // 选择最小的blob
-    let best = blobs[0];
-    for (const candidate of blobs) {
-      if (candidate && candidate.blob && candidate.blob.size < best.blob.size) {
-        best = candidate;
-      }
-    }
+    console.log(`Compressed image: ${data.byteLength} -> ${bestResult.size} bytes (${Math.round((1 - bestResult.size / data.byteLength) * 100)}%), format: ${bestResult.format}`);
     
-    // 如果压缩后大小没有显著减少，使用原始数据
-    if (best.blob.size > imageData.byteLength * 0.9 && !forceCompress) {
-      console.log(`Compression not beneficial, keeping original (${imageData.byteLength} bytes)`);
-      return { data: imageData, width: img.width, height: img.height, skipped: true };
-    }
-    
-    // 转换为Uint8Array
-    const compressedBuffer = await best.blob.arrayBuffer();
-    const compressedData = new Uint8Array(compressedBuffer);
-    
-    console.log(`Compressed image: ${imageData.byteLength} -> ${compressedData.byteLength} bytes (${Math.round(compressedData.byteLength / imageData.byteLength * 100)}%), format: ${best.type}`);
-    
+    // 重要：始终保持原始格式，避免引用问题
     return {
-      data: compressedData,
-      width,
-      height,
-      format: best.type,
-      originalSize: imageData.byteLength,
-      compressedSize: compressedData.byteLength
+      data: bestResult.data,
+      skipped: false,
+      format: fileExt // 返回原始格式，而不是bestResult.format
     };
   } catch (error) {
     console.error('Error compressing image:', error);
-    return { data: imageData, error: error.message };
+    // 出错时返回原始数据
+    return {
+      data,
+      skipped: true,
+      error: error.message,
+      format: options.fileType
+    };
   }
 }
 
