@@ -7,7 +7,7 @@
   export let options = {
     compressImages: {
       enabled: true,
-      quality: 0.8  // Changed from 0.7 to match optimizer settings
+      quality: 0.7
     },
     removeHiddenSlides: false,
     removeUnusedLayouts: true  // 默认启用

@@ -117,20 +117,6 @@ async function detectFormat(data) {
   }
 }
 
-// 在 compressImage 函数中添加 SVG 文件检测
-function isSVG(data) {
-  // Check for SVG signature in the first few bytes
-  if (data.length < 10) return false;
-  
-  // Convert first bytes to string to check for SVG signature
-  try {
-    const header = new TextDecoder().decode(data.slice(0, 100)).trim().toLowerCase();
-    return header.includes('<svg') || header.includes('<?xml') && header.includes('<svg');
-  } catch (e) {
-    return false;
-  }
-}
-
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
   // 参数校验
   if (!(data instanceof Uint8Array)) {
@@ -141,18 +127,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   }
 
   try {
-    // Add SVG detection early to skip processing
-    if (isSVG(data)) {
-      console.log(`[ImageCompress] SVG detected - skipping compression (${data.byteLength}B)`);
-      return {
-        data,
-        format: 'svg',
-        compressionMethod: 'original',
-        originalSize: data.byteLength,
-        compressedSize: data.byteLength
-      };
-    }
-    
     const cacheKey = `${data.byteLength}-${quality}-${hashCode(data)}`;
     let cached;
     try {
