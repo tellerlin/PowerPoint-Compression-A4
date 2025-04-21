@@ -3,7 +3,6 @@ import { compressImage, loadImage } from '../utils/image';
 import { findMediaFiles } from './media';
 import { cleanUnusedResources } from './cleaner';
 import { zipToMemFS, memFSToZip, readFileFromMemFS, writeFileToMemFS } from './zip-fs';
-import { COMPRESSION_SETTINGS } from './constants';
 
 export async function optimizePPTX(file, options = {}) {
   let memFS = {};
@@ -63,7 +62,6 @@ export async function optimizePPTX(file, options = {}) {
       const concurrency = options.concurrency || 4;
       let currentIndex = 0;
 
-      // 在compressNext函数中添加智能质量调整
       async function compressNext() {
         if (currentIndex >= mediaFiles.length) return;
         const mediaPath = mediaFiles[currentIndex++];
@@ -84,28 +82,10 @@ export async function optimizePPTX(file, options = {}) {
             return;
           }
           
-          // 根据文件扩展名和大小智能调整质量
-          const fileExt = mediaPath.split('.').pop().toLowerCase();
-          const fileSize = data.byteLength;
-          
-          // 基础质量设置
-          let imageQuality = options.compressImages && typeof options.compressImages.quality === 'number' 
+          // 获取压缩质量设置
+          const imageQuality = options.compressImages && typeof options.compressImages.quality === 'number' 
             ? options.compressImages.quality 
-            : (options.imageQuality !== undefined ? options.imageQuality : COMPRESSION_SETTINGS.DEFAULT_QUALITY);
-          
-          // 根据文件类型和大小调整质量
-          if (fileExt === 'png' || fileExt === 'gif') {
-            // PNG和GIF可能包含图表或图标，保持较高质量
-            imageQuality = Math.max(imageQuality, COMPRESSION_SETTINGS.DIAGRAM_QUALITY);
-          } else if (fileExt === 'jpg' || fileExt === 'jpeg') {
-            // JPEG通常是照片，可以使用较低质量
-            imageQuality = Math.min(imageQuality, COMPRESSION_SETTINGS.PHOTO_QUALITY);
-            
-            // 对于大文件，可以进一步降低质量
-            if (fileSize > 1000000) { // 1MB
-              imageQuality = Math.min(imageQuality, 0.75);
-            }
-          }
+            : (options.imageQuality !== undefined ? options.imageQuality : 0.8);
           
           // 获取最大尺寸设置
           const maxWidth = options.compressImages && options.compressImages.maxWidth || 1920;
@@ -116,10 +96,7 @@ export async function optimizePPTX(file, options = {}) {
           const compressedResult = await compressImage(data, imageQuality, {
             maxWidth,
             maxHeight,
-            forceCompress: options.forceCompress || false,
-            // 添加智能处理选项
-            smartCompression: true,
-            fileType: fileExt
+            forceCompress: options.forceCompress || false
           });
           
           if (compressedResult && compressedResult.data) {
@@ -207,15 +184,10 @@ export async function optimizePPTX(file, options = {}) {
     console.log('Generating final PPTX blob...');
     // 添加进度回调到ZIP生成过程
     let lastReportedProgress = 0;
-    // 更新ZIP生成选项
     const blob = await finalZip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
-      compressionOptions: { 
-        level: 9,  // 最高压缩级别
-        memory: 9, // 增加内存使用以提高压缩率
-        strategy: 3 // 使用Z_HUFFMAN_ONLY策略可能对某些文件更有效
-      }
+      compressionOptions: { level: 9 }
     }, (metadata) => {
       // 只有当进度变化超过1%时才更新，避免过多的日志
       const currentProgress = Math.round(metadata.percent);
