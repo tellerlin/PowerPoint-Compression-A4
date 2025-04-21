@@ -114,32 +114,11 @@ export class ProgressManager {
 
   updatePhaseProgress(phase, percentage, status) {
     if (this.currentPhase !== phase) {
-      // 在切换阶段时，确保进度不会回退
       this.startPhase(phase);
     }
     const phaseObj = this.phases[phase];
-    // 计算实际进度时，确保不会低于当前进度
-    const phaseProgress = (percentage / 100) * phaseObj.weight;
-    const actualProgress = phaseObj.start + phaseProgress;
-    
-    // 获取当前进度
-    let currentProgress = 0;
-    if (this.progressCallback) {
-      // 如果使用回调，我们需要维护一个内部状态
-      currentProgress = this._lastReportedProgress || 0;
-    } else {
-      // 从store获取当前进度
-      let state;
-      compressionProgress.subscribe(s => { state = s; })();
-      currentProgress = state.percentage || 0;
-    }
-    
-    // 只有当新进度大于当前进度时才更新
-    if (actualProgress > currentProgress) {
-      this._lastReportedProgress = actualProgress;
-      this.updateProgress(actualProgress, status);
-    }
-    
+    const actualProgress = (percentage / 100) * phaseObj.weight;
+    this.updateProgress(actualProgress, status);
     if (percentage >= 100) {
       this.endPhase(phase);
     }
@@ -179,24 +158,19 @@ export class ProgressManager {
   }
 
   // Add this method to handle errors in the progress store
-  // 改进错误处理
   handleError(error, currentProgress = 0) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    
     if (this.progressCallback) {
       this.progressCallback({
-        error: errorMessage,
+        error: error.message || String(error),
         percentage: currentProgress
       });
     } else {
       compressionProgress.update(state => ({
         ...state,
-        error: errorMessage,
+        error: error.message || String(error),
         percentage: currentProgress
       }));
     }
-    
-    console.error('Compression error:', errorMessage);
   }
 
   updateInitProgress(percentage) {
@@ -261,44 +235,4 @@ export class ProgressManager {
       }));
     }
   }
-
-  // Fix method syntax - replace semicolon with opening brace
-  smoothTransition(fromPhase, toPhase, duration = 500) {
-    const fromProgress = this._getPhaseProgress(fromPhase, 100);
-    const toProgress = this._getPhaseProgress(toPhase, 0);
-    
-    // 如果目标进度小于当前进度，直接跳到目标阶段而不降低进度
-    if (toProgress <= fromProgress) {
-      this.currentPhase = toPhase;
-      this.phaseStartTimes[toPhase] = Date.now();
-      return;
-    }
-    
-    // 否则，创建一个平滑过渡
-    const startTime = Date.now();
-    const startProgress = fromProgress;
-    const progressDiff = toProgress - fromProgress;
-    
-    const animate = () => {
-      const elapsed = Date.now() - startTime;
-      if (elapsed >= duration) {
-        this.currentPhase = toPhase;
-        this.phaseStartTimes[toPhase] = Date.now();
-        return;
-      }
-      
-      const progress = startProgress + (progressDiff * (elapsed / duration));
-      this.updateProgress(progress, `Transitioning to ${toPhase}...`);
-      requestAnimationFrame(animate);
-    };
-    
-    animate();
-  }
-  
-  // Fix method syntax - replace semicolon with opening brace
-  _getPhaseProgress(phase, percentage) {
-    const phaseObj = this.phases[phase];
-    return phaseObj.start + ((percentage / 100) * phaseObj.weight);
-  }
 }
-  

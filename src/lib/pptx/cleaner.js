@@ -137,73 +137,31 @@ async function getMediaFromLayouts(memFS, layoutPaths) {
   }
 }
 
-// 改进资源清理逻辑
 async function collectUsedMedia(memFS, usedSlides, usedLayouts, usedMasters, layoutsMedia = new Set()) {
   const usedMedia = new Set();
   try {
-    console.log(`Processing ${usedSlides.length} slides for media references`);
-    
-    // 处理幻灯片中的媒体引用
+    console.log(`Processing ${usedSlides.length} non-hidden slides for media references`);
     const slideMedia = await getUsedMedia(memFS, usedSlides);
     slideMedia.forEach(mediaPath => usedMedia.add(mediaPath));
-    
-    // 处理布局中的媒体引用
     layoutsMedia.forEach(mediaPath => usedMedia.add(mediaPath));
-    
-    // 处理关系文件中的媒体引用
     await processRelationshipFiles(memFS, usedLayouts, usedMasters, usedSlides, usedMedia);
-    
-    // 处理主题中的媒体引用
-    await processThemeMedia(memFS, usedMedia);
-    
-    console.log('Media collection complete:', {
-      slides: usedSlides.length,
-      layouts: usedLayouts.size,
-      masters: usedMasters.size,
-      layoutsMedia: layoutsMedia.size,
-      totalMedia: usedMedia.size
-    });
+    console.log('Media collection stats:', {
+        slides: usedSlides.length,
+        layouts: usedLayouts.size,
+        masters: usedMasters.size,
+        layoutsMedia: layoutsMedia.size,
+        totalMedia: usedMedia.size
+      });
   } catch (error) {
-    console.error('Error collecting media files:', error);
+    console.error('Error collecting media files:', {
+      error: error.message,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
   }
   return usedMedia;
 }
 
-// 添加处理主题媒体的函数
-async function processThemeMedia(memFS, usedMedia) {
-  try {
-    const themeFiles = Object.keys(memFS).filter(path => path.includes('ppt/theme/'));
-    for (const themePath of themeFiles) {
-      if (!themePath.endsWith('.xml')) continue;
-      
-      const themeRelsPath = themePath.replace('theme/', 'theme/_rels/') + '.rels';
-      if (!fileExistsInMemFS(memFS, themeRelsPath)) continue;
-      
-      const relsXml = readFileFromMemFS(memFS, themeRelsPath, 'string');
-      if (!relsXml) continue;
-      
-      const relsObj = await parseXml(relsXml);
-      if (!relsObj?.Relationships?.Relationship) continue;
-      
-      const relationships = Array.isArray(relsObj.Relationships.Relationship)
-        ? relsObj.Relationships.Relationship
-        : [relsObj.Relationships.Relationship];
-      
-      for (const rel of relationships) {
-        const relType = rel['@_Type'] || rel.Type;
-        const target = rel['@_Target'] || rel.Target;
-        
-        if (relType && target && (relType.includes('/image') || relType.includes('/media'))) {
-          const mediaPath = `ppt/${target.replace('../', '')}`;
-          usedMedia.add(mediaPath);
-          console.log(`Theme ${themePath} references media: ${mediaPath}`);
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error processing theme media:', error);
-  }
-}
 async function processRelationshipFiles(memFS, usedLayouts, usedMasters, usedSlides, usedMedia) {
   const slideRelsFiles = usedSlides.map(slide => slide.path.replace('slides/', 'slides/_rels/') + '.rels');
   const layoutRelsFiles = Array.from(usedLayouts).map(layout => layout.replace('slideLayouts/', 'slideLayouts/_rels/') + '.rels');

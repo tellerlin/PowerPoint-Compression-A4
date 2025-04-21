@@ -1,8 +1,19 @@
 import JSZip from 'jszip';
-import { compressImage, loadImage } from '../utils/image';
-import { findMediaFiles } from './media';
-import { cleanUnusedResources } from './cleaner';
-import { zipToMemFS, memFSToZip, readFileFromMemFS, writeFileToMemFS } from './zip-fs';
+// import { validateFile } from '../utils/validation'; // Assuming validation happens elsewhere or is not needed here
+import { compressImage } from '../utils/image';
+// import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants'; // SUPPORTED_IMAGE_EXTENSIONS might be needed if compressImage doesn't handle type checks
+import { findMediaFiles } from './media'; // Keep findMediaFiles, now expects memFS
+// import { processMediaFile } from './pptx-utils'; // processMediaFile is likely replaced by direct read/compress/write logic
+// import { removeHiddenSlides } from './slides'; // Assuming slide removal is part of cleaner or not implemented here
+// import { removeUnusedLayouts } from './layout-cleaner'; // This is called within cleaner
+import { cleanUnusedResources } from './cleaner'; // Expects memFS, returns { success, memFS, error? }
+import { zipToMemFS, memFSToZip, readFileFromMemFS, writeFileToMemFS } from './zip-fs'; // Import memFS helpers
+
+// Remove preprocessImages and simpleHash as they are not integrated with memFS
+/*
+async function preprocessImages(zip, options = {}) { ... }
+function simpleHash(data) { ... }
+*/
 
 export async function optimizePPTX(file, options = {}) {
   let memFS = {};
@@ -11,18 +22,14 @@ export async function optimizePPTX(file, options = {}) {
   const originalSize = file.size;
 
   try {
-    // 调整进度分配比例
-    // 初始化: 10%, 资源清理: 20%, 图片压缩: 40%, ZIP生成: 30%
-    onProgress('init', { percentage: 0, status: "Loading file..." });
-    
+    // Step 1: Load PPTX and convert to memFS
     console.log('Loading PPTX file...');
     const zip = await JSZip.loadAsync(file);
     console.log('Converting ZIP to memory file system...');
     memFS = await zipToMemFS(zip);
     console.log(`memFS created with ${Object.keys(memFS).length} entries.`);
-    
-    onProgress('init', { percentage: 10, status: "Analyzing file structure..." });
 
+    // Step 2: Clean unused resources using memFS
     const cleanUnused = options.cleanUnusedResources !== false;
     const removeLayouts = options.removeUnusedLayouts !== false;
     if (cleanUnused) {
@@ -42,10 +49,9 @@ export async function optimizePPTX(file, options = {}) {
       console.log(`memFS now has ${Object.keys(memFS).length} entries after cleaning.`);
     } else {
       console.log('Skipping resource cleaning step.');
-      onProgress('init', { percentage: 30, status: "Resource cleaning skipped" });
     }
 
-    // 在media阶段结束后，使用平滑过渡到finalize阶段
+    // Step 3: Compress images within memFS
     if (options.compressImages !== false) {
       console.log('Starting image compression...');
       const mediaFiles = Array.from(usedMedia);
@@ -53,12 +59,8 @@ export async function optimizePPTX(file, options = {}) {
       let compressedCount = 0;
       let skippedCount = 0;
       let failedCount = 0;
-      let totalOriginalSize = 0;
-      let totalCompressedSize = 0;
 
-      // 通知UI开始图片压缩阶段
-      onProgress('mediaCount', { count: mediaFiles.length, status: "Starting image compression..." });
-
+      // 新增：图片压缩进度反馈与并发控制
       const concurrency = options.concurrency || 4;
       let currentIndex = 0;
 
@@ -73,80 +75,47 @@ export async function optimizePPTX(file, options = {}) {
             return;
           }
           
-          // 跳过SVG和其他非图片文件
-          if (mediaPath.toLowerCase().endsWith('.svg') || 
-              mediaPath.toLowerCase().endsWith('.emf') ||
-              mediaPath.toLowerCase().endsWith('.wmf')) {
-            console.log(`Skipping vector file ${mediaPath}`);
+          // Skip SVG files or handle them specially
+          if (mediaPath.toLowerCase().endsWith('.svg')) {
+            console.log(`Skipping SVG file ${mediaPath}`);
             skippedCount++;
             return;
           }
           
-          // 获取压缩质量设置
-          const imageQuality = options.compressImages && typeof options.compressImages.quality === 'number' 
-            ? options.compressImages.quality 
-            : (options.imageQuality !== undefined ? options.imageQuality : 0.8);
-          
-          // 获取最大尺寸设置
-          const maxWidth = options.compressImages && options.compressImages.maxWidth || 1920;
-          const maxHeight = options.compressImages && options.compressImages.maxHeight || 1080;
-          
-          totalOriginalSize += data.byteLength;
-          
-          const compressedResult = await compressImage(data, imageQuality, {
-            maxWidth,
-            maxHeight,
-            forceCompress: options.forceCompress || false
-          });
-          
-          if (compressedResult && compressedResult.data) {
-            if (!compressedResult.skipped && (compressedResult.data.byteLength < data.byteLength || options.forceCompress)) {
-              writeFileToMemFS(memFS, mediaPath, compressedResult.data);
-              compressedCount++;
-              totalCompressedSize += compressedResult.data.byteLength;
-              console.log(`Compressed ${mediaPath} (saved ${data.byteLength - compressedResult.data.byteLength} bytes, ${Math.round((1 - compressedResult.data.byteLength / data.byteLength) * 100)}%)`);
-            } else {
-              skippedCount++;
-              totalCompressedSize += data.byteLength;
-              console.log(`Skipping update for ${mediaPath}, compressed size not smaller.`);
-            }
+          const imageQuality = options.imageQuality !== undefined ? options.imageQuality : 0.8;
+          const compressedResult = await compressImage(data, imageQuality);
+      
+          if (compressedResult && compressedResult.data && compressedResult.data.byteLength < data.byteLength) {
+            writeFileToMemFS(memFS, mediaPath, compressedResult.data);
+            compressedCount++;
+            console.log(`Compressed ${mediaPath} (saved ${data.byteLength - compressedResult.data.byteLength} bytes)`);
+          } else if (compressedResult && compressedResult.data) {
+            skippedCount++;
+            console.log(`Skipping update for ${mediaPath}, compressed size not smaller.`);
           } else {
             skippedCount++;
-            totalCompressedSize += data.byteLength;
             console.warn(`Compression result for ${mediaPath} is invalid, skipping update.`);
           }
         } catch (compressError) {
-          // 确保错误正确计数
           failedCount++;
           console.error(`Error compressing media file ${mediaPath}:`, compressError);
         } finally {
-          // 计算图片压缩阶段的进度百分比 (30-70%)
-          const processedCount = compressedCount + skippedCount + failedCount;
-          const mediaPercentage = mediaFiles.length > 0 
-            ? Math.round((processedCount / mediaFiles.length) * 40) + 30 
-            : 70;
-          
-          // 更新进度信息，确保包含status字段
+          // 进度反馈
           onProgress('media', {
-            fileIndex: processedCount,
+            fileIndex: compressedCount + skippedCount + failedCount,
             totalFiles: mediaFiles.length,
             compressedCount,
             skippedCount,
-            failedCount,
-            totalOriginalSize,
-            totalCompressedSize,
-            savedSize: totalOriginalSize - totalCompressedSize,
-            savedPercentage: totalOriginalSize > 0 ? ((totalOriginalSize - totalCompressedSize) / totalOriginalSize * 100).toFixed(2) : 0,
-            status: `Compressing image ${processedCount} of ${mediaFiles.length}`,
-            percentage: mediaPercentage
+            failedCount
           });
-          
+          // 递归压缩下一个
           if (currentIndex < mediaFiles.length) {
             await compressNext();
           }
         }
       }
 
+      // 启动并发压缩
       const workers = [];
       for (let i = 0; i < concurrency && i < mediaFiles.length; i++) {
         workers.push(compressNext());
@@ -154,65 +123,31 @@ export async function optimizePPTX(file, options = {}) {
       await Promise.all(workers);
 
       console.log(`Image compression finished. Compressed ${compressedCount} files, skipped ${skippedCount}, failed ${failedCount}.`);
-      console.log(`Total size reduction: ${totalOriginalSize} -> ${totalCompressedSize} bytes (${Math.round(totalCompressedSize / totalOriginalSize * 100)}%)`);
-      
-      // 添加一个小延迟，让用户看到media阶段完成
-      await new Promise(resolve => setTimeout(resolve, 300));
     } else {
       console.log('Skipping image compression step.');
-      // 如果跳过图片压缩，直接更新进度到70%
-      onProgress('media', { 
-        status: "Image compression skipped", 
-        percentage: 70,
-        fileIndex: 0,
-        totalFiles: 0,
-        compressedCount: 0,
-        skippedCount: 0,
-        failedCount: 0
-      });
     }
 
-    // 开始ZIP生成阶段，添加进度更新
+    // Step 4: Convert final memFS back to Zip
     console.log('Converting memory file system back to ZIP...');
-    onProgress('finalize', { percentage: 0, status: "Creating compressed file..." });
-    
     const finalZip = await memFSToZip(memFS);
     console.log('ZIP creation complete.');
-    onProgress('finalize', { percentage: 50, status: "Finalizing compression..." });
-    onProgress('finalize', { percentage: 80, status: "Finalizing compression..." });
 
+    // Step 5: Generate Blob
     console.log('Generating final PPTX blob...');
-    // 添加进度回调到ZIP生成过程
-    let lastReportedProgress = 0;
     const blob = await finalZip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
       compressionOptions: { level: 9 }
-    }, (metadata) => {
-      // 只有当进度变化超过1%时才更新，避免过多的日志
-      const currentProgress = Math.round(metadata.percent);
-      if (currentProgress > lastReportedProgress && currentProgress < 100) {
-        lastReportedProgress = currentProgress;
-        // ZIP生成进度 (80-99%)
-        const zipProgress = Math.min(98, Math.round(metadata.percent * 0.18) + 80);
-        onProgress('finalize', { 
-          percentage: zipProgress, 
-          status: `Finalizing: ${currentProgress}%` 
-        });
-      }
     });
-    
     console.log('PPTX optimization complete.');
-    // 最后阶段只发送一次99%的进度更新
-    onProgress('finalize', { percentage: 99, status: "Completing compression..." });
 
+    // Step 6: Report completion via onProgress
     const compressedSize = blob.size;
     const savedSize = originalSize - compressedSize;
     const savedPercentage = originalSize > 0 ? ((savedSize / originalSize) * 100).toFixed(2) : 0;
 
     onProgress('complete', {
       status: 'Compression complete!',
-      percentage: 100,
       stats: {
         originalSize: originalSize,
         compressedSize: compressedSize,

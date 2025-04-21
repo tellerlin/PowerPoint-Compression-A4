@@ -6,7 +6,6 @@
   import { Alert } from '$lib/components/ui/Alert';
   import { Container } from '$lib/components/ui';
   import { browser } from '$app/environment';
-  import { onDestroy } from 'svelte';
   
   let files;
   let processing = false;
@@ -58,9 +57,9 @@
     const file = files?.[0];
     if (!file) return;
 
-    processing = true;
-    compressionComplete = false;
-    if (downloadLink) {
+    processing = true; // <-- Set processing to true at the start
+    compressionComplete = false; // Reset completion state
+    if (downloadLink) { // Clean up previous link if any
       cleanupDownload(downloadLink);
       downloadUrl = null;
       downloadLink = null;
@@ -70,53 +69,59 @@
     try {
       // Pass the onProgress callback from progressManager
       const optimizedBlob = await optimizePPTX(file, {
-        compressImages: { quality: 0.9 },
+        compressImages: { quality: 0.9 },  // 将质量从0.8提高到0.9
         removeHiddenSlides: true,
-        removeUnusedLayouts: true,
-        cleanUnusedResources: true,
-        preprocessImages: {
+        removeUnusedLayouts: true,  // Enable cleaning of unused layouts and masters
+        cleanUnusedResources: true, // Enable cleaning of unused resources
+        preprocessImages: {         // Add preprocessing options
           removeDuplicateImages: true,
-          mergeSimilarImages: false
+          mergeSimilarImages: false // Temporarily disable similar image merging
         },
-        debug: true,
-        logLevel: 'verbose',
+        debug: true, // 启用调试模式以获取详细日志
+        logLevel: 'verbose', // 添加详细日志级别
 
         onProgress: (phase, detail) => {
-          console.log(`Progress: ${phase}`, detail);
+          console.log(`Progress: ${phase}`, detail); // 保留调试日志
           switch (phase) {
             case 'fileInfo':
               progressManager.updateFileInfo(detail);
               break;
             case 'init':
-              progressManager.updateInitProgress(detail.percentage || 0);
+              progressManager.updateInitProgress(detail.percentage);
               break;
             case 'mediaCount':
-              progressManager.initializeCompression(detail.count || 0);
+              progressManager.initializeCompression(detail.count);
               break;
             case 'media':
+              // 计算处理进度百分比
               const percentage = detail.totalFiles > 0 
                 ? Math.round((detail.fileIndex / detail.totalFiles) * 100) 
                 : 0;
               
-              progressManager.processedFiles = detail.fileIndex || 0;
+              // 更新已处理文件数
+              progressManager.processedFiles = detail.fileIndex;
+              
+              // 调用更新进度方法
               progressManager.updateMediaProgress(percentage);
               break;
             case 'finalize':
-              progressManager.updateFinalizationProgress(detail.percentage || 0);
+              progressManager.updateFinalizationProgress(detail.status, detail.stats);
               break;
             case 'complete':
+              // 确保 detail.stats 包含所有必要字段
               const completeStats = {
                 ...detail.stats,
-                originalSize: file.size,
+                originalSize: file.size, // 使用原始文件大小
                 compressedSize: detail.stats.compressedSize || (file.size * (1 - detail.stats.savedPercentage / 100)),
                 savedSize: detail.stats.savedSize || (file.size * detail.stats.savedPercentage / 100)
               };
               progressManager.completeCompression(completeStats);
               break;
             case 'error':
+              // 添加错误处理
               console.error('Compression error:', detail.message);
               console.error('Error details:', detail.error);
-              progressManager.handleError(detail.message || "Processing failed", detail.percentage || 0);
+              progressManager.handleError(detail.message || "处理失败", detail.percentage || 0);
               break;
           }
         }
@@ -126,11 +131,13 @@
         throw new Error("Failed to generate compressed file");
       }
       
+      // Create download link after successful compression
       const { url, a } = createDownloadLink(optimizedBlob, file.name);
       downloadUrl = url;
       downloadLink = a;
       
     } catch (error) {
+      // 修改错误处理中的中文消息
       try {
         console.error("Compression error:", error);
         console.error("Error details:", {
@@ -143,51 +150,86 @@
         processing = false;
       }
     } finally {
-       processing = false;
+       processing = false; // <-- Add this line in the finally block
     }
   }
 
+  // Add browser environment check
   function handleDownload() {
     if (typeof window === 'undefined' || !downloadLink || !downloadUrl) return;
     
+    // Detect Safari browser
     const isSafari = typeof navigator !== 'undefined' && 
                     /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     
     if (isSafari) {
+      // Special handling for Safari
       try {
         window.open(downloadUrl, '_blank');
       } catch (error) {
         console.error('Safari download failed:', error);
+        // Fallback: direct link click
         downloadLink.click();
       }
     } else {
+      // Normal handling for other browsers
       downloadLink.click();
     }
   }
 
+  // Add a function to reset state for compressing another file
   function resetCompression() {
     files = null;
     processing = false;
     compressionComplete = false;
     if (downloadLink) {
-      cleanupDownload(downloadLink);
+      cleanupDownload(downloadLink); // Clean up the old link
     }
     downloadUrl = null;
     downloadLink = null;
+    // Reset progress store to initial state
     compressionProgress.set({ percentage: 0, status: 'Ready', phase: '', error: null, stats: {} });
+    // Reset the file input visually if needed (might require DOM manipulation or component state)
     const fileInput = document.getElementById('file-upload');
     if (fileInput) {
-      fileInput.value = '';
+      fileInput.value = ''; // Clear the selected file
     }
   }
 
+  // Ensure cleanup happens when component is destroyed
+  import { onDestroy } from 'svelte';
   onDestroy(() => {
     if (downloadLink) {
       cleanupDownload(downloadLink);
     }
   });
 
-  // Removed the duplicate handleDownload function that was commented out
+
+  // Remove the duplicate definition below (lines 204-223)
+  /*
+  // Add browser environment check
+  function handleDownload() { // <-- DELETE THIS ENTIRE BLOCK
+    if (typeof window === 'undefined' || !downloadLink || !downloadUrl) return;
+
+    // Detect Safari browser
+    const isSafari = typeof navigator !== 'undefined' &&
+                    /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+    if (isSafari) {
+      // Special handling for Safari
+      try {
+        window.open(downloadUrl, '_blank');
+      } catch (error) {
+        console.error('Safari download failed:', error);
+        // Fallback: direct link click
+        downloadLink.click();
+      }
+    } else {
+      // Normal handling for other browsers
+      downloadLink.click();
+    }
+  }
+  */
 </script>
 
 <!-- In the template section, update formatFileSize to formatBytes -->
@@ -281,11 +323,8 @@
             </div>
           {:else}
             <p class="text-sm text-gray-400 mt-2">
-              <!-- 找到显示"Preparing files..."的部分，大约在284-287行 -->
               {#if $compressionProgress.stats.totalFiles > 0}
                 Processing {$compressionProgress.stats.processedFiles} of {$compressionProgress.stats.totalFiles} files
-              {:else if $compressionProgress.status}
-                {$compressionProgress.status}
               {:else}
                 Preparing files...
               {/if}
