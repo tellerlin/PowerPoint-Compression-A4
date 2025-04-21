@@ -56,19 +56,14 @@
   async function handleSubmit() {
     const file = files?.[0];
     if (!file) return;
-
-    processing = true; // <-- Set processing to true at the start
-    compressionComplete = false; // Reset completion state
-    if (downloadLink) { // Clean up previous link if any
-      cleanupDownload(downloadLink);
-      downloadUrl = null;
-      downloadLink = null;
-    }
+    
+    processing = true;
     progressManager = new ProgressManager();
-
+    
     try {
-      // Pass the onProgress callback from progressManager
-      const optimizedBlob = await optimizePPTX(file, {
+      let optimizedBlob;  // declare variable first
+      
+        optimizedBlob = await optimizePPTX(file, {
         compressImages: { quality: 0.9 },  // 将质量从0.8提高到0.9
         removeHiddenSlides: true,
         removeUnusedLayouts: true,  // Enable cleaning of unused layouts and masters
@@ -147,8 +142,6 @@
         percentage: $compressionProgress.percentage
       });
       progressManager.handleError(error.message || "文件处理失败", $compressionProgress.percentage);
-    } finally {
-       processing = false; // <-- Add this line in the finally block
     }
   }
 
@@ -175,59 +168,37 @@
     }
   }
 
-  // Add a function to reset state for compressing another file
   function resetCompression() {
     files = null;
     processing = false;
-    compressionComplete = false;
-    if (downloadLink) {
-      cleanupDownload(downloadLink); // Clean up the old link
+    if (downloadUrl) {
+      cleanupDownload(downloadUrl);
+      downloadUrl = null;
+      downloadLink = null;
     }
-    downloadUrl = null;
-    downloadLink = null;
-    // Reset progress store to initial state
-    compressionProgress.set({ percentage: 0, status: 'Ready', phase: '', error: null, stats: {} });
-    // Reset the file input visually if needed (might require DOM manipulation or component state)
-    const fileInput = document.getElementById('file-upload');
-    if (fileInput) {
-      fileInput.value = ''; // Clear the selected file
-    }
-  }
-
-  // Ensure cleanup happens when component is destroyed
-  import { onDestroy } from 'svelte';
-  onDestroy(() => {
-    if (downloadLink) {
-      cleanupDownload(downloadLink);
-    }
-  });
-
-
-  // Remove the duplicate definition below (lines 204-223)
-  /*
-  // Add browser environment check
-  function handleDownload() { // <-- DELETE THIS ENTIRE BLOCK
-    if (typeof window === 'undefined' || !downloadLink || !downloadUrl) return;
-
-    // Detect Safari browser
-    const isSafari = typeof navigator !== 'undefined' &&
-                    /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-    if (isSafari) {
-      // Special handling for Safari
-      try {
-        window.open(downloadUrl, '_blank');
-      } catch (error) {
-        console.error('Safari download failed:', error);
-        // Fallback: direct link click
-        downloadLink.click();
+    compressionProgress.set({
+      percentage: 0,
+      status: '',
+      error: null,
+      fileInfo: null,
+      stats: {
+        processedFiles: 0,
+        totalFiles: 0,
+        originalSize: 0,
+        compressedSize: 0,
+        savedSize: 0,
+        savedPercentage: 0
       }
-    } else {
-      // Normal handling for other browsers
-      downloadLink.click();
+    });
+    
+    // 修改为仅在浏览器环境执行
+    if (browser) {
+      setTimeout(() => {
+        const fileUpload = document.getElementById('file-upload');
+        if (fileUpload) fileUpload.click();
+      }, 100);
     }
   }
-  */
 </script>
 
 <!-- In the template section, update formatFileSize to formatBytes -->
