@@ -16,10 +16,10 @@ function simpleHash(data) { ... }
 */
 
 export async function optimizePPTX(file, options = {}) {
-  let memFS = {};
+  let memFS = {}; // Initialize memFS
   let usedMedia = new Set();
-  const onProgress = options.onProgress || (() => {});
-  const originalSize = file.size;
+  const onProgress = options.onProgress || (() => {}); // Get onProgress callback
+  const originalSize = file.size; // Store original size
 
   try {
     // Step 1: Load PPTX and convert to memFS
@@ -30,12 +30,11 @@ export async function optimizePPTX(file, options = {}) {
     console.log(`memFS created with ${Object.keys(memFS).length} entries.`);
 
     // Step 2: Clean unused resources using memFS
-    const cleanUnused = options.cleanUnusedResources !== false;
-    const removeLayouts = options.removeUnusedLayouts !== false;
-    if (cleanUnused) {
+    if (options.cleanUnusedResources !== false) { // Default to true unless explicitly false
       console.log('Starting resource cleaning...');
-      const cleanResult = await cleanUnusedResources(memFS, onProgress, {
-        removeUnusedLayouts: removeLayouts,
+      const cleanResult = await cleanUnusedResources(memFS, options.onProgress || (() => {}), {
+        removeUnusedLayouts: options.removeUnusedLayouts !== false,
+        // cleanMediaInUnusedLayouts: options.cleanMediaInUnusedLayouts
       });
 
       if (!cleanResult.success) {
@@ -45,79 +44,56 @@ export async function optimizePPTX(file, options = {}) {
         console.log("Resource cleaning successful.");
         memFS = cleanResult.memFS;
       }
-      usedMedia = cleanResult.usedMedia || new Set();
+      // 新增：获取 usedMedia
+      usedMedia = cleanResult.usedMedia || new Set(); // <-- 赋值到外部变量
       console.log(`memFS now has ${Object.keys(memFS).length} entries after cleaning.`);
     } else {
       console.log('Skipping resource cleaning step.');
     }
 
     // Step 3: Compress images within memFS
-    if (options.compressImages !== false) {
-      console.log('Starting image compression...');
-      const mediaFiles = Array.from(usedMedia);
-      console.log(`Found ${mediaFiles.length} media files for potential compression.`);
-      let compressedCount = 0;
-      let skippedCount = 0;
-      let failedCount = 0;
+    if (options.compressImages !== false) { // Default to true unless explicitly false
+        console.log('Starting image compression...');
+        // 只压缩被引用的媒体文件
+        const mediaFiles = Array.from(usedMedia); // <-- 这里不会报错了
+        console.log(`Found ${mediaFiles.length} media files for potential compression.`);
+        let compressedCount = 0;
 
-      // 新增：图片压缩进度反馈与并发控制
-      const concurrency = options.concurrency || 4;
-      let currentIndex = 0;
+        // Use Promise.all for potentially parallel compression (if compressImage is truly async)
+        await Promise.all(mediaFiles.map(async (mediaPath) => {
+            try {
+                // Read image data from memFS
+                const data = readFileFromMemFS(memFS, mediaPath, 'uint8array');
+                if (!data) {
+                    console.warn(`Media file ${mediaPath} not found in memFS during compression, skipping.`);
+                    return;
+                }
 
-      async function compressNext() {
-        if (currentIndex >= mediaFiles.length) return;
-        const mediaPath = mediaFiles[currentIndex++];
-        try {
-          const data = readFileFromMemFS(memFS, mediaPath, 'uint8array');
-          if (!data) {
-            console.warn(`Media file ${mediaPath} not found in memFS during compression, skipping.`);
-            skippedCount++;
-            return;
-          }
-          const imageQuality = options.imageQuality !== undefined ? options.imageQuality : 0.8;
-          const compressedResult = await compressImage(data, imageQuality);
+                // Compress the image
+                // 从 options 中获取 imageQuality，如果未提供，则使用默认值（例如 0.8）
+                const imageQuality = options.imageQuality !== undefined ? options.imageQuality : 0.8; // 或者从 COMPRESSION_SETTINGS 获取默认值
+                const compressedResult = await compressImage(data, imageQuality); // <-- 直接传递 quality 数字
 
-          if (compressedResult && compressedResult.data && compressedResult.data.byteLength < data.byteLength) {
-            writeFileToMemFS(memFS, mediaPath, compressedResult.data);
-            compressedCount++;
-            console.log(`Compressed ${mediaPath} (saved ${data.byteLength - compressedResult.data.byteLength} bytes)`);
-          } else if (compressedResult && compressedResult.data) {
-            skippedCount++;
-            console.log(`Skipping update for ${mediaPath}, compressed size not smaller.`);
-          } else {
-            skippedCount++;
-            console.warn(`Compression result for ${mediaPath} is invalid, skipping update.`);
-          }
-        } catch (compressError) {
-          failedCount++;
-          console.error(`Error compressing media file ${mediaPath}:`, compressError);
-        } finally {
-          // 进度反馈
-          onProgress('media', {
-            fileIndex: compressedCount + skippedCount + failedCount,
-            totalFiles: mediaFiles.length,
-            compressedCount,
-            skippedCount,
-            failedCount
-          });
-          // 递归压缩下一个
-          if (currentIndex < mediaFiles.length) {
-            await compressNext();
-          }
-        }
-      }
-
-      // 启动并发压缩
-      const workers = [];
-      for (let i = 0; i < concurrency && i < mediaFiles.length; i++) {
-        workers.push(compressNext());
-      }
-      await Promise.all(workers);
-
-      console.log(`Image compression finished. Compressed ${compressedCount} files, skipped ${skippedCount}, failed ${failedCount}.`);
+                // Write compressed data back to memFS if compression occurred and was successful
+                if (compressedResult && compressedResult.data && compressedResult.data.byteLength < data.byteLength) {
+                    writeFileToMemFS(memFS, mediaPath, compressedResult.data);
+                    compressedCount++;
+                    console.log(`Compressed ${mediaPath} (saved ${data.byteLength - compressedResult.data.byteLength} bytes)`);
+                } else if (compressedResult && compressedResult.data) {
+                    console.log(`Skipping update for ${mediaPath}, compressed size not smaller.`);
+                } else {
+                    console.warn(`Compression result for ${mediaPath} is invalid, skipping update.`);
+                }
+            } catch (compressError) {
+                console.error(`Error compressing media file ${mediaPath}:`, compressError);
+                // Decide whether to continue or stop on error
+            }
+        }));
+        console.log(`Image compression finished. Compressed ${compressedCount} files.`);
     } else {
-      console.log('Skipping image compression step.');
+        console.log('Skipping image compression step.');
     }
+
 
     // Step 4: Convert final memFS back to Zip
     console.log('Converting memory file system back to ZIP...');
@@ -138,24 +114,26 @@ export async function optimizePPTX(file, options = {}) {
     const savedSize = originalSize - compressedSize;
     const savedPercentage = originalSize > 0 ? ((savedSize / originalSize) * 100).toFixed(2) : 0;
 
-    onProgress('complete', {
+    onProgress('complete', { // <-- Call onProgress with 'complete' phase
       status: 'Compression complete!',
       stats: {
         originalSize: originalSize,
         compressedSize: compressedSize,
         savedSize: savedSize,
-        savedPercentage: parseFloat(savedPercentage)
+        savedPercentage: parseFloat(savedPercentage) // Ensure it's a number
+        // Include other relevant stats if available
       }
     });
 
-    return blob;
+    return blob; // Return the final blob
+
   } catch (error) {
     console.error('Error during PPTX optimization process:', error);
-    onProgress('error', {
-      message: error.message || 'An unknown error occurred during optimization.',
-      error: error,
-      percentage: 99
+    onProgress('error', { // <-- Report error via onProgress
+        message: error.message || 'An unknown error occurred during optimization.',
+        error: error,
+        percentage: 99 // Or estimate progress based on where it failed
     });
-    throw error;
+    throw error; // Rethrowing for now
   }
 }
