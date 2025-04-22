@@ -84,10 +84,9 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
 
 		const slidesData = [];
 
-		for (const rel of slideRelationships) {
+        for (const rel of slideRelationships) {
             console.log(`[DEBUG removeHiddenSlides LOOP] --- Iteration Start ---`);
             let rId = null, target = null, slidePath = null, slideNode = null;
-
             try {
                 try {
                     rId = rel.getAttribute('Id');
@@ -101,7 +100,6 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
                     console.error(`[ERROR LOOP Step 1] Error getting attributes: ${e.message}`, rel);
                     continue;
                 }
-
                 try {
                     slidePath = resolvePath(presentationRelsPath, target);
                     console.log(`[DEBUG LOOP Step 2] Resolved path: ${slidePath}`);
@@ -113,7 +111,6 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
                     console.error(`[ERROR LOOP Step 2] Error resolving path for target "${target}": ${e.message}`);
                     continue;
                 }
-
                 let fileExists = false;
                 try {
                     fileExists = zip.file(slidePath) !== null;
@@ -128,18 +125,17 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
                     console.error(`[ERROR LOOP Step 3] Error checking file existence for path "${slidePath}": ${e.message}`);
                     continue;
                 }
-
                 try {
                     slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
                     console.log(`[DEBUG LOOP Step 4] Found slideNode in sldIdList:`, slideNode ? 'Yes' : 'No/Not Checked');
                     if (slideIdList && !slideNode) {
-                        console.warn(`[removeHiddenSlides LOOP Step 4] Note: Could not find slide node in sldIdLst for rId: ${rId}. Proceeding anyway.`);
+                        console.warn(`[removeHiddenSlides LOOP Step 4] Note: Could not find slide node in sldIdLst for rId: ${rId}. This might indicate a file inconsistency. Proceeding anyway.`);
+                        console.log(`[DEBUG LOOP Step 4 Extra] sldIdList child count: ${slideIdList.childNodes.length}`);
                     }
                 } catch (e) {
                     console.error(`[ERROR LOOP Step 4] Error querying slideNode for rId "${rId}": ${e.message}`);
                     slideNode = null;
                 }
-
                 try {
                     console.log(`[DEBUG removeHiddenSlides LOOP Step 5] Adding slide to process: rId=${rId}, path=${slidePath}`);
                     slidesData.push({
@@ -154,14 +150,14 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
                 } catch (e) {
                     console.error(`[ERROR LOOP Step 5] Error pushing data for rId "${rId}": ${e.message}`);
                 }
-
             } catch (outerError) {
                 console.error(`[ERROR LOOP] Uncaught error during iteration for (potential rId: ${rId}): ${outerError.message}`, outerError.stack);
                 continue;
             } finally {
                 console.log(`[DEBUG removeHiddenSlides LOOP] --- Iteration End ---`);
             }
-		}
+        }
+        
 
 		console.log(`[removeHiddenSlides] Processing ${slidesData.length} valid slide entries.`);
 		const hiddenSlidesData = [];

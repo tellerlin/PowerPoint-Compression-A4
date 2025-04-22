@@ -114,10 +114,10 @@ async function detectFormat(data) {
 
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
   if (!(data instanceof Uint8Array)) {
-    throw new TypeError('compressImage: data must be a Uint8Array');
+      throw new TypeError('compressImage: data must be a Uint8Array');
   }
   if (typeof quality !== 'number' || quality < 0 || quality > 1) {
-    throw new RangeError('compressImage: quality must be a number between 0 and 1');
+      throw new RangeError('compressImage: quality must be a number between 0 and 1');
   }
   const originalSize = data.byteLength;
   let originalFormat = 'unknown';
@@ -128,152 +128,152 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   let resultMethod = 'original';
   let errorMsg = null;
   try {
-    const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
-    let cached = null;
-    try {
-      cached = imageCache.get(cacheKey);
-    } catch (e) {}
-    if (cached) {
-      return cached;
-    }
-    originalFormat = await detectFormat(data);
-    if (originalFormat === 'unknown' || originalFormat === 'tiff') {
-      return {
-        data: data,
-        format: originalFormat || 'original',
-        compressionMethod: 'original',
-        originalSize: originalSize,
-        compressedSize: originalSize,
-        originalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
-        finalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
-        error: `Unsupported format: ${originalFormat}`
-      };
-    }
-    const blob = new Blob([data]);
-    let bitmap;
-    try {
-      bitmap = await createImageBitmap(blob);
-      if (!bitmap) throw new Error('Created bitmap is null');
-      originalWidth = bitmap.width;
-      originalHeight = bitmap.height;
-    } catch (e) {
-      throw new Error(`Invalid or unsupported image data (format: ${originalFormat}, size: ${originalSize}B)`);
-    }
-    if (originalSize < COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-      resultFormat = originalFormat;
-    } else {
-      let tempCanvas, tempCtx, imageData;
+      const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
+      let cached = null;
       try {
-        tempCanvas = new OffscreenCanvas(originalWidth, originalHeight);
-        tempCtx = tempCanvas.getContext('2d');
-        if (!tempCtx) throw new Error('Failed to get 2d context for analysis');
-        tempCtx.drawImage(bitmap, 0, 0);
-        imageData = await getImageData(tempCanvas);
+          cached = imageCache.get(cacheKey);
+      } catch (e) {}
+      if (cached) {
+          return cached;
+      }
+      originalFormat = await detectFormat(data);
+      if (originalFormat === 'unknown' || originalFormat === 'tiff') {
+          return {
+              data: data,
+              format: originalFormat || 'original',
+              compressionMethod: 'original',
+              originalSize: originalSize,
+              compressedSize: originalSize,
+              originalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
+              finalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
+              error: `Unsupported format: ${originalFormat}`
+          };
+      }
+      const blob = new Blob([data]);
+      let bitmap;
+      try {
+          bitmap = await createImageBitmap(blob);
+          if (!bitmap) throw new Error('Created bitmap is null');
+          originalWidth = bitmap.width;
+          originalHeight = bitmap.height;
       } catch (e) {
-        throw e;
+          throw new Error(`Invalid or unsupported image data (format: ${originalFormat}, size: ${originalSize}B)`);
       }
-      let imageType = ImageType.UNKNOWN;
-      let analysis = { hasAlpha: false, isAnimated: false };
-      try {
-        imageType = analyzeImageType(imageData);
-        analysis = analyzeImage(imageData);
-      } catch (e) {}
-      let targetWidth = originalWidth;
-      let targetHeight = originalHeight;
-      try {
-        const dimensions = calculateOptimalDimensions(originalWidth, originalHeight, COMPRESSION_SETTINGS.MAX_IMAGE_SIZE);
-        targetWidth = dimensions.width;
-        targetHeight = dimensions.height;
-      } catch (e) {}
-      const needsResize = targetWidth !== originalWidth || targetHeight !== originalHeight;
-      if (!needsResize && originalSize < COMPRESSION_SETTINGS.MIN_RECOMPRESSION_SIZE_BYTES) {
-        resultFormat = originalFormat;
-      } else {
-        let sourceBitmap = bitmap;
-        let currentWidth = originalWidth;
-        let currentHeight = originalHeight;
-        if (needsResize) {
-          try {
-            const resizedCanvas = await resizeImage(bitmap, targetWidth, targetHeight);
-            sourceBitmap = await createImageBitmap(resizedCanvas);
-            currentWidth = targetWidth;
-            currentHeight = targetHeight;
-          } catch (e) {
-            throw e;
-          }
-        }
-        const conversionCanvas = new OffscreenCanvas(currentWidth, currentHeight);
-        const conversionCtx = conversionCanvas.getContext('2d');
-        if (!conversionCtx) throw new Error('Failed to get 2D context for conversion');
-        conversionCtx.drawImage(sourceBitmap, 0, 0);
-        const blobs = [];
-        try {
-          blobs.push({
-            type: 'webp',
-            blob: await conversionCanvas.convertToBlob({ type: 'image/webp', quality: targetQuality })
-          });
-          if (!analysis.hasAlpha) {
-            blobs.push({
-              type: 'jpeg',
-              blob: await conversionCanvas.convertToBlob({ type: 'image/jpeg', quality: targetQuality })
-            });
-          }
-          if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
-            blobs.push({
-              type: 'png',
-              blob: await conversionCanvas.convertToBlob({ type: 'image/png' })
-            });
-          }
-        } catch (e) {
-          throw e;
-        }
-        let best = blobs[0];
-        for (const candidate of blobs) {
-          if (candidate.blob && candidate.blob.size < best.blob.size) {
-            best = candidate;
-          }
-        }
-        if (!best.blob) {
-          throw new Error("No valid compressed blob generated.");
-        }
-        if (best.blob.size >= originalSize * COMPRESSION_SETTINGS.MIN_SAVING_PERCENTAGE_THRESHOLD) {
+      if (originalSize < COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
           resultFormat = originalFormat;
-        } else {
+      } else {
+          let tempCanvas, tempCtx, imageData;
           try {
-            resultData = new Uint8Array(await best.blob.arrayBuffer());
-            resultFormat = best.type;
-            resultMethod = best.type;
+              tempCanvas = new OffscreenCanvas(originalWidth, originalHeight);
+              tempCtx = tempCanvas.getContext('2d');
+              if (!tempCtx) throw new Error('Failed to get 2d context for analysis');
+              tempCtx.drawImage(bitmap, 0, 0);
+              imageData = await getImageData(tempCanvas);
           } catch (e) {
-            throw e;
+              throw e;
           }
-        }
+          let imageType = ImageType.UNKNOWN;
+          let analysis = { hasAlpha: false, isAnimated: false };
+          try {
+              imageType = analyzeImageType(imageData);
+              analysis = analyzeImage(imageData);
+          } catch (e) {}
+          let targetWidth = originalWidth;
+          let targetHeight = originalHeight;
+          try {
+              const dimensions = calculateOptimalDimensions(originalWidth, originalHeight, COMPRESSION_SETTINGS.MAX_IMAGE_SIZE);
+              targetWidth = dimensions.width;
+              targetHeight = dimensions.height;
+          } catch (e) {}
+          const needsResize = targetWidth !== originalWidth || targetHeight !== originalHeight;
+          if (!needsResize && originalSize < COMPRESSION_SETTINGS.MIN_RECOMPRESSION_SIZE_BYTES) {
+              resultFormat = originalFormat;
+          } else {
+              let sourceBitmap = bitmap;
+              let currentWidth = originalWidth;
+              let currentHeight = originalHeight;
+              if (needsResize) {
+                  try {
+                      const resizedCanvas = await resizeImage(bitmap, targetWidth, targetHeight);
+                      sourceBitmap = await createImageBitmap(resizedCanvas);
+                      currentWidth = targetWidth;
+                      currentHeight = targetHeight;
+                  } catch (e) {
+                      throw e;
+                  }
+              }
+              const conversionCanvas = new OffscreenCanvas(currentWidth, currentHeight);
+              const conversionCtx = conversionCanvas.getContext('2d');
+              if (!conversionCtx) throw new Error('Failed to get 2D context for conversion');
+              conversionCtx.drawImage(sourceBitmap, 0, 0);
+              const blobs = [];
+              try {
+                  blobs.push({
+                      type: 'webp',
+                      blob: await conversionCanvas.convertToBlob({ type: 'image/webp', quality: quality })
+                  });
+                  if (!analysis.hasAlpha) {
+                      blobs.push({
+                          type: 'jpeg',
+                          blob: await conversionCanvas.convertToBlob({ type: 'image/jpeg', quality: quality })
+                      });
+                  }
+                  if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+                      blobs.push({
+                          type: 'png',
+                          blob: await conversionCanvas.convertToBlob({ type: 'image/png' })
+                      });
+                  }
+              } catch (e) {
+                  throw e;
+              }
+              let best = blobs[0];
+              for (const candidate of blobs) {
+                  if (candidate.blob && candidate.blob.size < best.blob.size) {
+                      best = candidate;
+                  }
+              }
+              if (!best.blob) {
+                  throw new Error("No valid compressed blob generated.");
+              }
+              if (best.blob.size >= originalSize * COMPRESSION_SETTINGS.MIN_SAVING_PERCENTAGE_THRESHOLD) {
+                  resultFormat = originalFormat;
+              } else {
+                  try {
+                      resultData = new Uint8Array(await best.blob.arrayBuffer());
+                      resultFormat = best.type;
+                      resultMethod = best.type;
+                  } catch (e) {
+                      throw e;
+                  }
+              }
+          }
       }
-    }
-    const finalResult = {
-      data: resultData,
-      format: resultFormat,
-      compressionMethod: resultMethod,
-      originalSize: originalSize,
-      compressedSize: resultData.byteLength,
-      originalDimensions: { width: originalWidth, height: originalHeight },
-      finalDimensions: resultMethod === 'original' ? { width: originalWidth, height: originalHeight } : { width: targetWidth, height: targetHeight },
-      error: null
-    };
-    try {
-      imageCache.set(cacheKey, finalResult);
-    } catch (e) {}
-    return finalResult;
+      const finalResult = {
+          data: resultData,
+          format: resultFormat,
+          compressionMethod: resultMethod,
+          originalSize: originalSize,
+          compressedSize: resultData.byteLength,
+          originalDimensions: { width: originalWidth, height: originalHeight },
+          finalDimensions: resultMethod === 'original' ? { width: originalWidth, height: originalHeight } : { width: targetWidth, height: targetHeight },
+          error: null
+      };
+      try {
+          imageCache.set(cacheKey, finalResult);
+      } catch (e) {}
+      return finalResult;
   } catch (error) {
-    errorMsg = error.message;
-    return {
-      data: data,
-      format: originalFormat || 'original',
-      compressionMethod: 'original',
-      originalSize: originalSize,
-      compressedSize: originalSize,
-      originalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
-      finalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
-      error: errorMsg
-    };
+      errorMsg = error.message;
+      return {
+          data: data,
+          format: originalFormat || 'original',
+          compressionMethod: 'original',
+          originalSize: originalSize,
+          compressedSize: originalSize,
+          originalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
+          finalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
+          error: errorMsg
+      };
   }
 }

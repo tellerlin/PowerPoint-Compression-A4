@@ -107,80 +107,72 @@ export async function optimizePPTX(file, options = {}) {
 					const batch = mediaFiles.slice(i, i + batchSize);
 					const batchPromises = batch.map(mediaPath => {
 						return (async () => {
-                            let fileOriginalSize = 0;
-                            let fileCompressedSize = 0;
-                            let success = false;
-                            let error = null;
+							let fileOriginalSize = 0;
+							let fileCompressedSize = 0;
+							let success = false;
+							let error = null;
 							try {
 								const fileExtension = mediaPath.split('.').pop()?.toLowerCase() || '';
 								const isSupportedImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
-
 								await processMediaFile(zip, mediaPath, async (data) => {
 									fileOriginalSize = data.byteLength;
-                                    fileCompressedSize = fileOriginalSize; // Default if not compressed
-
+									fileCompressedSize = fileOriginalSize;
 									if (isSupportedImage && fileOriginalSize > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
 										const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
 										const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
 										const compressResult = await compressImage(data, adjustedQuality);
-
-                                        if(compressResult.error) {
-                                            console.warn(`[optimizePPTX] Compression failed for ${mediaPath}: ${compressResult.error}`);
-                                            error = compressResult.error;
-                                            return data; // Return original data on compression error
-                                        }
-
-                                        fileCompressedSize = compressResult.compressedSize;
-                                        // compressImage already handles the logic of returning original data if savings are insufficient
+										if (compressResult.error) {
+											console.warn(`[optimizePPTX] Compression failed for ${mediaPath}: ${compressResult.error}`);
+											error = compressResult.error;
+											return data;
+										}
+										fileCompressedSize = compressResult.compressedSize;
 										return compressResult.data;
 									} else {
-                                        if (!isSupportedImage) {
-                                            // console.log(`[optimizePPTX] Skipping compression for non-image file: ${mediaPath}`);
-                                        } else {
-                                             // console.log(`[optimizePPTX] Skipping compression for small image: ${mediaPath} (${fileOriginalSize} bytes)`);
-                                        }
-										return data; // Return original data for non-images or small images
+										if (!isSupportedImage) {
+											console.log(`[optimizePPTX] Skipping compression for non-image file: ${mediaPath}`);
+										} else {
+											console.log(`[optimizePPTX] Skipping compression for small image: ${mediaPath} (${fileOriginalSize} bytes)`);
+										}
+										return data;
 									}
 								});
-                                success = error === null; // Success if no error during compression attempt
+								success = error === null;
 							} catch (processError) {
 								console.error(`[optimizePPTX] Failed to process media file wrapper: ${mediaPath}`, processError.message);
-                                error = processError.message;
-                                // Attempt to get original size if processing failed early
-                                try {
-                                    const file = zip.file(mediaPath);
-                                    if(file) fileOriginalSize = (await file.async('uint8array')).byteLength;
-                                } catch(e){}
-                                fileCompressedSize = fileOriginalSize; // Assume no change on error
+								error = processError.message;
+								try {
+									const file = zip.file(mediaPath);
+									if (file) fileOriginalSize = (await file.async('uint8array')).byteLength;
+								} catch (e) {}
+								fileCompressedSize = fileOriginalSize;
 							}
-                            return { path: mediaPath, originalSize: fileOriginalSize, compressedSize: fileCompressedSize, success, error };
+							return { path: mediaPath, originalSize: fileOriginalSize, compressedSize: fileCompressedSize, success, error };
 						})();
 					});
-
 					const batchResults = await Promise.all(batchPromises);
-
 					batchResults.forEach(result => {
 						totalOriginalMediaSize += result.originalSize || 0;
 						totalCompressedMediaSize += result.compressedSize || 0;
-                        if (result.success) {
-                            processedMediaCount++;
-                        } else {
-                            failedMediaCount++;
-                        }
+						if (result.success) {
+							processedMediaCount++;
+						} else {
+							failedMediaCount++;
+						}
 					});
-
 					const elapsed = Date.now() - startTime;
-                    const currentProcessedTotal = processedMediaCount + failedMediaCount;
+					const currentProcessedTotal = processedMediaCount + failedMediaCount;
 					const estimatedTotalTime = mediaFiles.length > 0 && currentProcessedTotal > 0 ? (elapsed / currentProcessedTotal) * mediaFiles.length : 0;
 					const estimatedRemaining = Math.max(0, estimatedTotalTime - elapsed);
-
 					onProgress('media', {
 						fileIndex: Math.min(i + batchSize, mediaFiles.length),
 						totalFiles: mediaFiles.length,
-                        processedFiles: batchResults.map(r => r.path.split('/').pop()),
-                        estimatedTimeRemaining: Math.round(estimatedRemaining / 1000)
+						processedFiles: batchResults.map(r => r.path.split('/').pop()),
+						estimatedTimeRemaining: Math.round(estimatedRemaining / 1000)
 					});
 				}
+				
+				
 
 				finalStats.originalMediaSize = totalOriginalMediaSize;
 				finalStats.compressedMediaSize = totalCompressedMediaSize;

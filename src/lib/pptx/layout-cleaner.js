@@ -125,43 +125,40 @@ async function removeFilesAndRels(zip, filePaths, prefix) {
 }
 
 async function getSlideLayout(zip, slide) {
-	if (!slide?.path) return null;
-	try {
-		const slideRelsPath = slide.path.replace(/^(.*\/slides\/)([^/]+)$/, '$1_rels/$2.rels');
-		const slideRelsObj = await parseXmlSafely(zip, slideRelsPath);
-
+    if (!slide?.path) return null;
+    try {
+        const slideRelsPath = slide.path.replace(/^(.*\/slides\/)([^/]+)$/, '$1_rels/$2.rels');
+        console.log(`[LayoutCleaner] Attempting to read slide rels file: ${slideRelsPath}`);
+        const slideRelsObj = await parseXmlSafely(zip, slideRelsPath);
         if (slideRelsObj._notFoundOrEmpty || slideRelsObj._parseFailed || !slideRelsObj?.Relationships?.Relationship) {
-            // console.log(`[LayoutCleaner] No valid relationships found for slide: ${slide.path}`);
+            console.log(`[LayoutCleaner] No valid relationships found for slide: ${slide.path} at ${slideRelsPath}`);
             return null;
         }
-
-		const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
-			? slideRelsObj.Relationships.Relationship
-			: [slideRelsObj.Relationships.Relationship];
-
-		const layoutRel = slideRels.find(rel =>
-			rel?.['@_Type']?.includes('/slideLayout') && rel?.['@_Target']
-		);
-
-		if (!layoutRel) {
-            // console.log(`[LayoutCleaner] No slideLayout relationship found for slide: ${slide.path}`);
-			return null;
-		}
-
-        const layoutPath = resolvePath(slideRelsPath, layoutRel['@_Target']); // Use imported resolvePath
-        if (!layoutPath || !zip.file(layoutPath)) {
-             console.warn(`[LayoutCleaner] Layout target "${layoutRel['@_Target']}" resolved to non-existent file: ${layoutPath || 'resolution failed'} from slide: ${slide.path}`);
-             return null;
+        const slideRels = Array.isArray(slideRelsObj.Relationships.Relationship)
+            ? slideRelsObj.Relationships.Relationship
+            : [slideRelsObj.Relationships.Relationship];
+        console.log(`[LayoutCleaner] Found ${slideRels.length} relationships for slide: ${slide.path}`);
+        const layoutRel = slideRels.find(rel => 
+            rel?.['@_Type'] && rel?.['@_Type'].includes('slideLayout') && rel?.['@_Target']
+        );
+        if (!layoutRel) {
+            console.log(`[LayoutCleaner] No slideLayout relationship found for slide: ${slide.path}`);
+            return null;
         }
-
-		return {
-			path: layoutPath,
-			rId: layoutRel['@_Id']
-		};
-	} catch (error) {
-		console.error(`[LayoutCleaner] Error getting layout for slide ${slide.path}:`, error.message);
-		return null;
-	}
+        const layoutPath = resolvePath(slideRelsPath, layoutRel['@_Target']);
+        if (!layoutPath || !zip.file(layoutPath)) {
+            console.warn(`[LayoutCleaner] Layout target "${layoutRel['@_Target']}" resolved to non-existent file: ${layoutPath || 'resolution failed'} from slide: ${slide.path}`);
+            return null;
+        }
+        console.log(`[LayoutCleaner] Identified layout for slide ${slide.path}: ${layoutPath}`);
+        return {
+            path: layoutPath,
+            rId: layoutRel['@_Id']
+        };
+    } catch (error) {
+        console.error(`[LayoutCleaner] Error getting layout for slide ${slide.path}:`, error.message);
+        return null;
+    }
 }
 
 export async function getLayoutMaster(zip, layoutPath) {
