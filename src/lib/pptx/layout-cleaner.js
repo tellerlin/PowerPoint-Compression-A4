@@ -1,10 +1,12 @@
 import { parseXml, buildXml } from './xml/parser';
 import { SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX, CONTENT_TYPES_PATH } from './constants';
+import { resolvePath } from './utils'; // Added import
 
 async function parseXmlSafely(zip, path) {
     try {
         const xmlString = await zip.file(path)?.async('string');
         if (!xmlString) {
+            // console.log(`[parseXmlSafely] File not found or empty: ${path}`);
             return { _notFoundOrEmpty: true };
         }
         const parsed = await parseXml(xmlString);
@@ -17,43 +19,6 @@ async function parseXmlSafely(zip, path) {
         return { _parseFailed: true, _error: error.message };
     }
 }
-
-function resolvePathUtil(basePath, target) {
-    if (!target || typeof target !== 'string') return null;
-    try {
-        const baseDir = basePath.substring(0, basePath.lastIndexOf('/'));
-        let resolvedPath;
-        if (target.startsWith('../')) {
-            const xmlFileDir = baseDir.endsWith('/_rels') ? baseDir.substring(0, baseDir.lastIndexOf('/_rels')) : baseDir;
-            let currentParent = xmlFileDir;
-            let remainingTarget = target;
-            while (remainingTarget.startsWith('../')) {
-                const lastSlashIndex = currentParent.lastIndexOf('/');
-                if (lastSlashIndex <= 0) {
-                    console.error(`[resolvePathUtil] Cannot go up from "${currentParent}" for target "${target}" in "${basePath}"`);
-                    return null;
-                }
-                remainingTarget = remainingTarget.substring(3);
-                currentParent = currentParent.substring(0, lastSlashIndex);
-            }
-            resolvedPath = currentParent + '/' + remainingTarget;
-        } else if (target.startsWith('/')) {
-             resolvedPath = target.substring(1);
-        } else {
-             const xmlFileDir = baseDir.endsWith('/_rels') ? baseDir.substring(0, baseDir.lastIndexOf('/_rels')) : baseDir;
-             resolvedPath = xmlFileDir + '/' + target;
-        }
-        return resolvedPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/\.\//g, '/');
-    } catch (e) {
-        console.error(`[resolvePathUtil] Error resolving target "${target}" relative to "${basePath}": ${e.message}`);
-        return null;
-    }
-}
-
-function resolveRelationshipTarget(basePath, target) {
-    return resolvePathUtil(basePath, target);
-}
-
 
 export async function removeUnusedLayouts(zip, usedSlides, onProgress = () => {}) {
     const result = { success: false, usedLayouts: new Set(), usedMasters: new Set() };
@@ -147,7 +112,9 @@ async function removeFilesAndRels(zip, filePaths, prefix) {
             const relsPath = filePath.replace(prefix, `${prefix}_rels/`) + '.rels';
             if (zip.file(relsPath)) {
                 zip.remove(relsPath);
+                // console.log(`[LayoutCleaner] Removed ${filePath} and ${relsPath}`);
             } else {
+                // console.log(`[LayoutCleaner] Removed ${filePath} (no rels file found)`);
             }
             removedCount++;
         } catch (e) {
@@ -164,6 +131,7 @@ async function getSlideLayout(zip, slide) {
 		const slideRelsObj = await parseXmlSafely(zip, slideRelsPath);
 
         if (slideRelsObj._notFoundOrEmpty || slideRelsObj._parseFailed || !slideRelsObj?.Relationships?.Relationship) {
+            // console.log(`[LayoutCleaner] No valid relationships found for slide: ${slide.path}`);
             return null;
         }
 
@@ -176,10 +144,11 @@ async function getSlideLayout(zip, slide) {
 		);
 
 		if (!layoutRel) {
+            // console.log(`[LayoutCleaner] No slideLayout relationship found for slide: ${slide.path}`);
 			return null;
 		}
 
-        const layoutPath = resolveRelationshipTarget(slideRelsPath, layoutRel['@_Target']);
+        const layoutPath = resolvePath(slideRelsPath, layoutRel['@_Target']); // Use imported resolvePath
         if (!layoutPath || !zip.file(layoutPath)) {
              console.warn(`[LayoutCleaner] Layout target "${layoutRel['@_Target']}" resolved to non-existent file: ${layoutPath || 'resolution failed'} from slide: ${slide.path}`);
              return null;
@@ -202,6 +171,7 @@ export async function getLayoutMaster(zip, layoutPath) {
 		const layoutRelsObj = await parseXmlSafely(zip, layoutRelsPath);
 
         if (layoutRelsObj._notFoundOrEmpty || layoutRelsObj._parseFailed || !layoutRelsObj?.Relationships?.Relationship) {
+            // console.log(`[LayoutCleaner] No valid relationships found for layout: ${layoutPath}`);
              return null;
         }
 
@@ -211,9 +181,12 @@ export async function getLayoutMaster(zip, layoutPath) {
 
 		const masterRel = layoutRels.find(rel => rel?.['@_Type']?.includes('/slideMaster') && rel?.['@_Target']);
 
-		if (!masterRel) return null;
+		if (!masterRel) {
+            // console.log(`[LayoutCleaner] No slideMaster relationship found for layout: ${layoutPath}`);
+            return null;
+        }
 
-        const masterPath = resolveRelationshipTarget(layoutRelsPath, masterRel['@_Target']);
+        const masterPath = resolvePath(layoutRelsPath, masterRel['@_Target']); // Use imported resolvePath
          if (!masterPath || !zip.file(masterPath)) {
              console.warn(`[LayoutCleaner] Master target "${masterRel['@_Target']}" resolved to non-existent file: ${masterPath || 'resolution failed'} from layout: ${layoutPath}`);
              return null;
@@ -235,9 +208,11 @@ async function updateMasterLayoutReferences(zip, masterPath, usedLayoutsSet) {
 		const masterRelsObj = await parseXmlSafely(zip, masterRelsPath);
 
         if (masterRelsObj._notFoundOrEmpty || masterRelsObj._parseFailed) {
+            // console.log(`[LayoutCleaner] Master rels not found or parse failed, skipping update: ${masterRelsPath}`);
             return;
         }
         if (!masterRelsObj?.Relationships?.Relationship) {
+            // console.log(`[LayoutCleaner] No relationships found in master rels, skipping update: ${masterRelsPath}`);
              return;
         }
 
@@ -251,18 +226,19 @@ async function updateMasterLayoutReferences(zip, masterPath, usedLayoutsSet) {
 
 		const filteredRelationships = relationships.filter(rel => {
 			if (!rel?.['@_Type'] || !rel?.['@_Target']) {
-                console.warn(`[LayoutCleaner] Invalid relationship in ${masterRelsPath}:`, rel);
-				return false;
+                console.warn(`[LayoutCleaner] Invalid relationship in ${masterRelsPath}:`, JSON.stringify(rel).substring(0,100));
+				return false; // Keep invalid relationships? Maybe safer to keep them? Let's keep them for now. Changed to false.
 			}
 			if (!rel['@_Type'].includes('/slideLayout')) {
-				return true;
+				return true; // Keep non-layout relationships
 			}
 
-			const layoutPath = resolveRelationshipTarget(masterRelsPath, rel['@_Target']);
+			const layoutPath = resolvePath(masterRelsPath, rel['@_Target']); // Use imported resolvePath
 			const isUsed = layoutPath && usedLayoutsSet.has(layoutPath);
             if (isUsed) {
                 validLayoutRels.push(rel);
             } else {
+                // console.log(`[LayoutCleaner] Removing unused layout reference: ${rel['@_Target']} (resolved: ${layoutPath}) from ${masterRelsPath}`);
             }
 			return isUsed;
 		});
@@ -275,6 +251,7 @@ async function updateMasterLayoutReferences(zip, masterPath, usedLayoutsSet) {
 
 			await updateMasterXmlLayoutList(zip, masterPath, validLayoutRels);
 		} else {
+            // console.log(`[LayoutCleaner] No layout references needed removal in ${masterRelsPath}`);
         }
 	} catch (error) {
 		console.error(`[LayoutCleaner] Error updating master references for ${masterPath}:`, error.message);
@@ -302,6 +279,7 @@ async function updateMasterXmlLayoutList(zip, masterPath, validLayoutRelationshi
 
 
 		if (!layoutIdList) {
+            // console.log(`[LayoutCleaner] Layout ID list (sldLayoutIdLst) not found in master XML: ${masterPath}`);
 			return;
 		}
 
@@ -310,9 +288,15 @@ async function updateMasterXmlLayoutList(zip, masterPath, validLayoutRelationshi
 		const currentLayoutIds = Array.isArray(layoutIdList) ? layoutIdList : [layoutIdList];
         const initialCount = currentLayoutIds.length;
 
-		const filteredLayoutIds = currentLayoutIds.filter(layoutId =>
-			layoutId?.['@_r:id'] && validLayoutRIds.has(layoutId['@_r:id'])
-		);
+		const filteredLayoutIds = currentLayoutIds.filter(layoutId => {
+            const rId = layoutId?.['@_r:id'];
+            const keep = rId && validLayoutRIds.has(rId);
+            // if (!keep && rId) {
+            //     console.log(`[LayoutCleaner] Removing layout ID r:id="${rId}" from master XML: ${masterPath}`);
+            // }
+            return keep;
+        });
+
 
 		if (filteredLayoutIds.length < initialCount) {
              if (layoutIdListNode) {
@@ -325,6 +309,7 @@ async function updateMasterXmlLayoutList(zip, masterPath, validLayoutRelationshi
                  console.warn(`[LayoutCleaner] Could not find parent node for layout ID list in master XML: ${masterPath}`);
              }
 		} else {
+            // console.log(`[LayoutCleaner] No layout ID references needed removal in master XML: ${masterPath}`);
         }
 	} catch (error) {
 		console.error(`[LayoutCleaner] Error updating master XML layout list for ${masterPath}:`, error.message);
@@ -356,6 +341,6 @@ export async function getUsedLayoutsAndMasters(zip, usedSlides) {
 		return { usedLayouts, usedMasters };
 	} catch (error) {
 		console.error('[getUsedLayoutsAndMasters] Error analyzing used layouts and masters:', error.message);
-		return { usedLayouts: new Set(), usedMasters: new Set() };
+		return { usedLayouts: new Set(), usedMasters: new Set() }; // Return empty sets on error
 	}
 }

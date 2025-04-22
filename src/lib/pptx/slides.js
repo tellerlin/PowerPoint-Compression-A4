@@ -1,6 +1,7 @@
 import { PRESENTATION_PATH, CONTENT_TYPES_PATH, SLIDE_PREFIX, NOTES_SLIDE_PREFIX } from './constants';
+import { resolvePath } from './utils';
 
-async function parseXmlDOM(zip, path) {
+export async function parseXmlDOM(zip, path) {
 	try {
 		const xml = await zip.file(path)?.async('string');
 		if (!xml) {
@@ -35,43 +36,6 @@ function removeNode(node) {
     return false;
 }
 
-function resolvePathUtil(basePath, target) {
-    if (!target || typeof target !== 'string') return null;
-    try {
-        const baseDir = basePath.substring(0, basePath.lastIndexOf('/'));
-        let resolvedPath;
-        if (target.startsWith('../')) {
-            const xmlFileDir = baseDir.endsWith('/_rels') ? baseDir.substring(0, baseDir.lastIndexOf('/_rels')) : baseDir;
-            let currentParent = xmlFileDir;
-            let remainingTarget = target;
-            while (remainingTarget.startsWith('../')) {
-                const lastSlashIndex = currentParent.lastIndexOf('/');
-                if (lastSlashIndex <= 0) {
-                    console.error(`[resolvePathUtil] Cannot go up from "${currentParent}" for target "${target}" in "${basePath}"`);
-                    return null;
-                }
-                remainingTarget = remainingTarget.substring(3);
-                currentParent = currentParent.substring(0, lastSlashIndex);
-            }
-            resolvedPath = currentParent + '/' + remainingTarget;
-        } else if (target.startsWith('/')) {
-             resolvedPath = target.substring(1);
-        } else {
-             const xmlFileDir = baseDir.endsWith('/_rels') ? baseDir.substring(0, baseDir.lastIndexOf('/_rels')) : baseDir;
-             resolvedPath = xmlFileDir + '/' + target;
-        }
-        return resolvedPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/\/\.\//g, '/');
-    } catch (e) {
-        console.error(`[resolvePathUtil] Error resolving target "${target}" relative to "${basePath}": ${e.message}`);
-        return null;
-    }
-}
-
-function resolvePath(basePath, target) {
-    return resolvePathUtil(basePath, target);
-}
-
-
 export async function removeHiddenSlides(zip, onProgress = () => {}) {
 	console.log('[removeHiddenSlides] Starting hidden slide removal process...');
 	let removedCount = 0;
@@ -93,7 +57,6 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
         const presentationDoc = await parseXmlDOM(zip, PRESENTATION_PATH);
         if (!presentationDoc) {
             console.error('[removeHiddenSlides] Failed to parse presentation.xml file.');
-            return;
         }
 
         const slideIdList = presentationDoc ? presentationDoc.querySelector('sldIdLst, p\\:sldIdLst') : null;
@@ -107,36 +70,100 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
 		);
 
 		console.log(`[removeHiddenSlides] Found ${slideRelationships.length} slide relationships.`);
+        console.log(`[DEBUG removeHiddenSlides] Type of slideRelationships: ${typeof slideRelationships}`);
+        console.log(`[DEBUG removeHiddenSlides] Is slideRelationships an Array? ${Array.isArray(slideRelationships)}`);
+        console.log(`[DEBUG removeHiddenSlides] slideRelationships.length before loop: ${slideRelationships.length}`);
+        if (slideRelationships.length > 0) {
+            console.log(`[DEBUG removeHiddenSlides] First element type: ${typeof slideRelationships[0]}`);
+            try {
+                 console.log(`[DEBUG removeHiddenSlides] First element content (sample): ${slideRelationships[0]?.outerHTML?.substring(0, 100) || 'N/A'}`);
+            } catch (e) {
+                 console.error(`[DEBUG removeHiddenSlides] Error accessing outerHTML of first element: ${e.message}`);
+            }
+        }
+
 		const slidesData = [];
 
 		for (const rel of slideRelationships) {
-			const rId = rel.getAttribute('Id');
-			const target = rel.getAttribute('Target');
-			if (!rId || !target) continue;
+            console.log(`[DEBUG removeHiddenSlides LOOP] --- Iteration Start ---`);
+            let rId = null, target = null, slidePath = null, slideNode = null;
 
-			const slidePath = resolvePath(presentationRelsPath, target);
-			if (!slidePath || !zip.file(slidePath)) {
-                console.warn(`[removeHiddenSlides] Slide target "${target}" resolves to non-existent file: ${slidePath || 'resolution failed'} (rId: ${rId})`);
+            try {
+                try {
+                    rId = rel.getAttribute('Id');
+                    target = rel.getAttribute('Target');
+                    console.log(`[DEBUG LOOP Step 1] Got attributes: rId=${rId}, target=${target}`);
+                    if (!rId || !target) {
+                        console.warn(`[removeHiddenSlides LOOP Step 1] Skipping relationship due to missing rId or Target.`);
+                        continue;
+                    }
+                } catch (e) {
+                    console.error(`[ERROR LOOP Step 1] Error getting attributes: ${e.message}`, rel);
+                    continue;
+                }
+
+                try {
+                    slidePath = resolvePath(presentationRelsPath, target);
+                    console.log(`[DEBUG LOOP Step 2] Resolved path: ${slidePath}`);
+                    if (!slidePath) {
+                        console.warn(`[removeHiddenSlides LOOP Step 2] Skipping relationship (rId: ${rId}) because resolvePath returned null/empty.`);
+                        continue;
+                    }
+                } catch (e) {
+                    console.error(`[ERROR LOOP Step 2] Error resolving path for target "${target}": ${e.message}`);
+                    continue;
+                }
+
+                let fileExists = false;
+                try {
+                    fileExists = zip.file(slidePath) !== null;
+                    console.log(`[DEBUG LOOP Step 3] File "${slidePath}" exists: ${fileExists}`);
+                    if (!fileExists) {
+                        console.warn(`[removeHiddenSlides LOOP Step 3] Skipping relationship (rId: ${rId}) because resolved slide path "${slidePath}" does not exist in ZIP.`);
+                        const nearbyFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/slides/')).slice(0, 10);
+                        console.warn(`[removeHiddenSlides LOOP Step 3] Sample files in zip: ${JSON.stringify(nearbyFiles)}`);
+                        continue;
+                    }
+                } catch (e) {
+                    console.error(`[ERROR LOOP Step 3] Error checking file existence for path "${slidePath}": ${e.message}`);
+                    continue;
+                }
+
+                try {
+                    slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
+                    console.log(`[DEBUG LOOP Step 4] Found slideNode in sldIdList:`, slideNode ? 'Yes' : 'No/Not Checked');
+                    if (slideIdList && !slideNode) {
+                        console.warn(`[removeHiddenSlides LOOP Step 4] Note: Could not find slide node in sldIdLst for rId: ${rId}. Proceeding anyway.`);
+                    }
+                } catch (e) {
+                    console.error(`[ERROR LOOP Step 4] Error querying slideNode for rId "${rId}": ${e.message}`);
+                    slideNode = null;
+                }
+
+                try {
+                    console.log(`[DEBUG removeHiddenSlides LOOP Step 5] Adding slide to process: rId=${rId}, path=${slidePath}`);
+                    slidesData.push({
+                        rId: rId,
+                        path: slidePath,
+                        relsPath: slidePath.replace(SLIDE_PREFIX, `${SLIDE_PREFIX}_rels/`) + '.rels',
+                        notesSlideRelsPath: slidePath.replace(SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels',
+                        notesSlidePath: null,
+                        relNode: rel,
+                        slideNode: slideNode
+                    });
+                } catch (e) {
+                    console.error(`[ERROR LOOP Step 5] Error pushing data for rId "${rId}": ${e.message}`);
+                }
+
+            } catch (outerError) {
+                console.error(`[ERROR LOOP] Uncaught error during iteration for (potential rId: ${rId}): ${outerError.message}`, outerError.stack);
                 continue;
+            } finally {
+                console.log(`[DEBUG removeHiddenSlides LOOP] --- Iteration End ---`);
             }
-
-            const slideNode = slideIdList ? slideIdList.querySelector(`[r\\:id="${rId}"]`) : null;
-            if (slideIdList && !slideNode) {
-                 console.warn(`[removeHiddenSlides] Could not find slide node in sldIdLst for rId: ${rId} (path: ${slidePath})`);
-            }
-
-			slidesData.push({
-                rId: rId,
-                path: slidePath,
-                relsPath: slidePath.replace(SLIDE_PREFIX, `${SLIDE_PREFIX}_rels/`) + '.rels',
-                notesSlideRelsPath: slidePath.replace(SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels',
-                notesSlidePath: null,
-                relNode: rel,
-                slideNode: slideNode
-            });
 		}
 
-        console.log(`[removeHiddenSlides] Processing ${slidesData.length} valid slide entries.`);
+		console.log(`[removeHiddenSlides] Processing ${slidesData.length} valid slide entries.`);
 		const hiddenSlidesData = [];
         const visibleSlidesData = [];
 
@@ -145,14 +172,18 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
 			if (isHidden) {
 				hiddenSlidesData.push(slideData);
 			} else {
-                 visibleSlidesData.push(slideData);
+                visibleSlidesData.push(slideData);
             }
 		}
 
 		console.log(`[removeHiddenSlides] Found ${hiddenSlidesData.length} hidden slides to remove.`);
 
 		if (hiddenSlidesData.length === 0) {
-			console.log('[removeHiddenSlides] No hidden slides found. Exiting.');
+            if (slidesData.length > 0) {
+                console.log('[removeHiddenSlides] No hidden slides found among the valid slides. Exiting removal part.');
+            } else {
+                console.log('[removeHiddenSlides] No valid slides found to process for hidden status.');
+            }
 			return;
 		}
 
@@ -168,9 +199,8 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
             let removedRelNode = false;
 
             if (slideData.slideNode) {
-                 removedSlideNode = removeNode(slideData.slideNode);
-                 if (!removedSlideNode) console.warn(`[removeHiddenSlides] Failed to remove slide node for ${slideData.path}`);
-            } else {
+                removedSlideNode = removeNode(slideData.slideNode);
+                if (!removedSlideNode) console.warn(`[removeHiddenSlides] Failed to remove slide node for ${slideData.path}`);
             }
 
             removedRelNode = removeNode(slideData.relNode);
@@ -197,29 +227,24 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
                 zip.file(presentationRelsPath, updatedPresentationRelsXml);
             }
 
-			await updateContentTypesForRemovedFiles(zip, hiddenSlidesData.map(s => s.path));
-            await updateContentTypesForRemovedFiles(zip, hiddenSlidesData.map(s => s.notesSlidePath).filter(p => p));
+            const allRemovedPaths = [
+                ...hiddenSlidesData.map(s => s.path),
+                ...hiddenSlidesData.map(s => s.notesSlidePath)
+            ].filter(p => p);
 
+			await updateContentTypesForRemovedFiles(zip, allRemovedPaths);
 		}
 
 		console.log(`[removeHiddenSlides] Finished. Successfully removed: ${removedCount}, Failed: ${failedToRemoveCount}`);
-
 	} catch (error) {
 		console.error('[removeHiddenSlides] Critical error during hidden slide removal:', error.message, error.stack);
         onProgress('error', { message: `Hidden slide removal failed: ${error.message}` });
 	}
 }
 
-
 async function isSlideHidden(zip, slidePath) {
 	try {
-		const slideXml = await zip.file(slidePath)?.async('string');
-		if (!slideXml) {
-			console.warn(`[isSlideHidden] Unable to read slide file: ${slidePath}`);
-			return false;
-		}
-
-        const slideDoc = await parseXmlDOM(zip, slidePath);
+		const slideDoc = await parseXmlDOM(zip, slidePath);
         if (!slideDoc) {
             console.warn(`[isSlideHidden] Failed to parse slide XML for: ${slidePath}. Assuming not hidden.`);
             return false;
@@ -240,11 +265,10 @@ async function isSlideHidden(zip, slidePath) {
 	}
 }
 
-
 async function removeSlideFiles(zip, slideData) {
     let success = true;
     try {
-        zip.remove(slideData.path);
+        if (zip.file(slideData.path)) zip.remove(slideData.path);
 
         if (zip.file(slideData.relsPath)) {
             zip.remove(slideData.relsPath);
@@ -253,7 +277,7 @@ async function removeSlideFiles(zip, slideData) {
         const notesSlidePath = await findNotesSlidePath(zip, slideData.relsPath);
         if (notesSlidePath) {
             slideData.notesSlidePath = notesSlidePath;
-            zip.remove(notesSlidePath);
+            if (zip.file(notesSlidePath)) zip.remove(notesSlidePath);
              const notesSlideRelsPath = notesSlidePath.replace(NOTES_SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels';
              if (zip.file(notesSlideRelsPath)) {
                  zip.remove(notesSlideRelsPath);
@@ -269,8 +293,6 @@ async function removeSlideFiles(zip, slideData) {
 
 async function findNotesSlidePath(zip, slideRelsPath) {
      try {
-        if (!zip.file(slideRelsPath)) return null;
-
         const slideRelsDoc = await parseXmlDOM(zip, slideRelsPath);
         if (!slideRelsDoc) return null;
 
@@ -285,7 +307,6 @@ async function findNotesSlidePath(zip, slideRelsPath) {
             if (notesPath && zip.file(notesPath)) {
                 return notesPath;
             } else if (notesPath) {
-                 console.warn(`[findNotesSlidePath] Notes slide target "${target}" resolved to non-existent file: ${notesPath}`);
             } else {
                  console.warn(`[findNotesSlidePath] Failed to resolve notes slide target "${target}" from ${slideRelsPath}`);
             }
@@ -295,7 +316,6 @@ async function findNotesSlidePath(zip, slideRelsPath) {
     }
     return null;
 }
-
 
 async function updateContentTypesForRemovedFiles(zip, removedPaths) {
 	if (!removedPaths || removedPaths.length === 0) return;
@@ -316,7 +336,8 @@ async function updateContentTypesForRemovedFiles(zip, removedPaths) {
     removedPaths.forEach(removedPath => {
         if (!removedPath) return;
         const partName = `/${removedPath}`;
-        const overrideElement = typesElement.querySelector(`Override[PartName="${partName}"]`);
+        const escapedPartName = partName.replace(/"/g, '\\"');
+        const overrideElement = typesElement.querySelector(`Override[PartName="${escapedPartName}"]`);
         if (overrideElement) {
             if(removeNode(overrideElement)) {
                  changed = true;
@@ -331,9 +352,10 @@ async function updateContentTypesForRemovedFiles(zip, removedPaths) {
             const serializer = new XMLSerializer();
             const updatedXml = serializer.serializeToString(contentTypesDoc);
             zip.file(CONTENT_TYPES_PATH, updatedXml);
-            console.log(`[updateContentTypesForRemovedFiles] Updated [Content_Types].xml, removed references for ${removedPaths.filter(p=>p).length} files.`);
+            console.log(`[updateContentTypesForRemovedFiles] Updated [Content_Types].xml, removed Override references for ${removedPaths.filter(p=>p).length} files.`);
         } catch (e) {
              console.error('[updateContentTypesForRemovedFiles] Failed to serialize or save updated [Content_Types].xml:', e.message);
         }
+    } else {
     }
 }
