@@ -1,320 +1,341 @@
-import { PRESENTATION_PATH } from './constants';
+import { PRESENTATION_PATH, CONTENT_TYPES_PATH, SLIDE_PREFIX, NOTES_SLIDE_PREFIX } from './constants';
 
-const parseXml = async (zip, path) => {
-  try {
-    const xml = await zip.file(path)?.async('string');
-    if (!xml) {
-      return null;
-    }
-    const parser = new DOMParser();
-    return parser.parseFromString(xml, 'text/xml');
-  } catch (error) {
-    console.error(`Error parsing XML at ${path}:`, error);
-    return null;
-  }
-};
-
-const removeNode = (node) => {
-  if (node && node.parentNode) {
-    node.parentNode.removeChild(node);
-  }
-};
-
-export async function removeHiddenSlides(zip) {
-  console.log('===== removeHiddenSlides function started =====');
-  try {
-    console.log('Starting to find and remove hidden slides...');
-    
-    // Check if zip object is valid
-    if (!zip || typeof zip.files !== 'object') {
-      console.error('Invalid zip object:', zip);
-      return;
-    }
-    
-    console.log('Zip object is valid, file count:', Object.keys(zip.files).length);
-    
-    // 1. Get all slide rIds from presentation.xml
-    console.log(`Parsing ${PRESENTATION_PATH}`);
-    const presentationXml = await parseXml(zip, PRESENTATION_PATH);
-    if (!presentationXml) {
-      console.error('Failed to parse presentation.xml file');
-      return;
-    }
-    
-    const slideNodes = presentationXml.getElementsByTagNameNS('http://schemas.openxmlformats.org/presentationml/2006/main', 'sldId');
-    console.log(`Found ${slideNodes.length} slide nodes`);
-    
-    // 2. Get path and hidden status for each slide
-    const slidesToCheck = [];
-    for (let i = 0; i < slideNodes.length; i++) {
-      const slideNode = slideNodes[i];
-      const slideId = slideNode.getAttribute('id');
-      const slideRId = slideNode.getAttribute('r:id');
-      console.log(`Slide node ${i+1}: id=${slideId}, r:id=${slideRId}`);
-      
-      if (slideRId) {
-        const slideInfo = await getSlideInfo(zip, slideRId);
-        if (slideInfo) {
-          slidesToCheck.push({ slideNode, slideInfo, slideRId });
+async function parseXmlDOM(zip, path) {
+	try {
+		const xml = await zip.file(path)?.async('string');
+		if (!xml) {
+            console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
+			return null;
+		}
+		const parser = new DOMParser();
+		const doc = parser.parseFromString(xml, 'application/xml'); // Use application/xml for stricter parsing
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) {
+            console.error(`[parseXmlDOM] XML parsing error in ${path}:`, parseError.textContent);
+            // Fallback attempt with text/xml
+             const fallbackDoc = parser.parseFromString(xml, 'text/xml');
+             const fallbackError = fallbackDoc.querySelector('parsererror');
+             if(fallbackError) {
+                  console.error(`[parseXmlDOM] Fallback XML parsing also failed for ${path}`);
+                  return null;
+             }
+             console.warn(`[parseXmlDOM] Parsed ${path} with text/xml fallback.`);
+             return fallbackDoc;
         }
-      }
-    }
-    
-    // 3. Check if each slide is hidden
-    const hiddenSlides = [];
-    const visibleSlides = [];
-    for (const slide of slidesToCheck) {
-      console.log(`Checking if slide is hidden: ${slide.slideInfo.path}`);
-      const isHidden = await isSlideHidden(zip, slide.slideInfo.path);
-      console.log(`Slide ${slide.slideInfo.path} hidden status: ${isHidden}`);
-      
-      if (isHidden) {
-        console.log(`Found hidden slide: ${slide.slideInfo.path}`);
-        hiddenSlides.push(slide);
-      } else {
-        visibleSlides.push(slide);
-      }
-    }
-    
-    console.log(`Found ${hiddenSlides.length} hidden slides and ${visibleSlides.length} visible slides`);
-    
-    if (hiddenSlides.length === 0) {
-      console.log('No hidden slides found, no action needed');
-      return;
-    }
-    
-    // 4. Execute deletion operations
-    for (const { slideNode, slideInfo } of hiddenSlides) {
-      console.log(`Removing slide node: ${slideInfo.path}`);
-      removeNode(slideNode);
-      console.log(`Removing slide related files: ${slideInfo.path}`);
-      await removeSlide(zip, slideInfo);
-    }
-    
-    // 5. Update presentation.xml
-    console.log('Updating presentation.xml file');
-    const serializer = new XMLSerializer();
-    const updatedXml = serializer.serializeToString(presentationXml);
-    zip.file(PRESENTATION_PATH, updatedXml);
-    
-    // 6. 更新幻灯片编号和顺序
-    await updateSlideNumbers(zip, visibleSlides);
-    
-    console.log('Hidden slides removal completed');
-  } catch (error) {
-    console.error('Error removing hidden slides:', error);
-    console.error('Error stack:', error.stack);
-  }
-  console.log('===== removeHiddenSlides function completed =====');
+		return doc;
+	} catch (error) {
+		console.error(`[parseXmlDOM] Error parsing XML at ${path}:`, error.message);
+		return null;
+	}
 }
 
-// 添加新函数：更新幻灯片编号和顺序
-async function updateSlideNumbers(zip, visibleSlides) {
-  try {
-    console.log('Updating slide numbers and order...');
-    
-    // 更新幻灯片顺序文件（如果存在）
-    const viewPropsPath = 'ppt/viewProps.xml';
-    if (zip.file(viewPropsPath)) {
-      const viewPropsXml = await zip.file(viewPropsPath)?.async('string');
-      if (viewPropsXml) {
-        console.log('Updating viewProps.xml with new slide order');
-        // 实现更新逻辑...
-        // 这里需要根据实际文件格式进行处理
-      }
-    }
-    
-    // 更新其他可能引用幻灯片的文件
-    // 例如：自定义显示、幻灯片导航等
-    
-    console.log('Slide numbers and order updated successfully');
-  } catch (error) {
-    console.warn('Error updating slide numbers:', error);
-  }
-}
-
-// Modified isSlideHidden function with detailed logs
-async function isSlideHidden(zip, slidePath) {
-  try {
-    console.log(`[isSlideHidden] Starting to check slide: ${slidePath}`);
-    const slideXml = await zip.file(slidePath)?.async('string');
-    if (!slideXml) {
-      console.warn(`[isSlideHidden] Unable to read slide file: ${slidePath}`);
-      return false;
-    }
-    
-    console.log(`[isSlideHidden] Slide XML length: ${slideXml.length}`);
-    // Output first 200 characters of XML for debugging
-    console.log(`[isSlideHidden] First 200 chars of XML: ${slideXml.substring(0, 200)}...`);
-    
-    // First try simple string matching as a fallback method
-    const hasShowAttribute = slideXml.includes('show="0"');
-    console.log(`[isSlideHidden] String match 'show="0"': ${hasShowAttribute}`);
-
-    const parser = new DOMParser();
-    const slideDoc = parser.parseFromString(slideXml, 'text/xml');
-    
-    // Look for show attribute on p:sld element
-    const slideElement = slideDoc.querySelector('p\\:sld, sld');
-    if (!slideElement) {
-      console.warn(`[isSlideHidden] Slide element not found (p:sld or sld)`);
-      // Try other possible element names
-      const possibleElements = slideDoc.querySelectorAll('*');
-      console.log(`[isSlideHidden] Number of elements in document: ${possibleElements.length}`);
-      if (possibleElements.length > 0) {
-        console.log(`[isSlideHidden] First element name: ${possibleElements[0].tagName}`);
-      }
-      
-      // If string matching found show="0" but DOM query failed, still return true
-      return hasShowAttribute;
-    }
-    
-    console.log(`[isSlideHidden] Found slide element: ${slideElement.tagName}`);
-    const showAttribute = slideElement.getAttribute('show');
-    console.log(`[isSlideHidden] show attribute value: ${showAttribute}`);
-    
-    return showAttribute === '0';
-  } catch (error) {
-    console.error(`[isSlideHidden] Error checking if slide ${slidePath} is hidden:`, error);
-    console.error(`[isSlideHidden] Error stack:`, error.stack);
+function removeNode(node) {
+	if (node && node.parentNode) {
+		node.parentNode.removeChild(node);
+        return true;
+	}
     return false;
-  }
 }
 
-async function getSlideInfo(zip, slideRId) {
-  try {
-    const relsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
-    if (!relsXml) {
-      return null;
+function resolvePath(basePath, target) {
+    if (!target || typeof target !== 'string') return null;
+    try {
+        const baseDir = basePath.substring(0, basePath.lastIndexOf('/'));
+        let resolvedPath;
+        if (target.startsWith('../')) {
+            const parentDir = baseDir.substring(0, baseDir.lastIndexOf('/'));
+            resolvedPath = parentDir + '/' + target.substring(target.indexOf('/') + 1);
+        } else if (target.startsWith('/')) {
+            resolvedPath = target.substring(1);
+        } else {
+            resolvedPath = baseDir + '/' + target;
+        }
+        return resolvedPath.replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+    } catch (e) {
+        console.error(`[resolvePath] Error resolving target "${target}" relative to "${basePath}": ${e.message}`);
+        return null;
     }
+}
 
-    const parser = new DOMParser();
-    const relsDoc = parser.parseFromString(relsXml, 'text/xml');
-    const relationship = relsDoc.querySelector(`Relationship[Id="${slideRId}"]`);
-    if (!relationship) {
-      return null;
+
+export async function removeHiddenSlides(zip, onProgress = () => {}) {
+	console.log('[removeHiddenSlides] Starting hidden slide removal process...');
+	let removedCount = 0;
+    let failedToRemoveCount = 0;
+
+	try {
+		if (!zip || typeof zip.files !== 'object') {
+			console.error('[removeHiddenSlides] Invalid zip object provided.');
+			return;
+		}
+
+		const presentationRelsPath = 'ppt/_rels/presentation.xml.rels';
+		const presentationRelsDoc = await parseXmlDOM(zip, presentationRelsPath);
+		if (!presentationRelsDoc) {
+			console.error('[removeHiddenSlides] Failed to parse presentation relationships file.');
+			return;
+		}
+
+        const presentationDoc = await parseXmlDOM(zip, PRESENTATION_PATH);
+        if (!presentationDoc) {
+            console.error('[removeHiddenSlides] Failed to parse presentation.xml file.');
+            return;
+        }
+
+        const slideIdList = presentationDoc.querySelector('sldIdLst, p\\:sldIdLst'); // Namespace aware query
+        if (!slideIdList) {
+             console.warn('[removeHiddenSlides] Slide ID list (sldIdLst) not found in presentation.xml.');
+             return;
+        }
+
+		const relationships = Array.from(presentationRelsDoc.querySelectorAll('Relationship'));
+		const slideRelationships = relationships.filter(rel =>
+			rel.getAttribute('Type') === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide'
+		);
+
+		console.log(`[removeHiddenSlides] Found ${slideRelationships.length} slide relationships.`);
+		const slidesData = [];
+
+		for (const rel of slideRelationships) {
+			const rId = rel.getAttribute('Id');
+			const target = rel.getAttribute('Target');
+			if (!rId || !target) continue;
+
+			const slidePath = resolvePath(presentationRelsPath, target);
+			if (!slidePath || !zip.file(slidePath)) {
+                console.warn(`[removeHiddenSlides] Slide target resolves to non-existent file: ${slidePath} (rId: ${rId})`);
+                continue;
+            }
+
+            const slideNode = slideIdList.querySelector(`[r\\:id="${rId}"]`); // Namespace aware query
+            if (!slideNode) {
+                 console.warn(`[removeHiddenSlides] Could not find slide node in sldIdLst for rId: ${rId}`);
+                 // Still check if hidden, but might not be able to remove node later
+            }
+
+			slidesData.push({
+                rId: rId,
+                path: slidePath,
+                relsPath: slidePath.replace(SLIDE_PREFIX, `${SLIDE_PREFIX}_rels/`) + '.rels',
+                notesSlideRelsPath: slidePath.replace(SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels', // Path for notes slide rels
+                notesSlidePath: null, // Will be determined later
+                relNode: rel,
+                slideNode: slideNode
+            });
+		}
+
+        console.log(`[removeHiddenSlides] Processing ${slidesData.length} valid slide entries.`);
+		const hiddenSlidesData = [];
+        const visibleSlidesData = [];
+
+		for (const slideData of slidesData) {
+			const isHidden = await isSlideHidden(zip, slideData.path);
+            // console.log(`[removeHiddenSlides] Slide ${slideData.path} hidden status: ${isHidden}`);
+			if (isHidden) {
+				hiddenSlidesData.push(slideData);
+			} else {
+                 visibleSlidesData.push(slideData);
+            }
+		}
+
+		console.log(`[removeHiddenSlides] Found ${hiddenSlidesData.length} hidden slides to remove.`);
+
+		if (hiddenSlidesData.length === 0) {
+			console.log('[removeHiddenSlides] No hidden slides found. Exiting.');
+			return;
+		}
+
+        const totalToRemove = hiddenSlidesData.length;
+        let currentRemoved = 0;
+
+		for (const slideData of hiddenSlidesData) {
+            currentRemoved++;
+            const progressPercent = 15 + (currentRemoved / totalToRemove) * 10; // Allocate 10% of overall progress (15-25%)
+            onProgress('init', { percentage: progressPercent, status: `Removing hidden slide ${currentRemoved}/${totalToRemove}...`});
+
+            let removedSlideNode = false;
+            let removedRelNode = false;
+
+            if (slideData.slideNode) {
+                 removedSlideNode = removeNode(slideData.slideNode);
+                 if (!removedSlideNode) console.warn(`[removeHiddenSlides] Failed to remove slide node for ${slideData.path}`);
+            } else {
+                 console.warn(`[removeHiddenSlides] Cannot remove slide node for ${slideData.path} as it was not found.`);
+            }
+
+            removedRelNode = removeNode(slideData.relNode);
+            if (!removedRelNode) console.warn(`[removeHiddenSlides] Failed to remove relationship node for ${slideData.path}`);
+
+            const success = await removeSlideFiles(zip, slideData);
+            if (success) {
+                removedCount++;
+            } else {
+                failedToRemoveCount++;
+            }
+		}
+
+		if (removedCount > 0 || failedToRemoveCount > 0) {
+			console.log('[removeHiddenSlides] Updating presentation and content types after removal...');
+			const serializer = new XMLSerializer();
+
+            if (presentationDoc) {
+                const updatedPresentationXml = serializer.serializeToString(presentationDoc);
+                zip.file(PRESENTATION_PATH, updatedPresentationXml);
+            }
+            if (presentationRelsDoc) {
+                const updatedPresentationRelsXml = serializer.serializeToString(presentationRelsDoc);
+                zip.file(presentationRelsPath, updatedPresentationRelsXml);
+            }
+
+			await updateContentTypesForRemovedFiles(zip, hiddenSlidesData.map(s => s.path));
+            await updateContentTypesForRemovedFiles(zip, hiddenSlidesData.map(s => s.notesSlidePath).filter(p => p)); // Update for removed notes slides
+
+            // Simple re-numbering based on remaining order (optional, might break links)
+            // const finalSlideNodes = Array.from(slideIdList.querySelectorAll('sldId, p\\:sldId'));
+            // finalSlideNodes.forEach((node, index) => {
+            //     node.setAttribute('id', (256 + index).toString()); // Start IDs from 256 usually
+            // });
+            // const updatedPresentationXmlAgain = serializer.serializeToString(presentationDoc);
+            // zip.file(PRESENTATION_PATH, updatedPresentationXmlAgain);
+
+		}
+
+		console.log(`[removeHiddenSlides] Finished. Successfully removed: ${removedCount}, Failed: ${failedToRemoveCount}`);
+
+	} catch (error) {
+		console.error('[removeHiddenSlides] Critical error during hidden slide removal:', error.message, error.stack);
+        onProgress('error', { message: `Hidden slide removal failed: ${error.message}` });
+	}
+}
+
+
+async function isSlideHidden(zip, slidePath) {
+	try {
+		const slideXml = await zip.file(slidePath)?.async('string');
+		if (!slideXml) {
+			console.warn(`[isSlideHidden] Unable to read slide file: ${slidePath}`);
+			return false;
+		}
+
+		// Fast check: String matching (can be unreliable with formatting variations)
+		const hasShowAttribute = /show\s*=\s*["']0["']/.test(slideXml);
+		// console.log(`[isSlideHidden] String match 'show="0"' for ${slidePath}: ${hasShowAttribute}`);
+
+        // Robust check: DOM parsing
+        const slideDoc = await parseXmlDOM(zip, slidePath); // Use the DOM parser helper
+        if (!slideDoc) {
+            console.warn(`[isSlideHidden] Failed to parse slide XML, falling back to string match for: ${slidePath}`);
+            return hasShowAttribute; // Fallback to string match if parsing fails
+        }
+
+		const slideElement = slideDoc.querySelector('sld, p\\:sld'); // Check common namespaces
+		if (!slideElement) {
+			console.warn(`[isSlideHidden] Slide element (sld or p:sld) not found in ${slidePath}. Assuming not hidden.`);
+			return false;
+		}
+
+		const showValue = slideElement.getAttribute('show');
+        // console.log(`[isSlideHidden] DOM query 'show' attribute value for ${slidePath}: ${showValue}`);
+
+		return showValue === '0';
+
+	} catch (error) {
+		console.error(`[isSlideHidden] Error checking hidden status for ${slidePath}:`, error.message);
+		return false; // Assume not hidden on error
+	}
+}
+
+
+async function removeSlideFiles(zip, slideData) {
+    let success = true;
+    try {
+        // console.log(`[removeSlideFiles] Removing slide file: ${slideData.path}`);
+        zip.remove(slideData.path);
+
+        if (zip.file(slideData.relsPath)) {
+            // console.log(`[removeSlideFiles] Removing slide relationship file: ${slideData.relsPath}`);
+            zip.remove(slideData.relsPath);
+        }
+
+        // Find and remove associated notes slide
+        const notesSlidePath = await findNotesSlidePath(zip, slideData.relsPath);
+        if (notesSlidePath) {
+            slideData.notesSlidePath = notesSlidePath; // Store for content type update
+            // console.log(`[removeSlideFiles] Removing associated notes slide: ${notesSlidePath}`);
+            zip.remove(notesSlidePath);
+             const notesSlideRelsPath = notesSlidePath.replace(NOTES_SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels';
+             if (zip.file(notesSlideRelsPath)) {
+                 // console.log(`[removeSlideFiles] Removing notes slide relationship file: ${notesSlideRelsPath}`);
+                 zip.remove(notesSlideRelsPath);
+             }
+        }
+
+    } catch (error) {
+        console.error(`[removeSlideFiles] Error removing files for slide ${slideData.path}:`, error.message);
+        success = false;
     }
+    return success;
+}
 
-    const target = relationship.getAttribute('Target');
-    const slidePath = `ppt/${target.replace('../', '')}`;
+async function findNotesSlidePath(zip, slideRelsPath) {
+     try {
+        const slideRelsDoc = await parseXmlDOM(zip, slideRelsPath);
+        if (!slideRelsDoc) return null;
 
-    return {
-      path: slidePath,
-      relsPath: slidePath.replace('slides/', 'slides/_rels/') + '.rels'
-    };
-  } catch (error) {
-    console.error(`Error getting slide info for ${slideRId}:`, error);
+        const relationships = Array.from(slideRelsDoc.querySelectorAll('Relationship'));
+        const notesRel = relationships.find(rel =>
+            rel.getAttribute('Type') === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide'
+        );
+
+        if (notesRel) {
+            const target = notesRel.getAttribute('Target');
+            const notesPath = resolvePath(slideRelsPath, target);
+            if (notesPath && zip.file(notesPath)) {
+                return notesPath;
+            }
+        }
+    } catch (error) {
+        console.error(`[findNotesSlidePath] Error finding notes slide from ${slideRelsPath}:`, error.message);
+    }
     return null;
-  }
 }
 
-async function removeSlide(zip, slideInfo) {
-  try {
-    console.log(`Removing slide file: ${slideInfo.path}`);
-    zip.remove(slideInfo.path);
 
-    if (zip.file(slideInfo.relsPath)) {
-      console.log(`Removing slide relationship file: ${slideInfo.relsPath}`);
-      zip.remove(slideInfo.relsPath);
+async function updateContentTypesForRemovedFiles(zip, removedPaths) {
+	if (removedPaths.length === 0) return;
+    const contentTypesDoc = await parseXmlDOM(zip, CONTENT_TYPES_PATH);
+    if (!contentTypesDoc) {
+        console.error('[updateContentTypesForRemovedFiles] Failed to parse [Content_Types].xml');
+        return;
     }
 
-    await updateContentTypes(zip, slideInfo.path);
-    await updatePresentationRels(zip, slideInfo.path);
-    
-    // 更彻底地清理所有可能的引用
-    await removeSlideReferencesFromOtherFiles(zip, slideInfo.path);
-  } catch (error) {
-    console.warn('Error removing slide:', error);
-  }
-}
-
-// 增强 removeSlideReferencesFromOtherFiles 函数
-async function removeSlideReferencesFromOtherFiles(zip, slidePath) {
-  try {
-    console.log(`Removing all references to slide: ${slidePath}`);
-    
-    // 1. 检查并更新幻灯片顺序文件
-    const slideOrderPath = 'ppt/viewProps.xml';
-    if (zip.file(slideOrderPath)) {
-      const viewPropsXml = await zip.file(slideOrderPath)?.async('string');
-      if (viewPropsXml && viewPropsXml.includes(slidePath.split('ppt/')[1])) {
-        console.log(`Updating slide order file: ${slideOrderPath}`);
-        // 实现更新逻辑...
-      }
-    }
-    
-    // 2. 检查并更新自定义显示文件
-    const customShowsPath = 'ppt/presentation.xml';
-    if (zip.file(customShowsPath)) {
-      const presentationXml = await zip.file(customShowsPath)?.async('string');
-      if (presentationXml && presentationXml.includes('custShow')) {
-        console.log('Checking custom shows for slide references');
-        // 实现更新逻辑...
-      }
-    }
-    
-    // 3. 检查并更新幻灯片导航文件
-    const navFilesPattern = /ppt\/slideNavigation\/.*\.xml/;
-    const navFiles = Object.keys(zip.files).filter(path => navFilesPattern.test(path));
-    for (const navFile of navFiles) {
-      console.log(`Checking navigation file: ${navFile}`);
-      // 实现更新逻辑...
-    }
-    
-    // 4. 检查并更新其他可能引用幻灯片的文件
-    // 例如：注释、批注等
-    
-    console.log(`Completed removing all references to slide: ${slidePath}`);
-  } catch (error) {
-    console.warn(`Error removing slide references: ${error.message}`);
-  }
-}
-
-async function updateContentTypes(zip, slidePath) {
-  try {
-    const contentTypesXml = await zip.file('[Content_Types].xml')?.async('string');
-    if (!contentTypesXml) {
-      return;
+    let changed = false;
+    const typesElement = contentTypesDoc.querySelector('Types');
+    if (!typesElement) {
+         console.error('[updateContentTypesForRemovedFiles] <Types> element not found in [Content_Types].xml');
+         return;
     }
 
-    const parser = new DOMParser();
-    const contentTypesDoc = parser.parseFromString(contentTypesXml, 'text/xml');
-    const slidePartName = `/ppt/${slidePath.split('ppt/')[1]}`;
-    const overrideElement = contentTypesDoc.querySelector(`Override[PartName="${slidePartName}"]`);
+    removedPaths.forEach(removedPath => {
+        if (!removedPath) return;
+        const partName = `/${removedPath}`; // ContentTypes usually have leading slash
+        const overrideElement = typesElement.querySelector(`Override[PartName="${partName}"]`);
+        if (overrideElement) {
+            // console.log(`[updateContentTypesForRemovedFiles] Removing Override for: ${partName}`);
+            if(removeNode(overrideElement)) {
+                 changed = true;
+            }
+        }
+    });
 
-    if (overrideElement && overrideElement.parentNode) {
-      console.log(`Removing reference from [Content_Types].xml: ${slidePartName}`);
-      overrideElement.parentNode.removeChild(overrideElement);
-      const serializer = new XMLSerializer();
-      const updatedXml = serializer.serializeToString(contentTypesDoc);
-      zip.file('[Content_Types].xml', updatedXml);
+    if (changed) {
+        try {
+            const serializer = new XMLSerializer();
+            const updatedXml = serializer.serializeToString(contentTypesDoc);
+            zip.file(CONTENT_TYPES_PATH, updatedXml);
+            console.log(`[updateContentTypesForRemovedFiles] Updated [Content_Types].xml, removed references for ${removedPaths.length} files.`);
+        } catch (e) {
+             console.error('[updateContentTypesForRemovedFiles] Failed to serialize or save updated [Content_Types].xml:', e.message);
+        }
     }
-  } catch (error) {
-    console.warn('Error updating content types:', error);
-  }
-}
-
-async function updatePresentationRels(zip, slidePath) {
-  try {
-    const relsXml = await zip.file('ppt/_rels/presentation.xml.rels')?.async('string');
-    if (!relsXml) {
-      return;
-    }
-
-    const parser = new DOMParser();
-    const relsDoc = parser.parseFromString(relsXml, 'text/xml');
-    const slideTarget = `slides/${slidePath.split('slides/')[1]}`;
-    const relationshipElement = relsDoc.querySelector(`Relationship[Target="${slideTarget}"]`);
-    
-    if (relationshipElement && relationshipElement.parentNode) {
-      console.log(`Removing reference from presentation.xml.rels: ${slideTarget}`);
-      relationshipElement.parentNode.removeChild(relationshipElement);
-      
-      const serializer = new XMLSerializer();
-      const updatedXml = serializer.serializeToString(relsDoc);
-      zip.file('ppt/_rels/presentation.xml.rels', updatedXml);
-    }
-  } catch (error) {
-    console.warn('Error updating presentation rels:', error);
-  }
 }

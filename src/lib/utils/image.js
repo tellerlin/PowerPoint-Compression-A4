@@ -1,379 +1,350 @@
-import { COMPRESSION_SETTINGS } from '../pptx/constants';
+import { COMPRESSION_SETTINGS } from '../pptx/constants.js';
 import { validateImageData } from './validation';
 import { imageCache } from './cache';
-// Remove Squoosh import as it's not compatible with SvelteKit
-// import { ImagePool } from '@squoosh/lib';
 
-// Keep existing hashCode function and other utility functions
 function hashCode(data) {
-  // 简化的哈希算法，仅使用数据的部分样本
-  let hash = 0;
-  const step = Math.max(1, Math.floor(data.length / 100)); // 采样以提高性能
-  for (let i = 0; i < data.length; i += step) {
-    hash = ((hash << 5) - hash) + data[i];
-    hash |= 0; // 转换为32位整数
-  }
-  return hash.toString(16);
+	let hash = 0;
+	const step = Math.max(1, Math.floor(data.length / 100));
+	for (let i = 0; i < data.length; i += step) {
+		hash = ((hash << 5) - hash) + data[i];
+		hash |= 0;
+	}
+	return hash.toString(16);
 }
 
-// 添加图像类型枚举
 const ImageType = {
-  PHOTO: 'photo',
-  DIAGRAM: 'diagram',
-  ICON: 'icon',
-  UNKNOWN: 'unknown'
+	PHOTO: 'photo',
+	DIAGRAM: 'diagram',
+	ICON: 'icon',
+	UNKNOWN: 'unknown'
 };
 
-// 添加图像类型分析函数
 function analyzeImageType(imageData) {
-  // 简化的图像类型检测
-  // 实际应用中可以使用更复杂的算法
-  const { width, height, data } = imageData;
-  
-  // 检查是否为图标（小尺寸，通常有透明度）
-  if (width < 128 && height < 128) {
-    return ImageType.ICON;
-  }
-  
-  // 检查是否为图表/图形（有限的颜色数量，清晰的边缘）
-  let colorCount = 0;
-  const colorMap = new Map();
-  const sampleStep = Math.max(1, Math.floor((data.length / 4) / 1000));
-  
-  for (let i = 0; i < data.length; i += sampleStep * 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const colorKey = `${r},${g},${b}`;
-    
-    if (!colorMap.has(colorKey)) {
-      colorMap.set(colorKey, 1);
-      colorCount++;
-      if (colorCount > 50) break; // 如果颜色太多，可能是照片
-    }
-  }
-  
-  if (colorCount < 50) {
-    return ImageType.DIAGRAM;
-  }
-  
-  // 默认为照片
-  return ImageType.PHOTO;
+	const { width, height, data } = imageData;
+
+	if (width < 128 && height < 128) {
+		return ImageType.ICON;
+	}
+
+	let colorCount = 0;
+	const colorMap = new Map();
+	const sampleStep = Math.max(1, Math.floor((data.length / 4) / 1000));
+
+	for (let i = 0; i < data.length; i += sampleStep * 4) {
+		const r = data[i];
+		const g = data[i + 1];
+		const b = data[i + 2];
+		const colorKey = `${r},${g},${b}`;
+
+		if (!colorMap.has(colorKey)) {
+			colorMap.set(colorKey, 1);
+			colorCount++;
+			if (colorCount > 50) break;
+		}
+	}
+
+	if (colorCount < 50) {
+		return ImageType.DIAGRAM;
+	}
+
+	return ImageType.PHOTO;
 }
 
 async function getImageData(canvas) {
-  return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
+	const ctx = canvas.getContext('2d');
+	if (!ctx) throw new Error('Failed to get 2D context for image data');
+	return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
 function checkAlphaChannel(imageData) {
-  const data = imageData.data;
-  for (let i = 3; i < data.length; i += 4) if (data[i] < 255) return true;
-  return false;
+	const data = imageData.data;
+	for (let i = 3; i < data.length; i += 4) {
+		if (data[i] < 255) return true;
+	}
+	return false;
 }
 
 function analyzeImage(imageData) {
-  return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };
+	return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };
 }
 
 function calculateOptimalDimensions(originalWidth, originalHeight, maxSize = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE) {
-  if (originalWidth <= maxSize && originalHeight <= maxSize) {
-      return { width: originalWidth, height: originalHeight };
-  }
+	if (originalWidth <= maxSize && originalHeight <= maxSize) {
+		return { width: originalWidth, height: originalHeight };
+	}
 
-  const aspectRatio = originalWidth / originalHeight;
+	const aspectRatio = originalWidth / originalHeight;
+	let targetWidth, targetHeight;
 
-  let targetWidth, targetHeight;
-  if (originalWidth > originalHeight) {
-      // Wider image
-      targetWidth = maxSize;
-      targetHeight = Math.round(targetWidth / aspectRatio);
-  } else {
-      // Taller or square image
-      targetHeight = maxSize;
-      targetWidth = Math.round(targetHeight * aspectRatio);
-  }
+	if (originalWidth > originalHeight) {
+		targetWidth = maxSize;
+		targetHeight = Math.round(targetWidth / aspectRatio);
+	} else {
+		targetHeight = maxSize;
+		targetWidth = Math.round(targetHeight * aspectRatio);
+	}
 
-  // Ensure the *other* dimension doesn't exceed max size after rounding (edge case)
-  if (targetWidth > maxSize) {
-      targetWidth = maxSize;
-      targetHeight = Math.round(targetWidth / aspectRatio);
-  }
-   if (targetHeight > maxSize) {
-      targetHeight = maxSize;
-      targetWidth = Math.round(targetHeight * aspectRatio);
-  }
+	if (targetWidth > maxSize) {
+		targetWidth = maxSize;
+		targetHeight = Math.round(targetWidth / aspectRatio);
+	}
+	if (targetHeight > maxSize) {
+		targetHeight = maxSize;
+		targetWidth = Math.round(targetHeight * aspectRatio);
+	}
+
+	if (targetWidth >= originalWidth || targetHeight >= originalHeight) {
+	    return { width: originalWidth, height: originalHeight };
+	}
 
 
-  // Prevent upscaling
-  if (targetWidth > originalWidth || targetHeight > originalHeight) {
-    return { width: originalWidth, height: originalHeight };
-  }
-
-  return { width: targetWidth, height: targetHeight };
+	return { width: targetWidth, height: targetHeight };
 }
 
 
 async function resizeImage(bitmap, targetWidth, targetHeight) {
-  const canvas = new OffscreenCanvas(targetWidth, targetHeight);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Failed to get canvas context');
-  ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-  return canvas;
+	const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+	const ctx = canvas.getContext('2d');
+	if (!ctx) throw new Error('Failed to get 2D context for resizing');
+	ctx.imageSmoothingQuality = 'high';
+	ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+	return canvas;
 }
 
 async function detectFormat(data) {
-  try {
-    const image = new Image();
-    const url = URL.createObjectURL(new Blob([data]));
-    image.src = url;
-    await image.decode();
-    URL.revokeObjectURL(url);
-    return image.complete ? image.naturalWidth > 0 ? image.src.split('.').pop() : 'unknown' : 'unknown';
-  } catch (error) {
-    console.warn('Format detection failed:', error);
-    return 'unknown';
-  }
+	if (data.length < 12) return 'unknown';
+	const bytes = data.slice(0, 12);
+	const header = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+	if (header.startsWith('89504e470d0a1a0a')) return 'png';
+	if (header.startsWith('ffd8ff')) return 'jpeg';
+	if (header.startsWith('474946383761') || header.startsWith('474946383961')) return 'gif';
+	if (header.startsWith('424d')) return 'bmp';
+	if (header.startsWith('52494646') && header.endsWith('57454250')) return 'webp';
+
+	console.warn('[ImageCompress] Unknown image format, header:', header);
+	return 'unknown';
 }
 
 export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT_QUALITY) {
-  // 参数校验
-  if (!(data instanceof Uint8Array)) {
-    throw new TypeError('compressImage: data must be a Uint8Array');
-  }
-  if (typeof quality !== 'number' || quality < 0 || quality > 1) {
-    throw new RangeError('compressImage: quality must be a number between 0 and 1');
-  }
+	if (!(data instanceof Uint8Array)) {
+		console.error('[ImageCompress] Invalid input: data must be a Uint8Array.');
+		throw new TypeError('compressImage: data must be a Uint8Array');
+	}
+	if (typeof quality !== 'number' || quality < 0 || quality > 1) {
+		console.error(`[ImageCompress] Invalid quality: ${quality}. Must be between 0 and 1.`);
+		throw new RangeError('compressImage: quality must be a number between 0 and 1');
+	}
 
-  try {
-    const cacheKey = `${data.byteLength}-${quality}-${hashCode(data)}`;
-    let cached;
-    try {
-      cached = imageCache.get(cacheKey);
-    } catch (e) {
-      console.error('[ImageCompress] Cache get failed:', e);
-      cached = null;
-    }
-    if (cached) {
-      console.log(`[ImageCompress] Cache hit for key: ${cacheKey}`);
-      return cached;
-    }
+	const originalSize = data.byteLength;
+	let originalFormat = 'unknown';
+	let originalWidth = 0;
+	let originalHeight = 0;
+	let resultData = data;
+	let resultFormat = 'original';
+	let resultMethod = 'original';
+	let errorMsg = null;
 
-    try {
-      validateImageData(data);
-    } catch (e) {
-      console.error('[ImageCompress] Image data validation failed:', e);
-      throw e;
-    }
+	try {
+		const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
+		let cached = null;
+		try {
+			cached = imageCache.get(cacheKey);
+		} catch (e) {
+			console.warn('[ImageCompress] Cache get failed:', e?.message);
+		}
 
-    let blob;
-    try {
-      blob = new Blob([data]);
-    } catch (e) {
-      console.error('[ImageCompress] Failed to create Blob:', e);
-      throw e;
-    }
+		if (cached) {
+			console.log(`[ImageCompress] Cache hit for key: ${cacheKey.substring(0, 20)}...`);
+			return cached;
+		}
 
-    let bitmap;
-    try {
-      bitmap = await createImageBitmap(blob);
-      if (!bitmap) throw new Error('Bitmap is null');
-    } catch (e) {
-      console.error('[ImageCompress] Failed to create image bitmap:', e);
-      throw new Error('Invalid image data');
-    }
+		try {
+			validateImageData(data);
+		} catch (e) {
+			console.error('[ImageCompress] Image data validation failed:', e.message);
+			throw e;
+		}
 
-    const originalSize = data.byteLength;
-    let originalFormat = 'unknown';
-    try {
-      originalFormat = await detectFormat(data);
-    } catch (e) {
-      console.warn('[ImageCompress] Format detection failed:', e);
-    }
-    const originalWidth = bitmap.width;
-    const originalHeight = bitmap.height;
+		originalFormat = await detectFormat(data);
 
-    if (originalSize < 20 * 1024) {
-      console.log(`[ImageCompress] ${originalFormat || 'original'} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (no resize)`);
-      return {
-        data,
-        format: originalFormat || 'original',
-        compressionMethod: 'original',
-        originalDimensions: { width: originalWidth, height: originalHeight },
-        finalDimensions: { width: originalWidth, height: originalHeight }
-      };
-    }
+		let blob;
+		try {
+			blob = new Blob([data]);
+		} catch (e) {
+			console.error('[ImageCompress] Failed to create Blob:', e.message);
+			throw e;
+		}
 
-    let tempCanvas, tempCtx, imageData;
-    try {
-      tempCanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      tempCtx = tempCanvas.getContext('2d');
-      if (!tempCtx) throw new Error('Failed to get 2d context');
-      tempCtx.drawImage(bitmap, 0, 0);
-      imageData = tempCtx.getImageData(0, 0, bitmap.width, bitmap.height);
-    } catch (e) {
-      console.error('[ImageCompress] Failed to analyze image:', e);
-      throw e;
-    }
+		let bitmap;
+		try {
+			bitmap = await createImageBitmap(blob);
+			if (!bitmap) throw new Error('Created bitmap is null');
+			originalWidth = bitmap.width;
+			originalHeight = bitmap.height;
+		} catch (e) {
+			console.error('[ImageCompress] Failed to create image bitmap:', e.message);
+			if (originalFormat === 'webp' && !('createImageBitmap' in window && createImageBitmap.toString().includes('native code'))) {
+                 console.warn('[ImageCompress] Browser might lack native WebP support for createImageBitmap.');
+            }
+			throw new Error(`Invalid or unsupported image data (format: ${originalFormat}, size: ${originalSize}B)`);
+		}
 
-    let imageType, analysis;
-    try {
-      imageType = analyzeImageType(imageData);
-      analysis = analyzeImage(imageData);
-    } catch (e) {
-      console.error('[ImageCompress] Image analysis failed:', e);
-      imageType = 'unknown';
-      analysis = { hasAlpha: false, isAnimated: false };
-    }
+		if (originalSize < COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
+			console.log(`[ImageCompress] ${originalFormat} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (size below threshold)`);
+			resultFormat = originalFormat;
+			// No need to change other result variables
+		} else {
+			let tempCanvas, tempCtx, imageData;
+			try {
+				tempCanvas = new OffscreenCanvas(originalWidth, originalHeight);
+				tempCtx = tempCanvas.getContext('2d');
+				if (!tempCtx) throw new Error('Failed to get 2d context for analysis');
+				tempCtx.drawImage(bitmap, 0, 0);
+				imageData = await getImageData(tempCanvas);
+			} catch (e) {
+				console.error('[ImageCompress] Failed to analyze image for type/alpha:', e.message);
+				throw e; // Rethrow analysis failure
+			}
 
-    let targetQuality = quality;
-    if (imageType === 'diagram' || imageType === 'icon') {
-      targetQuality = Math.min(quality, 0.75);
-    }
+			let imageType = ImageType.UNKNOWN;
+			let analysis = { hasAlpha: false, isAnimated: false };
+			try {
+				imageType = analyzeImageType(imageData);
+				analysis = analyzeImage(imageData);
+			} catch (e) {
+				console.warn('[ImageCompress] Image analysis failed:', e.message);
+			}
 
-    let width, height;
-    try {
-      ({ width, height } = calculateOptimalDimensions(
-        bitmap.width, bitmap.height,
-        COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
-        COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
-        imageType
-      ));
-    } catch (e) {
-      console.error('[ImageCompress] Dimension calculation failed:', e);
-      width = bitmap.width;
-      height = bitmap.height;
-    }
+			let targetQuality = quality;
+			if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+				targetQuality = Math.min(quality, COMPRESSION_SETTINGS.DIAGRAM_ICON_QUALITY_FACTOR);
+			}
 
-    if (width === bitmap.width && height === bitmap.height && originalSize < 100 * 1024) {
-      console.log(`[ImageCompress] ${originalFormat || 'original'} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (no resize)`);
-      return {
-        data,
-        format: originalFormat || 'original',
-        compressionMethod: 'original',
-        originalDimensions: { width: originalWidth, height: originalHeight },
-        finalDimensions: { width: originalWidth, height: originalHeight }
-      };
-    }
+			let targetWidth, targetHeight;
+			try {
+				({ width: targetWidth, height: targetHeight } = calculateOptimalDimensions(
+					originalWidth, originalHeight,
+					COMPRESSION_SETTINGS.MAX_IMAGE_SIZE
+				));
+			} catch (e) {
+				console.error('[ImageCompress] Dimension calculation failed:', e.message);
+				targetWidth = originalWidth;
+				targetHeight = originalHeight;
+			}
 
-    let canvas, ctx;
-    try {
-      canvas = await resizeImage(bitmap, width, height);
-      ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Failed to get 2d context after resize');
-    } catch (e) {
-      console.error('[ImageCompress] Image resize failed:', e);
-      throw e;
-    }
+			const needsResize = targetWidth !== originalWidth || targetHeight !== originalHeight;
 
-    const blobs = [];
-    try {
-      blobs.push({
-        type: 'webp',
-        blob: await canvas.convertToBlob({ type: 'image/webp', quality: targetQuality })
-      });
-      if (!analysis.hasAlpha) {
-        blobs.push({
-          type: 'jpeg',
-          blob: await canvas.convertToBlob({ type: 'image/jpeg', quality: targetQuality })
-        });
-      }
-      if (imageType === 'diagram' || imageType === 'icon') {
-        blobs.push({
-          type: 'png',
-          blob: await canvas.convertToBlob({ type: 'image/png' })
-        });
-      }
-    } catch (e) {
-      console.error('[ImageCompress] Blob conversion failed:', e);
-      throw e;
-    }
+			if (!needsResize && originalSize < COMPRESSION_SETTINGS.MIN_RECOMPRESSION_SIZE_BYTES) {
+				console.log(`[ImageCompress] ${originalFormat} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (no resize, size below recompress threshold)`);
+				resultFormat = originalFormat;
+			} else {
+				let sourceBitmap = bitmap;
+				let currentWidth = originalWidth;
+				let currentHeight = originalHeight;
 
-    let best = blobs[0];
-    for (const candidate of blobs) {
-      if (candidate.blob.size < best.blob.size) best = candidate;
-    }
+				if (needsResize) {
+					try {
+						const resizedCanvas = await resizeImage(bitmap, targetWidth, targetHeight);
+						sourceBitmap = await createImageBitmap(resizedCanvas); // Use the resized bitmap for conversion
+						currentWidth = targetWidth;
+						currentHeight = targetHeight;
+						// No need for getContext or convertToBlob here, just need the bitmap
+					} catch (e) {
+						console.error('[ImageCompress] Image resize failed:', e.message);
+						throw e; // Stop if resize fails
+					}
+				}
 
-    if (best.blob.size > originalSize * 0.95) {
-      console.log(`[ImageCompress] ${originalFormat || 'original'} -> original | method: original | size: ${originalSize}B -> ${originalSize}B`);
-      return {
-        data,
-        format: originalFormat || 'original',
-        compressionMethod: 'original'
-      };
-    }
-
-    let compressedData;
-    try {
-      compressedData = new Uint8Array(await best.blob.arrayBuffer());
-    } catch (e) {
-      console.error('[ImageCompress] Failed to read compressed blob:', e);
-      throw e;
-    }
-
-    console.log(`[ImageCompress] ${originalFormat || 'original'} -> ${best.type} | method: ${best.type} | quality: ${targetQuality} | size: ${originalSize}B -> ${compressedData.byteLength}B | dimension: ${originalWidth}x${originalHeight} -> ${width}x${height}`);
-
-    const result = {
-      data: compressedData,
-      format: best.type,
-      originalSize,
-      compressedSize: compressedData.byteLength,
-      compressionRatio: (compressedData.byteLength / originalSize).toFixed(2),
-      imageType,
-      compressionMethod: best.type,
-      originalDimensions: { width: originalWidth, height: originalHeight },
-      finalDimensions: { width, height }
-    };
-    try {
-      imageCache.set(cacheKey, result);
-    } catch (e) {
-      console.warn('[ImageCompress] Failed to cache result:', e);
-    }
-    return result;
-
-  } catch (error) {
-    console.error('[ImageCompress] Image compression failed:', error);
-    return {
-      data,
-      format: 'original',
-      compressionMethod: 'original',
-      error: error.message
-    };
-  }
-}
+                // Create canvas from the sourceBitmap (original or resized)
+                const conversionCanvas = new OffscreenCanvas(currentWidth, currentHeight);
+                const conversionCtx = conversionCanvas.getContext('2d');
+                if (!conversionCtx) throw new Error('Failed to get 2D context for conversion');
+                conversionCtx.drawImage(sourceBitmap, 0, 0);
 
 
-function createCanvas(width, height) {
-  if (typeof OffscreenCanvas !== 'undefined') {
-    try {
-      return new OffscreenCanvas(width, height);
-    } catch (e) {
-      // fallback
-    }
-  }
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  return canvas;
-}
+				const blobs = [];
+				try {
+					blobs.push({
+						type: 'webp',
+						blob: await conversionCanvas.convertToBlob({ type: 'image/webp', quality: targetQuality })
+					});
+					if (!analysis.hasAlpha) {
+						blobs.push({
+							type: 'jpeg',
+							blob: await conversionCanvas.convertToBlob({ type: 'image/jpeg', quality: targetQuality })
+						});
+					}
+					if (imageType === ImageType.DIAGRAM || imageType === ImageType.ICON) {
+						blobs.push({
+							type: 'png',
+							blob: await conversionCanvas.convertToBlob({ type: 'image/png' })
+						});
+					}
+				} catch (e) {
+					console.error('[ImageCompress] Blob conversion failed:', e.message);
+					throw e;
+				}
 
-async function blobToArrayBuffer(blob) {
-  if (blob.stream) {
-    // Stream API for large blobs
-    const reader = blob.stream().getReader();
-    const chunks = [];
-    let done, value;
-    while ({ done, value } = await reader.read(), !done) {
-      chunks.push(value);
-    }
-    let length = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    let result = new Uint8Array(length);
-    let offset = 0;
-    for (const chunk of chunks) {
-      result.set(chunk, offset);
-      offset += chunk.length;
-    }
-    return result.buffer;
-  } else {
-    return await blob.arrayBuffer();
-  }
+				let best = blobs[0];
+				for (const candidate of blobs) {
+					if (candidate.blob && candidate.blob.size < best.blob.size) {
+						best = candidate;
+					}
+				}
+
+				if (!best.blob) {
+                     throw new Error("No valid compressed blob generated.");
+                }
+
+				if (best.blob.size >= originalSize * COMPRESSION_SETTINGS.MIN_SAVING_PERCENTAGE_THRESHOLD) {
+					console.log(`[ImageCompress] ${originalFormat} -> original | method: original | size: ${originalSize}B -> ${originalSize}B | dimension: ${originalWidth}x${originalHeight} (no significant saving)`);
+					resultFormat = originalFormat;
+				} else {
+					try {
+						resultData = new Uint8Array(await best.blob.arrayBuffer());
+						resultFormat = best.type;
+						resultMethod = best.type;
+						console.log(`[ImageCompress] ${originalFormat} -> ${best.type} | method: ${best.type} | quality: ${targetQuality.toFixed(2)} | size: ${originalSize}B -> ${resultData.byteLength}B | dimension: ${originalWidth}x${originalHeight} -> ${currentWidth}x${currentHeight}`);
+					} catch (e) {
+						console.error('[ImageCompress] Failed to read compressed blob:', e.message);
+						throw e;
+					}
+				}
+			}
+		}
+
+		const finalResult = {
+			data: resultData,
+			format: resultFormat,
+			compressionMethod: resultMethod,
+			originalSize: originalSize,
+			compressedSize: resultData.byteLength,
+			originalDimensions: { width: originalWidth, height: originalHeight },
+			finalDimensions: resultMethod === 'original' ? { width: originalWidth, height: originalHeight } : { width: targetWidth || originalWidth, height: targetHeight || originalHeight },
+			error: null
+		};
+
+		try {
+			imageCache.set(cacheKey, finalResult);
+		} catch (e) {
+			console.warn('[ImageCompress] Failed to cache result:', e?.message);
+		}
+		return finalResult;
+
+	} catch (error) {
+		console.error('[ImageCompress] Image compression failed:', error.message, error.stack);
+		errorMsg = error.message;
+		// Return original data on failure
+		return {
+			data: data,
+			format: originalFormat || 'original',
+			compressionMethod: 'original',
+			originalSize: originalSize,
+			compressedSize: originalSize,
+			originalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
+			finalDimensions: { width: originalWidth || 0, height: originalHeight || 0 },
+			error: errorMsg
+		};
+	}
 }

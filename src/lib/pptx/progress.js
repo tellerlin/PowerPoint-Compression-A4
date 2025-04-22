@@ -1,235 +1,128 @@
 import { writable } from 'svelte/store';
 
-// Progress store with percentage and status message
 export const compressionProgress = writable({
-  percentage: 0,
-  status: '',
-  error: null,
-  fileInfo: null,
-  stats: {
-    processedFiles: 0,
-    totalFiles: 0,
-    originalSize: 0,
-    compressedSize: 0,
-    savedSize: 0,
-    savedPercentage: 0
-  }
+	percentage: 0,
+	status: '',
+	error: null,
+	fileInfo: null,
+    mediaCount: 0,
+    processedMediaCount: 0,
+    estimatedTimeRemaining: null,
+	stats: {
+		originalSize: 0,
+		compressedSize: 0,
+		savedSize: 0,
+		savedPercentage: 0,
+        originalMediaSize: 0,
+		compressedMediaSize: 0,
+		savedMediaSize: 0,
+		savedMediaPercentage: 0,
+        processingTime: 0
+	}
 });
 
-// Progress manager class
-export class ProgressManager {
-  constructor() {
-    this.mediaFilesCount = null;
-    this.processedFiles = 0;
-    this.currentPhase = 'init';
-    this.fileInfo = null;
-    this.phaseStartTimes = {};
-    this.phaseDurations = {};
-    this.phases = this.loadPhases() || {
-      init: { weight: 15, start: 0 },
-      media: { weight: 60, start: 15 },
-      finalize: { weight: 25, start: 75 }
-    };
-    this.historicalData = {
-      init: [],
-      media: [],
-      finalize: []
-    };
-    this.progressCallback = null; // decouple from store
-  }
-
-  setProgressCallback(cb) {
-    this.progressCallback = cb;
-  }
-
-  savePhases() {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        localStorage.setItem('progress_phases', JSON.stringify(this.phases));
-      }
-    } catch (error) {
-      // 处理隐私模式或存储已满的情况
-      console.warn('Failed to save progress phases:', error);
-    }
-  }
-
-  loadPhases() {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        const data = localStorage.getItem('progress_phases');
-        if (data) return JSON.parse(data);
-      }
-    } catch (error) {
-      // 处理数据损坏或其他异常
-      console.warn('Failed to load progress phases:', error);
-    }
-    return null;
-  }
-
-  adjustWeights() {
-    const hasEnoughData = Object.values(this.historicalData).every(data => data.length > 0);
-    if (!hasEnoughData) return;
-    const avgDurations = {};
-    let totalDuration = 0;
-    for (const phase in this.historicalData) {
-      const durations = this.historicalData[phase];
-      avgDurations[phase] = durations.reduce((sum, d) => sum + d, 0) / durations.length;
-      totalDuration += avgDurations[phase];
-    }
-    if (totalDuration > 0) {
-      let startPercentage = 0;
-      for (const phase in avgDurations) {
-        const weight = Math.round((avgDurations[phase] / totalDuration) * 100);
-        this.phases[phase] = {
-          weight: weight,
-          start: startPercentage
-        };
-        startPercentage += weight;
-      }
-      const totalWeight = Object.values(this.phases).reduce((sum, p) => sum + p.weight, 0);
-      if (totalWeight !== 100) {
-        const lastPhase = Object.keys(this.phases).pop();
-        this.phases[lastPhase].weight += (100 - totalWeight);
-      }
-      this.savePhases();
-    }
-  }
-
-  updatePhaseProgress(phase, percentage, status) {
-    if (this.currentPhase !== phase) {
-      this.startPhase(phase);
-    }
-    const phaseObj = this.phases[phase];
-    const actualProgress = (percentage / 100) * phaseObj.weight;
-    this.updateProgress(actualProgress, status);
-    if (percentage >= 100) {
-      this.endPhase(phase);
-    }
-  }
-
-  updateProgress(percentage, status, stats = null) {
-    const updateObj = {
-      percentage: Math.min(Math.round(percentage * 100) / 100, 100),
-      status,
-      error: null,
-      stats: {
-        processedFiles: this.processedFiles,
-        totalFiles: this.mediaFilesCount || 0,
-        ...(stats || {})
-      }
-    };
-    if (this.progressCallback) {
-      this.progressCallback(updateObj);
-    } else {
-      compressionProgress.update(state => ({
-        ...state,
-        ...updateObj
-      }));
-    }
-  }
-
-  // Add this method to update file info in the progress store
-  updateFileInfo(fileInfo) {
-    if (this.progressCallback) {
-      this.progressCallback({ fileInfo });
-    } else {
-      compressionProgress.update(state => ({
-        ...state,
-        fileInfo
-      }));
-    }
-  }
-
-  // Add this method to handle errors in the progress store
-  handleError(error, currentProgress = 0) {
-    if (this.progressCallback) {
-      this.progressCallback({
-        error: error.message || String(error),
-        percentage: currentProgress
-      });
-    } else {
-      compressionProgress.update(state => ({
-        ...state,
-        error: error.message || String(error),
-        percentage: currentProgress
-      }));
-    }
-  }
-
-  updateInitProgress(percentage) {
-    this.updatePhaseProgress('init', percentage, 'Initializing compression...');
-  }
-
-  updateMediaProgress(percentage) {
-    this.updatePhaseProgress('media', percentage, 'Processing media files...');
-  }
-
-  updateFinalizationProgress(percentage) {
-    this.updatePhaseProgress('finalize', percentage, 'Finalizing...');
-  }
-
-  initializeCompression(mediaFilesCount) {
-    this.mediaFilesCount = mediaFilesCount;
-    this.processedFiles = 0;
-    if (this.progressCallback) {
-      this.progressCallback({
-        stats: {
-          processedFiles: this.processedFiles,
-          totalFiles: this.mediaFilesCount
+export function updateProgress(type, payload) {
+    // console.log('Progress Update:', type, payload); // Debug log
+    compressionProgress.update(state => {
+        let newState = { ...state };
+        switch (type) {
+            case 'fileInfo':
+                newState.fileInfo = payload;
+                newState.stats.originalSize = payload.size;
+                newState.percentage = 0;
+                newState.status = 'Starting...';
+                newState.error = null;
+                newState.mediaCount = 0;
+                newState.processedMediaCount = 0;
+                newState.estimatedTimeRemaining = null;
+                // Reset other stats
+                newState.stats = {
+                    ...newState.stats,
+                    compressedSize: null,
+                    savedSize: 0,
+                    savedPercentage: 0,
+                    originalMediaSize: 0,
+                    compressedMediaSize: 0,
+                    savedMediaSize: 0,
+                    savedMediaPercentage: 0,
+                    processingTime: 0
+                };
+                break;
+            case 'init':
+                newState.percentage = payload.percentage; // Assume percentage covers init phase (e.g., 0-35%)
+                newState.status = payload.status || 'Initializing...';
+                break;
+            case 'mediaCount':
+                newState.mediaCount = payload.count;
+                newState.processedMediaCount = 0;
+                newState.status = payload.count > 0 ? 'Compressing media...' : 'No media to compress.';
+                 newState.percentage = Math.max(newState.percentage, 35); // Ensure we are past init phase
+                break;
+            case 'media':
+                newState.processedMediaCount = payload.fileIndex;
+                newState.estimatedTimeRemaining = payload.estimatedTimeRemaining;
+                // Calculate media phase progress (e.g., 35% to 90%)
+                const mediaPhaseStart = 35;
+                const mediaPhaseWeight = 55;
+                const mediaProgress = newState.mediaCount > 0 ? (payload.fileIndex / payload.totalFiles) : 1;
+                newState.percentage = mediaPhaseStart + (mediaProgress * mediaPhaseWeight);
+                newState.status = `Compressing media (${payload.fileIndex}/${payload.totalFiles})...`;
+                break;
+             case 'finalize':
+                newState.percentage = Math.max(newState.percentage, 90); // Move to finalize phase (e.g., 90-100%)
+                newState.status = payload.status || 'Finalizing...';
+                if (payload.stats) { // Update stats if provided
+                     newState.stats = { ...newState.stats, ...payload.stats };
+                }
+                break;
+            case 'complete':
+                newState.percentage = 100;
+                newState.status = 'Optimization complete!';
+                newState.estimatedTimeRemaining = 0;
+                newState.stats = { ...state.stats, ...payload.stats };
+                break;
+            case 'error':
+                newState.error = payload.message || 'An unknown error occurred.';
+                newState.status = `Error: ${newState.error}`;
+                // Keep percentage where it failed, or set to 100 if error occurs late?
+                // newState.percentage = 100; // Or keep current percentage
+                if (payload.stats) { // Update stats collected so far
+                     newState.stats = { ...newState.stats, ...payload.stats };
+                }
+                break;
+             case 'warning':
+                 // Warnings don't stop progress but should be noted
+                 // Maybe add a warnings array to the store? For now, just log.
+                 console.warn('Optimization Warning:', payload.message);
+                 break;
+             default:
+                 console.warn('Unknown progress update type:', type);
         }
-      });
-    } else {
-      compressionProgress.update(state => ({
-        ...state,
-        stats: {
-          ...state.stats,
-          processedFiles: this.processedFiles,
-          totalFiles: this.mediaFilesCount
-        }
-      }));
-    }
-  }
+        // Clamp percentage
+        newState.percentage = Math.max(0, Math.min(100, Math.round(newState.percentage)));
+        return newState;
+    });
+}
 
-  startPhase(phase) {
-    this.currentPhase = phase;
-    this.phaseStartTimes[phase] = Date.now();
-  }
-
-  endPhase(phase) {
-    if (this.phaseStartTimes[phase]) {
-      const duration = Date.now() - this.phaseStartTimes[phase];
-      this.phaseDurations[phase] = duration;
-      if (this.historicalData[phase]) {
-        this.historicalData[phase].push(duration);
-        // 只保留最近10次
-        if (this.historicalData[phase].length > 10) {
-          this.historicalData[phase].shift();
-        }
-      }
-    }
-  }
-
-  completeCompression(stats) {
-    if (this.progressCallback) {
-      this.progressCallback({
-        percentage: 100,
-        status: 'Compression complete!',
+export function resetProgress() {
+     compressionProgress.set({
+        percentage: 0,
+        status: '',
         error: null,
+        fileInfo: null,
+        mediaCount: 0,
+        processedMediaCount: 0,
+        estimatedTimeRemaining: null,
         stats: {
-          ...stats
+            originalSize: 0,
+            compressedSize: 0,
+            savedSize: 0,
+            savedPercentage: 0,
+            originalMediaSize: 0,
+            compressedMediaSize: 0,
+            savedMediaSize: 0,
+            savedMediaPercentage: 0,
+            processingTime: 0
         }
-      });
-    } else {
-      compressionProgress.update(state => ({
-        ...state,
-        percentage: 100,
-        status: 'Compression complete!',
-        error: null,
-        stats: {
-          ...state.stats,
-          ...stats
-        }
-      }));
-    }
-  }
+    });
 }
