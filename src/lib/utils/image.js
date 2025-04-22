@@ -75,25 +75,43 @@ function analyzeImage(imageData) {
   return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };
 }
 
-function calculateOptimalDimensions(originalWidth, originalHeight, maxWidth = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, maxHeight = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE, imageType = ImageType.UNKNOWN) {
-  // 找出最短边和最长边
-  const shortestSide = Math.min(originalWidth, originalHeight);
-  const longestSide = Math.max(originalWidth, originalHeight);
-  
-  // 如果最短边已经小于等于MAX_IMAGE_SIZE，保持原始尺寸
-  if (shortestSide <= COMPRESSION_SETTINGS.MAX_IMAGE_SIZE) {
+function calculateOptimalDimensions(originalWidth, originalHeight, maxSize = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE) {
+  if (originalWidth <= maxSize && originalHeight <= maxSize) {
+      return { width: originalWidth, height: originalHeight };
+  }
+
+  const aspectRatio = originalWidth / originalHeight;
+
+  let targetWidth, targetHeight;
+  if (originalWidth > originalHeight) {
+      // Wider image
+      targetWidth = maxSize;
+      targetHeight = Math.round(targetWidth / aspectRatio);
+  } else {
+      // Taller or square image
+      targetHeight = maxSize;
+      targetWidth = Math.round(targetHeight * aspectRatio);
+  }
+
+  // Ensure the *other* dimension doesn't exceed max size after rounding (edge case)
+  if (targetWidth > maxSize) {
+      targetWidth = maxSize;
+      targetHeight = Math.round(targetWidth / aspectRatio);
+  }
+   if (targetHeight > maxSize) {
+      targetHeight = maxSize;
+      targetWidth = Math.round(targetHeight * aspectRatio);
+  }
+
+
+  // Prevent upscaling
+  if (targetWidth > originalWidth || targetHeight > originalHeight) {
     return { width: originalWidth, height: originalHeight };
   }
-  
-  // 计算缩放比例（基于最短边）
-  const scale = COMPRESSION_SETTINGS.MAX_IMAGE_SIZE / shortestSide;
-  
-  // 等比例调整尺寸
-  return {
-    width: Math.round(originalWidth * scale),
-    height: Math.round(originalHeight * scale)
-  };
+
+  return { width: targetWidth, height: targetHeight };
 }
+
 
 async function resizeImage(bitmap, targetWidth, targetHeight) {
   const canvas = new OffscreenCanvas(targetWidth, targetHeight);
