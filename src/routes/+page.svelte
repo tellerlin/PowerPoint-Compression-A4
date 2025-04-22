@@ -50,7 +50,7 @@
     originalSize: $compressionProgress.stats.originalSize || 0,
     compressedSize: $compressionProgress.stats.compressedSize || 0,
     savedSize: $compressionProgress.stats.savedSize || 0,
-    savedPercentage: $compressionProgress.savedPercentage || 0,
+    savedPercentage: $compressionProgress.stats.savedPercentage || 0,
     formattedOriginalSize: formatBytes($compressionProgress.stats.originalSize || 0),
     formattedCompressedSize: formatBytes($compressionProgress.stats.compressedSize || 0),
     formattedSavedSize: formatBytes($compressionProgress.stats.savedSize || 0)
