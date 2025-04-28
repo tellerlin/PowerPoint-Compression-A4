@@ -1,9 +1,37 @@
 import { parseXml, buildXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX, SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX } from './constants';
-import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters } from './layout-cleaner';
+import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters, analyzeLayoutsAndMasters } from './layout-cleaner';
 import { findMediaFiles } from './media';
 import { resolvePath } from './utils';
 import { parseXmlDOM } from './slides';
+
+async function parseXmlDOMWithLog(zip, path) {
+    try {
+        const xml = await zip.file(path)?.async('string');
+        if (!xml) {
+            console.warn(`[parseXmlDOMWithLog] File is empty or not found: ${path}`);
+            return null;
+        }
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xml, 'application/xml');
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) {
+            console.error(`[parseXmlDOMWithLog] XML parse error: ${path}:`, parseError.textContent);
+            const fallbackDoc = parser.parseFromString(xml, 'text/xml');
+            const fallbackError = fallbackDoc.querySelector('parsererror');
+            if (fallbackError) {
+                console.error(`[parseXmlDOMWithLog] Fallback parse failed: ${path}`);
+                return null;
+            }
+            console.warn(`[parseXmlDOMWithLog] Using text/xml fallback parse: ${path}`);
+            return fallbackDoc;
+        }
+        return doc;
+    } catch (error) {
+        console.error(`[parseXmlDOMWithLog] Exception: ${path}:`, error.message);
+        return null;
+    }
+}
 
 export async function cleanUnusedResources(zip, onProgress, options) {
     let successfulLayoutRemoval = false;
@@ -11,7 +39,8 @@ export async function cleanUnusedResources(zip, onProgress, options) {
     let finalUsedMasters = new Set();
     try {
         console.log('[Cleaner] Starting resource cleanup process...');
-        const cleanOptions = { removeUnusedLayouts: options.removeUnusedLayouts !== false, ...options };
+        // 默认禁用布局删除
+        const cleanOptions = { removeUnusedLayouts: false, ...options };
         onProgress('init', { percentage: 10, status: 'Analyzing presentation structure...' });
         const usedSlides = await getUsedSlides(zip);
         if (usedSlides.length === 0) {
@@ -20,29 +49,14 @@ export async function cleanUnusedResources(zip, onProgress, options) {
             console.log(`[Cleaner] Found ${usedSlides.length} slides marked as used in presentation.xml.rels.`);
         }
         console.log(`[DEBUG] cleaner.js: usedSlides = ${JSON.stringify(usedSlides.map(s => s.path))}`);
-        if (cleanOptions.removeUnusedLayouts) {
-            console.log('[Cleaner] Layout/master removal is enabled. Executing cleanup...');
-            const layoutResult = await performLayoutRemoval(zip, usedSlides, onProgress);
-            console.log(`[DEBUG] cleaner.js: layoutResult from performLayoutRemoval = ${JSON.stringify({success: layoutResult.success, layouts: Array.from(layoutResult.usedLayouts), masters: Array.from(layoutResult.usedMasters)})}}`);
-            if (layoutResult.success) {
-                console.log('[Cleaner] Layout/master cleanup step completed successfully.');
-                successfulLayoutRemoval = true;
-                finalUsedLayouts = layoutResult.usedLayouts instanceof Set ? layoutResult.usedLayouts : new Set();
-                finalUsedMasters = layoutResult.usedMasters instanceof Set ? layoutResult.usedMasters : new Set();
-            } else {
-                console.error('[Cleaner] Layout/master cleanup step failed. Analyzing current state instead to prevent incorrect media deletion.');
-                const analysisResult = await analyzeUsedLayoutsMasters(zip, usedSlides);
-                console.log(`[DEBUG] cleaner.js: analysisResult after failed removal = ${JSON.stringify({layouts: Array.from(analysisResult.usedLayouts), masters: Array.from(analysisResult.usedMasters)})}}`);
-                finalUsedLayouts = analysisResult.usedLayouts instanceof Set ? analysisResult.usedLayouts : new Set();
-                finalUsedMasters = analysisResult.usedMasters instanceof Set ? analysisResult.usedMasters : new Set();
-            }
-        } else {
-            console.log('[Cleaner] Layout removal is disabled. Analyzing existing layouts/masters...');
-            const analysisResult = await analyzeUsedLayoutsMasters(zip, usedSlides);
-            console.log(`[DEBUG] cleaner.js: analysisResult (removal disabled) = ${JSON.stringify({layouts: Array.from(analysisResult.usedLayouts), masters: Array.from(analysisResult.usedMasters)})}}`);
-            finalUsedLayouts = analysisResult.usedLayouts instanceof Set ? analysisResult.usedLayouts : new Set();
-            finalUsedMasters = analysisResult.usedMasters instanceof Set ? analysisResult.usedMasters : new Set();
-        }
+        
+        // 无论选项如何，都只进行分析而不删除
+        console.log('[Cleaner] Layout removal is disabled. Analyzing existing layouts/masters...');
+        const analysisResult = await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
+        console.log(`[DEBUG] cleaner.js: analysisResult = ${JSON.stringify({layouts: Array.from(analysisResult.usedLayouts), masters: Array.from(analysisResult.usedMasters)})}`);
+        finalUsedLayouts = analysisResult.usedLayouts instanceof Set ? analysisResult.usedLayouts : new Set();
+        finalUsedMasters = analysisResult.usedMasters instanceof Set ? analysisResult.usedMasters : new Set();
+        
         console.log(`[Cleaner] Final analysis results - Used Layouts: ${finalUsedLayouts.size}, Used Masters: ${finalUsedMasters.size}`);
         console.log(`[DEBUG] cleaner.js: Final Layouts = ${JSON.stringify(Array.from(finalUsedLayouts))}`);
         console.log(`[DEBUG] cleaner.js: Final Masters = ${JSON.stringify(Array.from(finalUsedMasters))}`);
@@ -110,25 +124,36 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
     }
     await Promise.all(relsFilePaths.map(async (relsPath) => {
         try {
-            const relsDoc = await parseXmlDOM(zip, relsPath);
+            const relsDoc = await parseXmlDOMWithLog(zip, relsPath);
             if (!relsDoc) {
+                console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
                 return;
             }
             const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
+            if (!relationships.length) {
+                console.warn(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
+            }
             relationships.forEach(rel => {
                 if (!rel) return;
                 const relType = rel.getAttribute('Type');
                 const target = rel.getAttribute('Target');
                 const targetMode = rel.getAttribute('TargetMode');
-                if (!relType || !target || targetMode === 'External') {
+                if (!relType || !target) {
+                    console.warn(`[processGenericRelationshipFiles] Relationship missing Type or Target: ${rel.outerHTML}`);
                     return;
                 }
-                if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' || relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' || relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' || relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
+                if (targetMode === 'External') {
+                    return;
+                }
+                if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ||
+                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' ||
+                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' ||
+                    relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
                     let mediaPath = resolvePath(relsPath, target);
                     if (mediaPath && mediaPath.startsWith(MEDIA_PATH_PREFIX)) {
                         usedMedia.add(mediaPath);
                     } else {
-                        console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" from target "${target}" in ${relsPath} does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
+                        console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" (target="${target}", relsPath="${relsPath}") does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
                     }
                 }
             });
@@ -141,13 +166,24 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
 async function getUsedSlides(zip) {
     try {
         const relsPath = 'ppt/_rels/presentation.xml.rels';
-        const relsDoc = await parseXmlDOM(zip, relsPath);
+        const relsDoc = await parseXmlDOMWithLog(zip, relsPath);
         if (!relsDoc) {
             console.warn('[getUsedSlides] Failed to parse presentation relationships file.');
             return [];
         }
         const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
-        const slides = relationships.filter(rel => rel.getAttribute('Type') === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide' && rel.getAttribute('Target')).map(rel => {
+        if (!relationships.length) {
+            console.warn(`[getUsedSlides] No Relationship nodes found, relsPath=${relsPath}`);
+        }
+        const slides = relationships.filter(rel => {
+            const type = rel.getAttribute('Type');
+            const target = rel.getAttribute('Target');
+            if (!type || !target) {
+                console.warn(`[getUsedSlides] Relationship missing Type or Target: ${rel.outerHTML}`);
+                return false;
+            }
+            return type === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
+        }).map(rel => {
             const target = rel.getAttribute('Target');
             const rId = rel.getAttribute('Id');
             const resolvedPath = resolvePath(relsPath, target);
@@ -157,6 +193,8 @@ async function getUsedSlides(zip) {
                 const dir = parts.join('/');
                 const slideRelsPath = `${dir}/_rels/${filename}.rels`;
                 return { rId, path: resolvedPath, relsPath: slideRelsPath };
+            } else {
+                console.warn(`[getUsedSlides] Target file does not exist: ${resolvedPath} (target=${target})`);
             }
             return null;
         }).filter(s => s);
@@ -286,6 +324,7 @@ async function updateContentTypes(zip) {
                 const fileExists = zip.file(filePath) !== null;
                 return fileExists;
             });
+
             const finalCount = filteredOverrides.length;
             if (finalCount < initialCount) {
                 contentTypesObj.Types.Override = finalCount > 0 ? filteredOverrides : undefined;
@@ -306,6 +345,9 @@ async function updateContentTypes(zip) {
                 const cleanExtension = extension.toLowerCase();
                 const extensionPattern = new RegExp(`\\.${cleanExtension}$`, 'i');
                 const exists = Object.keys(zip.files).some(path => !zip.files[path].dir && extensionPattern.test(path));
+                if (!exists) {
+                    console.log(`[updateContentTypes] No file found for extension ".${cleanExtension}", will remove Default:`, JSON.stringify(def));
+                }
                 return exists;
             });
             const finalCount = filteredDefaults.length;

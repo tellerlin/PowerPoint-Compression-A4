@@ -1,4 +1,5 @@
 <script>
+  export let className = '';
   export let variant = 'primary';
   export let type = 'button';
   export let disabled = false;
@@ -14,7 +15,7 @@
         ? 'bg-gray-800 text-white hover:bg-gray-900 focus:ring-gray-500 border-gray-600' 
         : 'bg-surface text-white hover:bg-gray-700 focus:ring-gray-500 border-gray-600'} 
     focus:outline-none focus:ring-2 focus:ring-offset-2
-    disabled:opacity-50 disabled:cursor-not-allowed"
+    disabled:opacity-50 disabled:cursor-not-allowed {className}"
   class:opacity-50={disabled}
   on:click
 >
