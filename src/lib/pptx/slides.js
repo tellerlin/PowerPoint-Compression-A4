@@ -1,35 +1,5 @@
 import { PRESENTATION_PATH, CONTENT_TYPES_PATH, SLIDE_PREFIX, NOTES_SLIDE_PREFIX } from './constants';
-import { resolvePath } from './utils';
-
-export async function parseXmlDOM(zip, path) {
-    try {
-        const xml = await zip.file(path)?.async('string');
-        if (!xml) {
-            console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
-            return null;
-        }
-        
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xml, 'application/xml');
-        
-        const parseError = doc.querySelector('parsererror');
-        if (parseError) {
-            // 尝试使用备用解析方法
-            const fallbackDoc = parser.parseFromString(xml, 'text/xml');
-            const fallbackError = fallbackDoc.querySelector('parsererror');
-            if (fallbackError) {
-                console.error(`[parseXmlDOM] XML parse error for ${path}:`, parseError.textContent);
-                return null;
-            }
-            return fallbackDoc;
-        }
-        
-        return doc;
-    } catch (error) {
-        console.error(`[parseXmlDOM] Error parsing XML for ${path}:`, error.message);
-        return null;
-    }
-}
+import { resolvePath, parseXmlDOM } from './utils';
 
 function removeNode(node) {
 	if (node && node.parentNode) {

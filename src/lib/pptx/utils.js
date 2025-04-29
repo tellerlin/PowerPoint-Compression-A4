@@ -1,3 +1,47 @@
+/**
+ * 解析ZIP文件中的XML文档
+ * @param {Object} zip - JSZip实例
+ * @param {string} path - 文件路径
+ * @param {Object} options - 选项
+ * @param {boolean} options.verbose - 是否输出详细日志
+ * @returns {Document|null} 解析后的DOM文档或null
+ */
+export async function parseXmlDOM(zip, path, options = { verbose: true }) {
+    try {
+        const xml = await zip.file(path)?.async('string');
+        if (!xml) {
+            if (options.verbose) {
+                console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
+            }
+            return null;
+        }
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xml, 'application/xml');
+        
+        const parseError = doc.querySelector('parsererror');
+        if (parseError) {
+            // 尝试使用备用解析方法
+            const fallbackDoc = parser.parseFromString(xml, 'text/xml');
+            const fallbackError = fallbackDoc.querySelector('parsererror');
+            if (fallbackError) {
+                if (options.verbose) {
+                    console.error(`[parseXmlDOM] XML parse error for ${path}:`, parseError.textContent);
+                }
+                return null;
+            }
+            return fallbackDoc;
+        }
+        
+        return doc;
+    } catch (error) {
+        if (options.verbose) {
+            console.error(`[parseXmlDOM] Error parsing XML for ${path}:`, error.message);
+        }
+        return null;
+    }
+}
+
 export function resolvePath(basePath, target) {
     if (!target || typeof target !== 'string') return null;
     try {

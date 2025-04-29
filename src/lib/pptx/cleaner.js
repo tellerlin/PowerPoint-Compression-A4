@@ -2,31 +2,7 @@ import { parseXml, buildXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX, SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX } from './constants';
 import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters, analyzeLayoutsAndMasters } from './layout-cleaner';
 import { findMediaFiles } from './media';
-import { resolvePath } from './utils';
-import { parseXmlDOM } from './slides';
-
-async function parseXmlDOMWithLog(zip, path) {
-    try {
-        const xml = await zip.file(path)?.async('string');
-        if (!xml) {
-            return null;
-        }
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xml, 'application/xml');
-        const parseError = doc.querySelector('parsererror');
-        if (parseError) {
-             const fallbackDoc = parser.parseFromString(xml, 'text/xml');
-             const fallbackError = fallbackDoc.querySelector('parsererror');
-             if (fallbackError) {
-                  return null;
-             }
-             return fallbackDoc;
-        }
-        return doc;
-    } catch (error) {
-        return null;
-    }
-}
+import { resolvePath, parseXmlDOM } from './utils';
 
 export async function cleanUnusedResources(zip, onProgress, options) {
     let finalUsedLayouts = new Set();
@@ -130,7 +106,7 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
     }
     await Promise.all(relsFilePaths.map(async (relsPath) => {
         try {
-            const relsDoc = await parseXmlDOMWithLog(zip, relsPath);
+            const relsDoc = await parseXmlDOM(zip, relsPath);
             if (!relsDoc) {
                 console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
                 return;
@@ -172,7 +148,7 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
 async function getUsedSlides(zip) {
     try {
         const relsPath = 'ppt/_rels/presentation.xml.rels';
-        const relsDoc = await parseXmlDOMWithLog(zip, relsPath);
+        const relsDoc = await parseXmlDOM(zip, relsPath);
         if (!relsDoc) {
             console.warn('[getUsedSlides] Failed to parse presentation relationships file.');
             return [];
