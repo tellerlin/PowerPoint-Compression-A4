@@ -166,7 +166,6 @@ async function getSlideLayout(zip, slide) {
         const slideRelsPath = slide.path.replace(/^(.*\/slides\/)([^/]+)$/, '$1_rels/$2.rels');
         console.log(`[LayoutCleaner] Attempting to read slide rels file: ${slideRelsPath}`);
         const slideRelsObj = await parseXmlSafely(zip, slideRelsPath);
-        console.log(`[DEBUG] slideRelsObj for ${slideRelsPath}:`, JSON.stringify(slideRelsObj));
         let slideRels = [];
         if (slideRelsObj.Relationships) {
             const relsArr = Array.isArray(slideRelsObj.Relationships) ? slideRelsObj.Relationships : [slideRelsObj.Relationships];
@@ -177,9 +176,9 @@ async function getSlideLayout(zip, slide) {
                 return [];
             });
         }
-        console.log(`[DEBUG] slideRels array for ${slideRelsPath}:`, JSON.stringify(slideRels));
+        
         slideRels.forEach((rel, idx) => {
-            console.log(`[DEBUG] rel[${idx}] in ${slideRelsPath}:`, JSON.stringify(rel));
+
         });
         if (!slideRels.length) {
             console.log(`[LayoutCleaner] No valid relationships found for slide: ${slide.path} at ${slideRelsPath}`);

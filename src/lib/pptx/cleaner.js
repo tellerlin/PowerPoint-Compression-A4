@@ -29,42 +29,56 @@ async function parseXmlDOMWithLog(zip, path) {
 }
 
 export async function cleanUnusedResources(zip, onProgress, options) {
-    let successfulLayoutRemoval = false;
     let finalUsedLayouts = new Set();
     let finalUsedMasters = new Set();
     try {
-        // 默认禁用布局删除
         const cleanOptions = { removeUnusedLayouts: false, ...options };
         onProgress('init', { percentage: 10, status: 'Analyzing presentation structure...' });
+        
+        // 1. 获取使用中的幻灯片
         const usedSlides = await getUsedSlides(zip);
         if (usedSlides.length === 0) {
             console.warn('[Cleaner] No used slides found in the presentation. Cleanup might be limited.');
         } else {
             console.log(`[Cleaner] Found ${usedSlides.length} slides marked as used in presentation.xml.rels.`);
         }
-        console.log(`[DEBUG] cleaner.js: usedSlides = ${JSON.stringify(usedSlides.map(s => s.path))}`);
         
-        // 无论选项如何，都只进行分析而不删除
-        console.log('[Cleaner] Layout removal is disabled. Analyzing existing layouts/masters...');
+        // 2. 分析布局和母版
+        console.log('[Cleaner] Analyzing existing layouts/masters...');
         const analysisResult = await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
-        console.log(`[DEBUG] cleaner.js: analysisResult = ${JSON.stringify({layouts: Array.from(analysisResult.usedLayouts), masters: Array.from(analysisResult.usedMasters)})}`);
+        
         finalUsedLayouts = analysisResult.usedLayouts instanceof Set ? analysisResult.usedLayouts : new Set();
         finalUsedMasters = analysisResult.usedMasters instanceof Set ? analysisResult.usedMasters : new Set();
         
-        console.log(`[Cleaner] Final analysis results - Used Layouts: ${finalUsedLayouts.size}, Used Masters: ${finalUsedMasters.size}`);
-        console.log(`[DEBUG] cleaner.js: Final Layouts = ${JSON.stringify(Array.from(finalUsedLayouts))}`);
-        console.log(`[DEBUG] cleaner.js: Final Masters = ${JSON.stringify(Array.from(finalUsedMasters))}`);
+        console.log(`[Cleaner] Analysis results - Used Layouts: ${finalUsedLayouts.size}, Used Masters: ${finalUsedMasters.size}`);
+        
+        // 3. 收集和处理媒体文件
         onProgress('init', { percentage: 70, status: 'Analyzing media file usage...' });
-        console.log(`[Cleaner] Calling collectUsedMedia with slides=${usedSlides.length}, layouts=${finalUsedLayouts.size}, masters=${finalUsedMasters.size}`);
         const usedMedia = await collectUsedMedia(zip, usedSlides, finalUsedLayouts, finalUsedMasters);
         const allMediaPaths = findMediaFiles(zip);
         const unusedMediaPaths = allMediaPaths.filter(path => !usedMedia.has(path));
-        console.log('[Cleaner] Media Usage Summary:', { totalFound: allMediaPaths.length, identifiedAsUsed: usedMedia.size, identifiedAsUnused: unusedMediaPaths.length });
-        await removeUnusedMedia(zip, usedMedia);
+        
+        console.log('[Cleaner] Media Usage Summary:', { 
+            totalFound: allMediaPaths.length, 
+            identifiedAsUsed: usedMedia.size, 
+            identifiedAsUnused: unusedMediaPaths.length 
+        });
+        
+        // 4. 安全检查并移除未使用的媒体
+        const shouldSkip = shouldSkipMediaRemoval(allMediaPaths.length, unusedMediaPaths.length, usedMedia.size);
+        if (!shouldSkip) {
+            await removeUnusedMedia(zip, usedMedia);
+        } else {
+            console.warn('[Cleaner] Skipping media removal due to safety check.');
+        }
+        
+        // 5. 更新内容类型
         onProgress('init', { percentage: 95, status: 'Updating content types...' });
         await updateContentTypes(zip);
+        
         return true;
     } catch (error) {
+        console.error('[Cleaner] Error during resource cleanup:', error.message, error.stack);
         onProgress('error', { message: `Cleanup failed: ${error.message}` });
         return false;
     }
@@ -210,21 +224,19 @@ async function removeUnusedMedia(zip, usedMedia) {
         
         console.log(`[removeUnusedMedia] Found ${unusedMediaFiles.length} unused media files.`);
         
-        // 创建一个1字节的空白文件内容（可以是任何格式）
         const oneByteContent = new Uint8Array([0]);
+        let replacedCount = 0;
         
-        // 替换而不是删除
         for (const mediaPath of unusedMediaFiles) {
             try {
-                // 用1字节文件替换原媒体文件
                 zip.file(mediaPath, oneByteContent);
-                console.log(`[removeUnusedMedia] Replaced unused media file with 1-byte placeholder: ${mediaPath}`);
+                replacedCount++;
             } catch (error) {
                 console.error(`[removeUnusedMedia] Error replacing media file ${mediaPath}:`, error.message);
             }
         }
         
-        console.log(`[removeUnusedMedia] Successfully replaced ${unusedMediaFiles.length} unused media files with placeholders.`);
+        console.log(`[removeUnusedMedia] Successfully replaced ${replacedCount}/${unusedMediaFiles.length} unused media files with placeholders.`);
     } catch (error) {
         console.error('[removeUnusedMedia] Error during media replacement:', error.message);
     }
