@@ -92,7 +92,6 @@
     } catch (error) {
       // optimizePPTX should call onProgress('error', ...) on failure.
       // If it somehow throws before calling onProgress, catch it here.
-      console.error("Unhandled Compression error:", error);
       if (!$compressionProgress.error) { // Check if progress store already has error
           updateProgress('error', {
               message: error.message || "File processing failed unexpectedly.",

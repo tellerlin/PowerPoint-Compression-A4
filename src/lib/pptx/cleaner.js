@@ -9,26 +9,21 @@ async function parseXmlDOMWithLog(zip, path) {
     try {
         const xml = await zip.file(path)?.async('string');
         if (!xml) {
-            console.warn(`[parseXmlDOMWithLog] File is empty or not found: ${path}`);
             return null;
         }
         const parser = new DOMParser();
         const doc = parser.parseFromString(xml, 'application/xml');
         const parseError = doc.querySelector('parsererror');
         if (parseError) {
-            console.error(`[parseXmlDOMWithLog] XML parse error: ${path}:`, parseError.textContent);
-            const fallbackDoc = parser.parseFromString(xml, 'text/xml');
-            const fallbackError = fallbackDoc.querySelector('parsererror');
-            if (fallbackError) {
-                console.error(`[parseXmlDOMWithLog] Fallback parse failed: ${path}`);
-                return null;
-            }
-            console.warn(`[parseXmlDOMWithLog] Using text/xml fallback parse: ${path}`);
-            return fallbackDoc;
+             const fallbackDoc = parser.parseFromString(xml, 'text/xml');
+             const fallbackError = fallbackDoc.querySelector('parsererror');
+             if (fallbackError) {
+                  return null;
+             }
+             return fallbackDoc;
         }
         return doc;
     } catch (error) {
-        console.error(`[parseXmlDOMWithLog] Exception: ${path}:`, error.message);
         return null;
     }
 }
@@ -38,7 +33,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
     let finalUsedLayouts = new Set();
     let finalUsedMasters = new Set();
     try {
-        console.log('[Cleaner] Starting resource cleanup process...');
         // 默认禁用布局删除
         const cleanOptions = { removeUnusedLayouts: false, ...options };
         onProgress('init', { percentage: 10, status: 'Analyzing presentation structure...' });
@@ -69,10 +63,8 @@ export async function cleanUnusedResources(zip, onProgress, options) {
         await removeUnusedMedia(zip, usedMedia);
         onProgress('init', { percentage: 95, status: 'Updating content types...' });
         await updateContentTypes(zip);
-        console.log('[Cleaner] Resource cleanup process finished.');
         return true;
     } catch (error) {
-        console.error('[Cleaner] Critical error during resource cleanup:', error.message, error.stack);
         onProgress('error', { message: `Cleanup failed: ${error.message}` });
         return false;
     }
