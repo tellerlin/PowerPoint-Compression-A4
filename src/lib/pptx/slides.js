@@ -68,7 +68,6 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
 try {
     slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
     if (slideIdList && !slideNode) {
-        // 尝试使用替代方法查找节点
         const allNodes = Array.from(slideIdList.querySelectorAll('sldId, p\\:sldId'));
         slideNode = allNodes.find(node => {
             const nodeRId = node.getAttribute('r:id') || node.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
@@ -154,7 +153,6 @@ try {
 			const serializer = new XMLSerializer();
 
             if (presentationDoc && hiddenSlidesData.some(s => s.slideNode)) {
-                // 确保更新演示文稿中的幻灯片顺序
                 const updatedPresentationXml = serializer.serializeToString(presentationDoc);
                 zip.file(PRESENTATION_PATH, updatedPresentationXml);
                 console.log('[removeHiddenSlides] Updated presentation.xml with removed slides');
@@ -172,7 +170,6 @@ try {
 
 			await updateContentTypesForRemovedFiles(zip, allRemovedPaths);
             
-            // 添加：更新演示文稿中的幻灯片ID列表
             await updatePresentationSlideIds(zip, visibleSlidesData);
 		}
 
@@ -247,9 +244,6 @@ async function findNotesSlidePath(zip, slideRelsPath) {
             const notesPath = resolvePath(slideRelsPath, target);
             if (notesPath && zip.file(notesPath)) {
                 return notesPath;
-            } else if (notesPath) {
-            } else {
-                 console.warn(`[findNotesSlidePath] Failed to resolve notes slide target "${target}" from ${slideRelsPath}`);
             }
         }
     } catch (error) {
@@ -282,14 +276,10 @@ async function updateContentTypesForRemovedFiles(zip, removedPaths) {
         if (overrideElement) {
             if(removeNode(overrideElement)) {
                  changed = true;
-                 console.log(`[updateContentTypesForRemovedFiles] Removed Override for: ${partName}`);
-            } else {
-                 console.warn(`[updateContentTypesForRemovedFiles] Failed to remove Override node for: ${partName}`);
             }
         }
     });
 
-    // 检查并更新Default节点
     const allExtensions = new Set();
     Object.keys(zip.files).forEach(path => {
         if (!zip.files[path].dir) {
@@ -304,7 +294,6 @@ async function updateContentTypesForRemovedFiles(zip, removedPaths) {
         if (extension && !allExtensions.has(extension.toLowerCase())) {
             if (removeNode(defaultElement)) {
                 changed = true;
-                console.log(`[updateContentTypesForRemovedFiles] Removed Default for extension: ${extension}`);
             }
         }
     }
@@ -318,8 +307,6 @@ async function updateContentTypesForRemovedFiles(zip, removedPaths) {
         } catch (e) {
              console.error('[updateContentTypesForRemovedFiles] Failed to serialize or save updated [Content_Types].xml:', e.message);
         }
-    } else {
-        console.log('[updateContentTypesForRemovedFiles] No changes needed for [Content_Types].xml');
     }
 }
 
@@ -327,28 +314,23 @@ async function updatePresentationSlideIds(zip, visibleSlidesData) {
     try {
         console.log('[updatePresentationSlideIds] Updating presentation slide IDs...');
         
-        // 读取presentation.xml
         const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
         if (!presentationXml) {
             console.error('[updatePresentationSlideIds] Failed to read presentation.xml');
             return;
         }
         
-        // 解析XML
         const parser = new DOMParser();
         const presentationDoc = parser.parseFromString(presentationXml, 'application/xml');
         
-        // 获取幻灯片ID列表
         const slideIdList = presentationDoc.querySelector('sldIdLst, p\\:sldIdLst');
         if (!slideIdList) {
             console.warn('[updatePresentationSlideIds] Slide ID list not found in presentation.xml');
             return;
         }
         
-        // 获取所有可见幻灯片的ID
         const visibleSlideIds = visibleSlidesData.map(slide => slide.rId).filter(Boolean);
         
-        // 移除所有不在可见幻灯片列表中的幻灯片ID
         const slideIdNodes = Array.from(slideIdList.querySelectorAll('sldId, p\\:sldId'));
         for (const slideIdNode of slideIdNodes) {
             const rId = slideIdNode.getAttribute('r:id') || slideIdNode.getAttribute('r\\:id');
@@ -357,7 +339,6 @@ async function updatePresentationSlideIds(zip, visibleSlidesData) {
             }
         }
         
-        // 序列化并保存更新后的XML
         const serializer = new XMLSerializer();
         const updatedPresentationXml = serializer.serializeToString(presentationDoc);
         zip.file(PRESENTATION_PATH, updatedPresentationXml);
