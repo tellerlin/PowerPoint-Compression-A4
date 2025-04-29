@@ -242,6 +242,7 @@ async function removeUnusedMedia(zip, usedMedia) {
     }
 }
 
+
 function shouldSkipMediaRemoval(totalCount, unusedCount, usedCount) {
     if (totalCount === 0 || unusedCount <= 0) {
         return false;

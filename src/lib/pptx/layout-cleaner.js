@@ -87,8 +87,59 @@ export async function analyzeLayoutsAndMasters(zip, usedSlides, onProgress = () 
 }
 
 export async function removeUnusedLayouts(zip, usedSlides, onProgress = () => {}) {
-    console.log('[LayoutCleaner] Layout removal is disabled. Redirecting to analysis-only function.');
-    return await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
+    console.log('[LayoutCleaner] Starting layout removal process...');
+    try {
+        // 分析布局和母版
+        const analysisResult = await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
+        if (!analysisResult.success) {
+            console.warn('[LayoutCleaner] Layout analysis failed, skipping removal.');
+            return analysisResult;
+        }
+        
+        const usedLayouts = analysisResult.usedLayouts;
+        const usedMasters = analysisResult.usedMasters;
+        
+        // 获取所有布局和母版文件
+        const allLayoutFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/slideLayouts/slideLayout') && f.endsWith('.xml'));
+        const allMasterFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/slideMasters/slideMaster') && f.endsWith('.xml'));
+        
+        // 确定未使用的布局和母版
+        const unusedLayouts = allLayoutFiles.filter(f => !usedLayouts.has(f));
+        const unusedMasters = allMasterFiles.filter(f => !usedMasters.has(f));
+        
+        if (unusedLayouts.length === 0 && unusedMasters.length === 0) {
+            console.log('[LayoutCleaner] No unused layouts or masters found to remove.');
+            return analysisResult;
+        }
+        
+        console.log(`[LayoutCleaner] Removing ${unusedLayouts.length} unused layouts and ${unusedMasters.length} unused masters...`);
+        onProgress('init', { percentage: 80, status: 'Removing unused layouts and masters...' });
+        
+        // 更新母版中的布局引用
+        for (const masterPath of usedMasters) {
+            await updateMasterLayoutReferences(zip, masterPath, usedLayouts);
+        }
+        
+        // 移除未使用的布局和母版文件
+        if (unusedLayouts.length > 0) {
+            await removeFilesAndRels(zip, unusedLayouts, SLIDE_LAYOUT_PREFIX);
+        }
+        
+        if (unusedMasters.length > 0) {
+            await removeFilesAndRels(zip, unusedMasters, SLIDE_MASTER_PREFIX);
+        }
+        
+        // 更新内容类型
+        await updateContentTypes(zip, unusedLayouts, unusedMasters);
+        
+        console.log(`[LayoutCleaner] Successfully removed ${unusedLayouts.length} layouts and ${unusedMasters.length} masters.`);
+        onProgress('init', { percentage: 100, status: 'Layout cleanup complete' });
+        
+        return analysisResult;
+    } catch (error) {
+        console.error('[LayoutCleaner] Error in removeUnusedLayouts:', error.message);
+        return { success: false, layouts: [], masters: [], usedLayouts: new Set(), usedMasters: new Set() };
+    }
 }
 
 async function updateContentTypes(zip, removedLayouts, removedMasters) {

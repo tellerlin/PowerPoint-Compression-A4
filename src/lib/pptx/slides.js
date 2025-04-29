@@ -2,31 +2,33 @@ import { PRESENTATION_PATH, CONTENT_TYPES_PATH, SLIDE_PREFIX, NOTES_SLIDE_PREFIX
 import { resolvePath } from './utils';
 
 export async function parseXmlDOM(zip, path) {
-	try {
-		const xml = await zip.file(path)?.async('string');
-		if (!xml) {
-			console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
-			return null;
-		}
-		const parser = new DOMParser();
-		const doc = parser.parseFromString(xml, 'application/xml');
+    try {
+        const xml = await zip.file(path)?.async('string');
+        if (!xml) {
+            console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
+            return null;
+        }
+        
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xml, 'application/xml');
+        
         const parseError = doc.querySelector('parsererror');
         if (parseError) {
-             console.warn(`[parseXmlDOM] XML parse error for ${path}, attempting fallback.`);
-             const fallbackDoc = parser.parseFromString(xml, 'text/xml');
-             const fallbackError = fallbackDoc.querySelector('parsererror');
-             if(fallbackError) {
-                  console.error(`[parseXmlDOM] Fallback XML parse failed for ${path}:`, fallbackError.textContent);
-                  return null;
-             }
-             console.log(`[parseXmlDOM] Fallback XML parse successful for ${path}.`);
-             return fallbackDoc;
+            // 尝试使用备用解析方法
+            const fallbackDoc = parser.parseFromString(xml, 'text/xml');
+            const fallbackError = fallbackDoc.querySelector('parsererror');
+            if (fallbackError) {
+                console.error(`[parseXmlDOM] XML parse error for ${path}:`, parseError.textContent);
+                return null;
+            }
+            return fallbackDoc;
         }
-		return doc;
-	} catch (error) {
-		console.error(`[parseXmlDOM] Error parsing XML for ${path}:`, error.message);
-		return null;
-	}
+        
+        return doc;
+    } catch (error) {
+        console.error(`[parseXmlDOM] Error parsing XML for ${path}:`, error.message);
+        return null;
+    }
 }
 
 function removeNode(node) {
@@ -92,15 +94,26 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
             continue;
         }
         
-        try {
-            slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
-            if (slideIdList && !slideNode) {
-                console.warn(`[removeHiddenSlides] Could not find slide node in sldIdLst for rId: ${rId}`);
-            }
-        } catch (e) {
-            console.error(`[removeHiddenSlides] Error querying slideNode for rId "${rId}": ${e.message}`);
-            slideNode = null;
+
+try {
+    slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
+    if (slideIdList && !slideNode) {
+        // 尝试使用替代方法查找节点
+        const allNodes = Array.from(slideIdList.querySelectorAll('sldId, p\\:sldId'));
+        slideNode = allNodes.find(node => {
+            const nodeRId = node.getAttribute('r:id') || node.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+            return nodeRId === rId;
+        });
+        
+        if (!slideNode) {
+            console.warn(`[removeHiddenSlides] Could not find slide node in sldIdLst for rId: ${rId}`);
         }
+    }
+} catch (e) {
+    console.error(`[removeHiddenSlides] Error querying slideNode for rId "${rId}": ${e.message}`);
+    slideNode = null;
+}
+
         
         slidesData.push({
             rId: rId,
