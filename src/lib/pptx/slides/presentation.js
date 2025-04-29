@@ -44,6 +44,6 @@ export async function updatePresentationSlides(zip, presentationObj, remainingSl
     const finalXml = buildXml(presentationObj);
     zip.file(PRESENTATION_PATH, finalXml);
   } catch (error) {
-    console.error('更新演示文稿幻灯片时出错:', error);
+    console.error('Update powerpoint error:', error);
   }
 }

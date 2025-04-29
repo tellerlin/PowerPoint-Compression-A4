@@ -5,21 +5,26 @@ export async function parseXmlDOM(zip, path) {
 	try {
 		const xml = await zip.file(path)?.async('string');
 		if (!xml) {
+			console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
 			return null;
 		}
 		const parser = new DOMParser();
 		const doc = parser.parseFromString(xml, 'application/xml');
         const parseError = doc.querySelector('parsererror');
         if (parseError) {
+             console.warn(`[parseXmlDOM] XML parse error for ${path}, attempting fallback.`);
              const fallbackDoc = parser.parseFromString(xml, 'text/xml');
              const fallbackError = fallbackDoc.querySelector('parsererror');
              if(fallbackError) {
+                  console.error(`[parseXmlDOM] Fallback XML parse failed for ${path}:`, fallbackError.textContent);
                   return null;
              }
+             console.log(`[parseXmlDOM] Fallback XML parse successful for ${path}.`);
              return fallbackDoc;
         }
 		return doc;
 	} catch (error) {
+		console.error(`[parseXmlDOM] Error parsing XML for ${path}:`, error.message);
 		return null;
 	}
 }
@@ -66,61 +71,50 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
 		const slidesData = [];
 
         for (const rel of slideRelationships) {
-            let rId = null, target = null, slidePath = null, slideNode = null;
-            try {
-                try {
-                    rId = rel.getAttribute('Id');
-                    target = rel.getAttribute('Target');
-                    if (!rId || !target) {
-                        continue;
-                    }
-                } catch (e) {
-                    continue;
-                }
-                try {
-                    slidePath = resolvePath(presentationRelsPath, target);
-                    if (!slidePath) {
-                        continue;
-                    }
-                } catch (e) {
-                    continue;
-                }
-                let fileExists = false;
-                try {
-                    fileExists = zip.file(slidePath) !== null;
-                    if (!fileExists) {
-                        continue;
-                    }
-                } catch (e) {
-                    continue;
-                }
-                try {
-                    slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
-                    if (slideIdList && !slideNode) {
-                        console.warn(`[removeHiddenSlides LOOP Step 4] Note: Could not find slide node in sldIdLst for rId: ${rId}. This might indicate a file inconsistency. Proceeding anyway.`);
-                        console.log(`[DEBUG LOOP Step 4 Extra] sldIdList child count: ${slideIdList.childNodes.length}`);
-                    }
-                } catch (e) {
-                    console.error(`[ERROR LOOP Step 4] Error querying slideNode for rId "${rId}": ${e.message}`);
-                    slideNode = null;
-                }
-                try {
-                    slidesData.push({
-                        rId: rId,
-                        path: slidePath,
-                        relsPath: slidePath.replace(SLIDE_PREFIX, `${SLIDE_PREFIX}_rels/`) + '.rels',
-                        notesSlideRelsPath: slidePath.replace(SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels',
-                        notesSlidePath: null,
-                        relNode: rel,
-                        slideNode: slideNode
-                    });
-                } catch (e) {
-                    console.error(`[ERROR LOOP Step 5] Error pushing data for rId "${rId}": ${e.message}`);
-                }
-            } catch (outerError) {
-                continue;
-            }
+    let rId = null, target = null, slidePath = null, slideNode = null;
+    try {
+        rId = rel.getAttribute('Id');
+        target = rel.getAttribute('Target');
+        if (!rId || !target) {
+            console.warn(`[removeHiddenSlides] Missing Id or Target attribute in relationship`);
+            continue;
         }
+        
+        slidePath = resolvePath(presentationRelsPath, target);
+        if (!slidePath) {
+            console.warn(`[removeHiddenSlides] Failed to resolve path for target: ${target}`);
+            continue;
+        }
+        
+        const fileExists = zip.file(slidePath) !== null;
+        if (!fileExists) {
+            console.warn(`[removeHiddenSlides] Slide file does not exist: ${slidePath}`);
+            continue;
+        }
+        
+        try {
+            slideNode = slideIdList ? slideIdList.querySelector(`sldId[r\\:id="${rId}"], p\\:sldId[r\\:id="${rId}"]`) : null;
+            if (slideIdList && !slideNode) {
+                console.warn(`[removeHiddenSlides] Could not find slide node in sldIdLst for rId: ${rId}`);
+            }
+        } catch (e) {
+            console.error(`[removeHiddenSlides] Error querying slideNode for rId "${rId}": ${e.message}`);
+            slideNode = null;
+        }
+        
+        slidesData.push({
+            rId: rId,
+            path: slidePath,
+            relsPath: slidePath.replace(SLIDE_PREFIX, `${SLIDE_PREFIX}_rels/`) + '.rels',
+            notesSlideRelsPath: slidePath.replace(SLIDE_PREFIX, `${NOTES_SLIDE_PREFIX}_rels/`) + '.rels',
+            notesSlidePath: null,
+            relNode: rel,
+            slideNode: slideNode
+        });
+    } catch (error) {
+        console.error(`[removeHiddenSlides] Error processing slide relationship: ${error.message}`);
+    }
+}
         
 		const hiddenSlidesData = [];
         const visibleSlidesData = [];

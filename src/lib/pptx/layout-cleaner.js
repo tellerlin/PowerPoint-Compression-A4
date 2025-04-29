@@ -64,7 +64,6 @@ export async function analyzeLayoutsAndMasters(zip, usedSlides, onProgress = () 
         }
         console.log(`[LayoutCleaner] Identified ${usedMasters.size} unique masters used by layouts.`);
         
-        // 计算未使用的布局和母版（仅用于日志记录，不会删除）
         const allLayoutFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/slideLayouts/slideLayout') && f.endsWith('.xml'));
         const unusedLayouts = allLayoutFiles.filter(f => !usedLayouts.has(f));
         
@@ -87,7 +86,6 @@ export async function analyzeLayoutsAndMasters(zip, usedSlides, onProgress = () 
     return result;
 }
 
-// 保留原始函数但重命名，以便在需要时仍可使用
 export async function removeUnusedLayouts(zip, usedSlides, onProgress = () => {}) {
     console.log('[LayoutCleaner] Layout removal is disabled. Redirecting to analysis-only function.');
     return await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
@@ -164,7 +162,7 @@ async function getSlideLayout(zip, slide) {
     if (!slide?.path) return null;
     try {
         const slideRelsPath = slide.path.replace(/^(.*\/slides\/)([^/]+)$/, '$1_rels/$2.rels');
-        console.log(`[LayoutCleaner] Attempting to read slide rels file: ${slideRelsPath}`);
+        
         const slideRelsObj = await parseXmlSafely(zip, slideRelsPath);
         let slideRels = [];
         if (slideRelsObj.Relationships) {
@@ -177,14 +175,11 @@ async function getSlideLayout(zip, slide) {
             });
         }
         
-        slideRels.forEach((rel, idx) => {
-
-        });
         if (!slideRels.length) {
             console.log(`[LayoutCleaner] No valid relationships found for slide: ${slide.path} at ${slideRelsPath}`);
             return null;
         }
-        console.log(`[LayoutCleaner] Found ${slideRels.length} relationships for slide: ${slide.path}`);
+        
         const layoutRel = slideRels.find(rel => {
             const type = (rel?.['@_Type'] || rel?.['Type'] || rel?.['$Type'] || '').trim();
             const target = (rel?.['@_Target'] || rel?.['Target'] || rel?.['$Target'] || '').trim();
@@ -199,7 +194,7 @@ async function getSlideLayout(zip, slide) {
             console.warn(`[LayoutCleaner] Layout target "${layoutRel['@_Target']}" resolved to non-existent file: ${layoutPath || 'resolution failed'} from slide: ${slide.path}`);
             return null;
         }
-        console.log(`[LayoutCleaner] Identified layout for slide ${slide.path}: ${layoutPath}`);
+        
         return {
             path: layoutPath,
             rId: layoutRel['@_Id']
@@ -213,7 +208,6 @@ async function getSlideLayout(zip, slide) {
 export async function getLayoutMaster(zip, layoutPath) {
     if (!layoutPath) return null;
     try {
-        // 获取所有 slideMaster 文件路径
         const masterFiles = Object.keys(zip.files).filter(f => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(f));
         for (const masterPath of masterFiles) {
             const masterRelsPath = masterPath.replace(/^(.*\/slideMasters\/)([^/]+)$/, '$1_rels/$2.rels');
@@ -229,7 +223,6 @@ export async function getLayoutMaster(zip, layoutPath) {
                 });
             }
             for (const rel of relationships) {
-                // 兼容不同属性名
                 const type = (rel?.['@_Type'] || rel?.['Type'] || rel?.['$Type'] || '').toLowerCase();
                 const target = rel?.['@_Target'] || rel?.['Target'] || rel?.['$Target'];
                 if (type.includes('slidelayout') && target) {
@@ -246,7 +239,7 @@ export async function getLayoutMaster(zip, layoutPath) {
         }
         return null;
     } catch (error) {
-        console.error(`[getLayoutMaster] 查找 layout ${layoutPath} 的 master 时出错:`, error.message);
+        console.error(`[getLayoutMaster] Error finding master for layout ${layoutPath}:`, error.message);
         return null;
     }
 }
