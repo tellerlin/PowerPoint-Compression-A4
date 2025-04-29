@@ -208,56 +208,33 @@ async function getUsedSlides(zip) {
 
 async function removeUnusedMedia(zip, usedMedia) {
     try {
-        const allMediaPaths = findMediaFiles(zip);
-        console.log(`[removeUnusedMedia] Checking media usage. Total files in ${MEDIA_PATH_PREFIX}: ${allMediaPaths.length}. Identified as used: ${usedMedia.size}`);
-        const existingUsedMedia = new Set();
-        let missingCount = 0;
-        for (const mediaPath of usedMedia) {
-            if (zip.file(mediaPath)) {
-                existingUsedMedia.add(mediaPath);
-            } else {
-                console.warn(`[removeUnusedMedia] Referenced media file not found in ZIP, cannot mark as used: ${mediaPath}`);
-                missingCount++;
-            }
-        }
-        if (missingCount > 0) {
-            console.log(`[removeUnusedMedia] Adjusted used media count after existence check: ${existingUsedMedia.size}`);
-        }
-        const unusedMediaPaths = allMediaPaths.filter(path => !existingUsedMedia.has(path));
-        console.log(`[removeUnusedMedia] Identified ${unusedMediaPaths.length} unused media files for potential removal.`);
-        if (shouldSkipMediaRemoval(allMediaPaths.length, unusedMediaPaths.length, existingUsedMedia.size)) {
-            console.warn('[removeUnusedMedia] Skipping media removal due to safety checks.');
+        const allMediaFiles = findMediaFiles(zip);
+        const unusedMediaFiles = allMediaFiles.filter(path => !usedMedia.has(path));
+        
+        if (unusedMediaFiles.length === 0) {
+            console.log('[removeUnusedMedia] No unused media files found.');
             return;
         }
-        let removedCount = 0;
-        let failedToRemoveCount = 0;
-        for (const mediaPath of unusedMediaPaths) {
+        
+        console.log(`[removeUnusedMedia] Found ${unusedMediaFiles.length} unused media files.`);
+        
+        // 创建一个1字节的空白文件内容（可以是任何格式）
+        const oneByteContent = new Uint8Array([0]);
+        
+        // 替换而不是删除
+        for (const mediaPath of unusedMediaFiles) {
             try {
-                if (zip.file(mediaPath)) {
-                    zip.remove(mediaPath);
-                    removedCount++;
-                }
-            } catch (removeError) {
-                failedToRemoveCount++;
-                console.error(`[removeUnusedMedia] Error removing media file ${mediaPath}:`, removeError.message);
+                // 用1字节文件替换原媒体文件
+                zip.file(mediaPath, oneByteContent);
+                console.log(`[removeUnusedMedia] Replaced unused media file with 1-byte placeholder: ${mediaPath}`);
+            } catch (error) {
+                console.error(`[removeUnusedMedia] Error replacing media file ${mediaPath}:`, error.message);
             }
         }
-        if (removedCount > 0) {
-            console.log(`[removeUnusedMedia] Successfully removed ${removedCount} unused media files.`);
-        }
-        if (failedToRemoveCount > 0) {
-            console.warn(`[removeUnusedMedia] Failed to remove ${failedToRemoveCount} unused media files.`);
-        }
-        if (removedCount === 0 && failedToRemoveCount === 0 && unusedMediaPaths.length > 0) {
-            console.log(`[removeUnusedMedia] Identified ${unusedMediaPaths.length} unused media files, but none were removed (may have been removed by other processes or checks failed).`);
-        }
-        if (unusedMediaPaths.length === 0) {
-            console.log(`[removeUnusedMedia] No unused media files found to remove.`);
-        }
-        const remainingMedia = findMediaFiles(zip).length;
-        console.log(`[removeUnusedMedia] Remaining media files after removal attempt: ${remainingMedia}`);
+        
+        console.log(`[removeUnusedMedia] Successfully replaced ${unusedMediaFiles.length} unused media files with placeholders.`);
     } catch (error) {
-        console.error('[removeUnusedMedia] Error during unused media removal process:', error.message, error.stack);
+        console.error('[removeUnusedMedia] Error during media replacement:', error.message);
     }
 }
 
@@ -335,6 +312,16 @@ async function updateContentTypes(zip) {
         if (contentTypesObj.Types.Default) {
             const defaults = Array.isArray(contentTypesObj.Types.Default) ? contentTypesObj.Types.Default : [contentTypesObj.Types.Default];
             const initialCount = defaults.length;
+            
+            // 收集ZIP中所有文件扩展名
+            const allExtensions = new Set();
+            Object.keys(zip.files).forEach(path => {
+                if (!zip.files[path].dir) {
+                    const ext = path.split('.').pop().toLowerCase();
+                    if (ext) allExtensions.add(ext);
+                }
+            });
+            
             const filteredDefaults = defaults.filter(def => {
                 if (!def) return false;
                 const extension = def['@_Extension'];
@@ -343,13 +330,9 @@ async function updateContentTypes(zip) {
                     return true;
                 }
                 const cleanExtension = extension.toLowerCase();
-                const extensionPattern = new RegExp(`\\.${cleanExtension}$`, 'i');
-                const exists = Object.keys(zip.files).some(path => !zip.files[path].dir && extensionPattern.test(path));
-                if (!exists) {
-                    console.log(`[updateContentTypes] No file found for extension ".${cleanExtension}", will remove Default:`, JSON.stringify(def));
-                }
-                return exists;
+                return allExtensions.has(cleanExtension);
             });
+            
             const finalCount = filteredDefaults.length;
             if (finalCount < initialCount) {
                 contentTypesObj.Types.Default = finalCount > 0 ? filteredDefaults : undefined;

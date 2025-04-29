@@ -215,12 +215,15 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
 			const serializer = new XMLSerializer();
 
             if (presentationDoc && hiddenSlidesData.some(s => s.slideNode)) {
+                // 确保更新演示文稿中的幻灯片顺序
                 const updatedPresentationXml = serializer.serializeToString(presentationDoc);
                 zip.file(PRESENTATION_PATH, updatedPresentationXml);
+                console.log('[removeHiddenSlides] Updated presentation.xml with removed slides');
             }
             if (presentationRelsDoc) {
                 const updatedPresentationRelsXml = serializer.serializeToString(presentationRelsDoc);
                 zip.file(presentationRelsPath, updatedPresentationRelsXml);
+                console.log('[removeHiddenSlides] Updated presentation.xml.rels with removed slide relationships');
             }
 
             const allRemovedPaths = [
@@ -229,6 +232,9 @@ export async function removeHiddenSlides(zip, onProgress = () => {}) {
             ].filter(p => p);
 
 			await updateContentTypesForRemovedFiles(zip, allRemovedPaths);
+            
+            // 添加：更新演示文稿中的幻灯片ID列表
+            await updatePresentationSlideIds(zip, visibleSlidesData);
 		}
 
 		console.log(`[removeHiddenSlides] Finished. Successfully removed: ${removedCount}, Failed: ${failedToRemoveCount}`);
@@ -337,21 +343,88 @@ async function updateContentTypesForRemovedFiles(zip, removedPaths) {
         if (overrideElement) {
             if(removeNode(overrideElement)) {
                  changed = true;
+                 console.log(`[updateContentTypesForRemovedFiles] Removed Override for: ${partName}`);
             } else {
                  console.warn(`[updateContentTypesForRemovedFiles] Failed to remove Override node for: ${partName}`);
             }
         }
     });
 
+    // 检查并更新Default节点
+    const allExtensions = new Set();
+    Object.keys(zip.files).forEach(path => {
+        if (!zip.files[path].dir) {
+            const ext = path.split('.').pop().toLowerCase();
+            if (ext) allExtensions.add(ext);
+        }
+    });
+    
+    const defaultElements = Array.from(typesElement.querySelectorAll('Default'));
+    for (const defaultElement of defaultElements) {
+        const extension = defaultElement.getAttribute('Extension');
+        if (extension && !allExtensions.has(extension.toLowerCase())) {
+            if (removeNode(defaultElement)) {
+                changed = true;
+                console.log(`[updateContentTypesForRemovedFiles] Removed Default for extension: ${extension}`);
+            }
+        }
+    }
+
     if (changed) {
         try {
             const serializer = new XMLSerializer();
             const updatedXml = serializer.serializeToString(contentTypesDoc);
             zip.file(CONTENT_TYPES_PATH, updatedXml);
-            console.log(`[updateContentTypesForRemovedFiles] Updated [Content_Types].xml, removed Override references for ${removedPaths.filter(p=>p).length} files.`);
+            console.log(`[updateContentTypesForRemovedFiles] Updated [Content_Types].xml, removed references for ${removedPaths.filter(p=>p).length} files.`);
         } catch (e) {
              console.error('[updateContentTypesForRemovedFiles] Failed to serialize or save updated [Content_Types].xml:', e.message);
         }
     } else {
+        console.log('[updateContentTypesForRemovedFiles] No changes needed for [Content_Types].xml');
+    }
+}
+
+async function updatePresentationSlideIds(zip, visibleSlidesData) {
+    try {
+        console.log('[updatePresentationSlideIds] Updating presentation slide IDs...');
+        
+        // 读取presentation.xml
+        const presentationXml = await zip.file(PRESENTATION_PATH)?.async('string');
+        if (!presentationXml) {
+            console.error('[updatePresentationSlideIds] Failed to read presentation.xml');
+            return;
+        }
+        
+        // 解析XML
+        const parser = new DOMParser();
+        const presentationDoc = parser.parseFromString(presentationXml, 'application/xml');
+        
+        // 获取幻灯片ID列表
+        const slideIdList = presentationDoc.querySelector('sldIdLst, p\\:sldIdLst');
+        if (!slideIdList) {
+            console.warn('[updatePresentationSlideIds] Slide ID list not found in presentation.xml');
+            return;
+        }
+        
+        // 获取所有可见幻灯片的ID
+        const visibleSlideIds = visibleSlidesData.map(slide => slide.rId).filter(Boolean);
+        
+        // 移除所有不在可见幻灯片列表中的幻灯片ID
+        const slideIdNodes = Array.from(slideIdList.querySelectorAll('sldId, p\\:sldId'));
+        for (const slideIdNode of slideIdNodes) {
+            const rId = slideIdNode.getAttribute('r:id') || slideIdNode.getAttribute('r\\:id');
+            if (rId && !visibleSlideIds.includes(rId)) {
+                slideIdList.removeChild(slideIdNode);
+            }
+        }
+        
+        // 序列化并保存更新后的XML
+        const serializer = new XMLSerializer();
+        const updatedPresentationXml = serializer.serializeToString(presentationDoc);
+        zip.file(PRESENTATION_PATH, updatedPresentationXml);
+        
+        console.log('[updatePresentationSlideIds] Successfully updated presentation slide IDs');
+    } catch (error) {
+        console.error('[updatePresentationSlideIds] Error updating presentation slide IDs:', error.message);
     }
 }
