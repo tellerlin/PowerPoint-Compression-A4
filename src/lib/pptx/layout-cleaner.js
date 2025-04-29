@@ -1,6 +1,6 @@
 import { parseXml, buildXml } from './xml/parser';
 import { SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX, CONTENT_TYPES_PATH } from './constants';
-import { resolvePath } from './utils';
+import { resolvePath, parseXmlDOM } from './utils';
 
 async function parseXmlSafely(zip, path) {
     try {
@@ -10,11 +10,11 @@ async function parseXmlSafely(zip, path) {
         }
         const parsed = await parseXml(xmlString);
         if (parsed._parseFailed) {
-             console.error(`[parseXmlSafely] Failed to parse XML: ${path}`);
+             console.error(`[LayoutCleaner] Failed to parse XML: ${path}`);
         }
         return parsed;
     } catch (error) {
-        console.error(`[parseXmlSafely] Error reading/parsing XML from ${path}:`, error.message);
+        console.error(`[LayoutCleaner] Error reading/parsing XML from ${path}:`, error.message);
         return { _parseFailed: true, _error: error.message };
     }
 }
@@ -89,56 +89,65 @@ export async function analyzeLayoutsAndMasters(zip, usedSlides, onProgress = () 
 export async function removeUnusedLayouts(zip, usedSlides, onProgress = () => {}) {
     console.log('[LayoutCleaner] Starting layout removal process...');
     try {
-        // 分析布局和母版
+        // Analyze layouts and masters
         const analysisResult = await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
         if (!analysisResult.success) {
             console.warn('[LayoutCleaner] Layout analysis failed, skipping removal.');
-            return analysisResult;
+            return { success: false, removedLayoutsCount: 0, removedMastersCount: 0 };
         }
         
         const usedLayouts = analysisResult.usedLayouts;
         const usedMasters = analysisResult.usedMasters;
         
-        // 获取所有布局和母版文件
+        // Get all layout and master files
         const allLayoutFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/slideLayouts/slideLayout') && f.endsWith('.xml'));
         const allMasterFiles = Object.keys(zip.files).filter(f => f.startsWith('ppt/slideMasters/slideMaster') && f.endsWith('.xml'));
         
-        // 确定未使用的布局和母版
+        // Determine unused layouts and masters
         const unusedLayouts = allLayoutFiles.filter(f => !usedLayouts.has(f));
         const unusedMasters = allMasterFiles.filter(f => !usedMasters.has(f));
         
         if (unusedLayouts.length === 0 && unusedMasters.length === 0) {
             console.log('[LayoutCleaner] No unused layouts or masters found to remove.');
-            return analysisResult;
+            return { success: true, removedLayoutsCount: 0, removedMastersCount: 0 };
         }
         
         console.log(`[LayoutCleaner] Removing ${unusedLayouts.length} unused layouts and ${unusedMasters.length} unused masters...`);
         onProgress('init', { percentage: 80, status: 'Removing unused layouts and masters...' });
         
-        // 更新母版中的布局引用
+        // Update master layout references
         for (const masterPath of usedMasters) {
             await updateMasterLayoutReferences(zip, masterPath, usedLayouts);
         }
         
-        // 移除未使用的布局和母版文件
+        // Remove unused layout and master files
+        let removedLayoutsCount = 0;
+        let removedMastersCount = 0;
+        
         if (unusedLayouts.length > 0) {
-            await removeFilesAndRels(zip, unusedLayouts, SLIDE_LAYOUT_PREFIX);
+            removedLayoutsCount = await removeFilesAndRels(zip, unusedLayouts, SLIDE_LAYOUT_PREFIX);
         }
         
         if (unusedMasters.length > 0) {
-            await removeFilesAndRels(zip, unusedMasters, SLIDE_MASTER_PREFIX);
+            removedMastersCount = await removeFilesAndRels(zip, unusedMasters, SLIDE_MASTER_PREFIX);
         }
         
-        // 更新内容类型
+        // Update content types
         await updateContentTypes(zip, unusedLayouts, unusedMasters);
         
-        console.log(`[LayoutCleaner] Successfully removed ${unusedLayouts.length} layouts and ${unusedMasters.length} masters.`);
+        console.log(`[LayoutCleaner] Successfully removed ${removedLayoutsCount} layouts and ${removedMastersCount} masters.`);
         onProgress('init', { percentage: 100, status: 'Layout cleanup complete' });
         
-        return analysisResult;
+        return { 
+            success: true, 
+            removedLayoutsCount, 
+            removedMastersCount,
+            usedLayouts: analysisResult.usedLayouts,
+            usedMasters: analysisResult.usedMasters
+        };
     } catch (error) {
         console.error('[LayoutCleaner] Error in removeUnusedLayouts:', error.message);
-        return { success: false, layouts: [], masters: [], usedLayouts: new Set(), usedMasters: new Set() };
+        return { success: false, removedLayoutsCount: 0, removedMastersCount: 0 };
     }
 }
 
@@ -196,25 +205,39 @@ async function removeFilesAndRels(zip, filePaths, prefix) {
     let removedCount = 0;
     for (const filePath of filePaths) {
         try {
-            zip.remove(filePath);
-            const relsPath = filePath.replace(prefix, `${prefix}_rels/`) + '.rels';
-            if (zip.file(relsPath)) {
-                zip.remove(relsPath);
+            if (zip.file(filePath)) {
+                zip.remove(filePath);
+                const relsPath = filePath.replace(prefix, `${prefix}_rels/`) + '.rels';
+                if (zip.file(relsPath)) {
+                    zip.remove(relsPath);
+                }
+                removedCount++;
             }
-            removedCount++;
         } catch (e) {
             console.error(`[LayoutCleaner] Failed to remove ${filePath} or its rels: ${e.message}`);
         }
     }
-    console.log(`[LayoutCleaner] Attempted removal of ${filePaths.length} items, successfully removed ${removedCount}.`);
+    console.log(`[LayoutCleaner] Removed ${removedCount}/${filePaths.length} ${prefix.includes('Layout') ? 'layouts' : 'masters'}.`);
+    return removedCount;
 }
 
 async function getSlideLayout(zip, slide) {
     if (!slide?.path) return null;
     try {
-        const slideRelsPath = slide.path.replace(/^(.*\/slides\/)([^/]+)$/, '$1_rels/$2.rels');
+        const slideRelsPath = slide.relsPath || slide.path.replace(/^(.*\/slides\/)([^/]+)$/, '$1_rels/$2.rels');
+        
+        // Check if the rels file exists before trying to parse it
+        if (!zip.file(slideRelsPath)) {
+            console.debug(`[LayoutCleaner] Slide relationship file not found: ${slideRelsPath}`);
+            return null;
+        }
         
         const slideRelsObj = await parseXmlSafely(zip, slideRelsPath);
+        if (slideRelsObj._notFoundOrEmpty || slideRelsObj._parseFailed) {
+            console.debug(`[LayoutCleaner] Failed to parse slide relationships: ${slideRelsPath}`);
+            return null;
+        }
+        
         let slideRels = [];
         if (slideRelsObj.Relationships) {
             const relsArr = Array.isArray(slideRelsObj.Relationships) ? slideRelsObj.Relationships : [slideRelsObj.Relationships];
@@ -227,7 +250,7 @@ async function getSlideLayout(zip, slide) {
         }
         
         if (!slideRels.length) {
-            console.log(`[LayoutCleaner] No valid relationships found for slide: ${slide.path} at ${slideRelsPath}`);
+            console.debug(`[LayoutCleaner] No valid relationships found for slide: ${slide.path} at ${slideRelsPath}`);
             return null;
         }
         
@@ -237,12 +260,12 @@ async function getSlideLayout(zip, slide) {
             return type.toLowerCase().includes('slidelayout') && target;
         });
         if (!layoutRel) {
-            console.log(`[LayoutCleaner] No slideLayout relationship found for slide: ${slide.path}`);
+            console.debug(`[LayoutCleaner] No slideLayout relationship found for slide: ${slide.path}`);
             return null;
         }
         const layoutPath = resolvePath(slideRelsPath, layoutRel['@_Target']);
         if (!layoutPath || !zip.file(layoutPath)) {
-            console.warn(`[LayoutCleaner] Layout target "${layoutRel['@_Target']}" resolved to non-existent file: ${layoutPath || 'resolution failed'} from slide: ${slide.path}`);
+            console.debug(`[LayoutCleaner] Layout target "${layoutRel['@_Target']}" resolved to non-existent file: ${layoutPath || 'resolution failed'} from slide: ${slide.path}`);
             return null;
         }
         
@@ -262,7 +285,19 @@ export async function getLayoutMaster(zip, layoutPath) {
         const masterFiles = Object.keys(zip.files).filter(f => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(f));
         for (const masterPath of masterFiles) {
             const masterRelsPath = masterPath.replace(/^(.*\/slideMasters\/)([^/]+)$/, '$1_rels/$2.rels');
+            
+            // Check if the master rels file exists
+            if (!zip.file(masterRelsPath)) {
+                console.debug(`[LayoutCleaner] Master relationship file not found: ${masterRelsPath}`);
+                continue;
+            }
+            
             const masterRelsObj = await parseXmlSafely(zip, masterRelsPath);
+            if (masterRelsObj._notFoundOrEmpty || masterRelsObj._parseFailed) {
+                console.debug(`[LayoutCleaner] Failed to parse master relationships: ${masterRelsPath}`);
+                continue;
+            }
+            
             let relationships = [];
             if (masterRelsObj.Relationships) {
                 const relsArr = Array.isArray(masterRelsObj.Relationships) ? masterRelsObj.Relationships : [masterRelsObj.Relationships];
@@ -290,7 +325,7 @@ export async function getLayoutMaster(zip, layoutPath) {
         }
         return null;
     } catch (error) {
-        console.error(`[getLayoutMaster] Error finding master for layout ${layoutPath}:`, error.message);
+        console.error(`[LayoutCleaner] Error finding master for layout ${layoutPath}:`, error.message);
         return null;
     }
 }
@@ -298,7 +333,18 @@ export async function getLayoutMaster(zip, layoutPath) {
 async function updateMasterLayoutReferences(zip, masterPath, usedLayoutsSet) {
     const masterRelsPath = masterPath.replace(/^(.*\/slideMasters\/)([^/]+)$/, '$1_rels/$2.rels');
     try {
+        // Check if the master rels file exists
+        if (!zip.file(masterRelsPath)) {
+            console.debug(`[LayoutCleaner] Master relationship file not found: ${masterRelsPath}`);
+            return;
+        }
+        
         const masterRelsObj = await parseXmlSafely(zip, masterRelsPath);
+        if (masterRelsObj._notFoundOrEmpty || masterRelsObj._parseFailed) {
+            console.debug(`[LayoutCleaner] Failed to parse master relationships: ${masterRelsPath}`);
+            return;
+        }
+        
         let relationships = [];
         if (masterRelsObj.Relationships) {
             const relsArr = Array.isArray(masterRelsObj.Relationships) ? masterRelsObj.Relationships : [masterRelsObj.Relationships];
@@ -394,11 +440,11 @@ export async function getUsedLayoutsAndMasters(zip, usedSlides) {
     const usedLayouts = new Set();
     const usedMasters = new Set();
     if (!usedSlides || usedSlides.length === 0) {
-        console.log("[getUsedLayoutsAndMasters] No slides provided, returning empty sets.");
+        console.log("[LayoutCleaner] No slides provided, returning empty sets.");
         return { usedLayouts, usedMasters };
     }
     try {
-        console.log(`[getUsedLayoutsAndMasters] Analyzing ${usedSlides.length} slides...`);
+        console.log(`[LayoutCleaner] Analyzing ${usedSlides.length} slides...`);
         for (const slide of usedSlides) {
             const layoutInfo = await getSlideLayout(zip, slide);
             if (layoutInfo?.path) {
@@ -409,10 +455,10 @@ export async function getUsedLayoutsAndMasters(zip, usedSlides) {
                 }
             }
         }
-        console.log(`[getUsedLayoutsAndMasters] Analysis complete. Found ${usedLayouts.size} layouts and ${usedMasters.size} masters.`);
+        console.log(`[LayoutCleaner] Analysis complete. Found ${usedLayouts.size} layouts and ${usedMasters.size} masters.`);
         return { usedLayouts, usedMasters };
     } catch (error) {
-        console.error('[getUsedLayoutsAndMasters] Error analyzing used layouts and masters:', error.message);
+        console.error('[LayoutCleaner] Error analyzing used layouts and masters:', error.message);
         return { usedLayouts: new Set(), usedMasters: new Set() };
     }
 }

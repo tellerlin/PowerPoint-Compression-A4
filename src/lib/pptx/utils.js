@@ -8,10 +8,24 @@
  */
 export async function parseXmlDOM(zip, path, options = { verbose: true }) {
     try {
-        const xml = await zip.file(path)?.async('string');
+        const file = zip.file(path);
+        if (!file) {
+            if (options.verbose) {
+                // 降低日志级别，对于常见的缺失文件使用debug级别而不是warn
+                const logLevel = path.includes('_rels/') ? 'debug' : 'warn';
+                if (logLevel === 'debug') {
+                    console.debug(`[parseXmlDOM] File not found: ${path}`);
+                } else {
+                    console.warn(`[parseXmlDOM] File not found: ${path}`);
+                }
+            }
+            return null;
+        }
+        
+        const xml = await file.async('string');
         if (!xml) {
             if (options.verbose) {
-                console.warn(`[parseXmlDOM] File not found or empty: ${path}`);
+                console.warn(`[parseXmlDOM] File is empty: ${path}`);
             }
             return null;
         }
