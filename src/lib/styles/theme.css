@@ -3,7 +3,9 @@
 @import './theme/typography.css';
 @import './theme/animation.css';
 
+/* 优化CSS变量定义，减少重复 */
 :root {
+  /* 基础变量 */
   --color-background: var(--light-background);
   --color-surface: var(--light-surface);
   --color-primary: var(--light-primary);
@@ -12,6 +14,11 @@
   --color-text: var(--light-text);
   --color-muted: var(--light-muted);
   --color-border: var(--light-border);
+
+  /* 添加性能优化相关变量 */
+  --content-visibility-setting: auto;
+  --backface-visibility-setting: hidden;
+  --will-change-setting: transform;
 
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Plus Jakarta Sans', var(--font-sans);
@@ -67,4 +74,15 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* 添加性能优化类 */
+.optimize-rendering {
+  content-visibility: var(--content-visibility-setting);
+  contain: content;
+}
+
+.optimize-animation {
+  backface-visibility: var(--backface-visibility-setting);
+  will-change: var(--will-change-setting);
 }

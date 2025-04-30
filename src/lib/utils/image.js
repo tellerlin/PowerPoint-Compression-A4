@@ -129,13 +129,27 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   let resultMethod = 'original';
   let errorMsg = null;
   try {
+    // 添加缓存检查以避免重复压缩
     const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
     let cached = null;
     try {
       cached = imageCache.get(cacheKey);
-    } catch (e) {}
-    if (cached) {
-      return cached;
+      if (cached) {
+        return cached;
+      }
+    } catch (e) {
+      // 缓存错误处理，继续执行压缩
+      console.warn('Image cache error:', e.message);
+    }
+    
+    // 使用Web Worker进行图像压缩以避免阻塞主线程
+    if (typeof Worker !== 'undefined' && originalSize > COMPRESSION_SETTINGS.WORKER_THRESHOLD_SIZE) {
+      try {
+        return await compressImageInWorker(data, quality, originalFormat);
+      } catch (workerError) {
+        console.warn('Worker compression failed, falling back to main thread:', workerError.message);
+        // 继续使用主线程压缩
+      }
     }
     originalFormat = await detectFormat(data);
     if (originalFormat === 'unknown' || originalFormat === 'tiff') {

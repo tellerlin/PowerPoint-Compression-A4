@@ -199,3 +199,20 @@ export async function optimizePPTX(file, options = {}) {
 		throw error;
 	}
 }
+
+// 计算媒体文件总大小的辅助函数
+async function calculateTotalMediaSize(zip, mediaFiles) {
+    let totalSize = 0;
+    const sampleSize = Math.min(mediaFiles.length, 10); // 只取样本以提高性能
+    for (let i = 0; i < sampleSize; i++) {
+        const index = Math.floor(i * mediaFiles.length / sampleSize);
+        try {
+            const file = zip.file(mediaFiles[index]);
+            if (file) {
+                const data = await file.async('uint8array');
+                totalSize += data.byteLength;
+            }
+        } catch (e) {}
+    }
+    return totalSize * mediaFiles.length / sampleSize; // 估算总大小
+}

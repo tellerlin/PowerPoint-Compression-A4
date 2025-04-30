@@ -166,6 +166,26 @@
       }
   });
 
+  // Add debounce function here (moved from outside the script tag)
+  function debounce(func, wait) {
+    let timeout;
+    return function(...args) {
+      const context = this;
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func.apply(context, args), wait);
+    };
+  }
+  
+  // Using debounce to optimize UI updates
+  const debouncedUpdateUI = debounce(() => {
+    // Update UI logic here
+    // You can add specific UI update logic if needed
+  }, 100);
+  
+  // Monitor compression progress changes
+  $: if ($compressionProgress) {
+    debouncedUpdateUI();
+  }
 </script>
 
 <!-- Your <Container> template remains the same -->

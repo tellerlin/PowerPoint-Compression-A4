@@ -1,7 +1,6 @@
 import { writable } from 'svelte/store';
 
-// 创建一个动态加载动画数组
-const loadingAnimations = ['.', '..', '...', '....', '.....'];
+const loadingAnimations = ['.', '..', '...', '....', '.....', '......', '.......', '........', '.........', '..........'];
 
 export const compressionProgress = writable({
 	percentage: 0,
@@ -29,7 +28,7 @@ export const compressionProgress = writable({
 // 启动动画效果
 function startAnimation(baseStatus) {
     let animIndex = 0;
-    // 创建一个计时器，每500毫秒更新一次动画
+    // 减少动画更新间隔，使动画更加流畅
     const timer = setInterval(() => {
         compressionProgress.update(state => {
             animIndex = (animIndex + 1) % loadingAnimations.length;
@@ -39,7 +38,7 @@ function startAnimation(baseStatus) {
                 status: baseStatus + loadingAnimations[animIndex]
             };
         });
-    }, 500);
+    }, 300); // 从500ms减少到300ms，使动画更加流畅
     
     return { baseStatus, timer };
 }
@@ -55,6 +54,14 @@ function updateProgress(type, payload) {
     compressionProgress.update(state => {
         let newState = { ...state };
         let currentPercentage = newState.percentage || 0;
+        
+        // 防止频繁更新导致的性能问题
+        const now = Date.now();
+        if (newState._lastUpdateTime && (now - newState._lastUpdateTime < 50) && type !== 'complete' && type !== 'error') {
+            // 如果更新太频繁且不是关键状态，则跳过此次更新
+            return state;
+        }
+        newState._lastUpdateTime = now;
         
         // 如果有正在运行的动画计时器，先停止它
         if (newState.animationTimer) {
@@ -99,45 +106,51 @@ function updateProgress(type, payload) {
             case 'mediaCount':
                 newState.mediaCount = payload.count;
                 newState.processedMediaCount = 0;
-                // 媒体计数阶段占总进度的25%
                 newState.percentage = Math.max(currentPercentage, 25);
                 
                 if (payload.count > 0) {
-                    newState.status = 'Compressing media...';
+                    const baseStatus = 'Compressing media';
+                    const animation = startAnimation(baseStatus);
+                    newState.status = baseStatus + loadingAnimations[newState.animationIndex];
+                    newState.animationTimer = animation.timer;
                 } else {
                     newState.status = 'No media to compress.';
                 }
                 break;
+                
             case 'media':
                 newState.processedMediaCount = payload.fileIndex;
                 
-                // 只有当估计时间大于1秒时才更新显示，否则设为null（不显示）
                 if (payload.estimatedTimeRemaining && payload.estimatedTimeRemaining > 1) {
                     newState.estimatedTimeRemaining = payload.estimatedTimeRemaining;
                 } else {
                     newState.estimatedTimeRemaining = null;
                 }
                 
-                // 媒体处理阶段从25%到85%，占总进度的60%
                 const mediaPhaseStart = 25;
                 const mediaPhaseWeight = 60;
                 
-                // 如果没有媒体文件，直接设为该阶段结束
                 let mediaProgress;
                 if (newState.mediaCount <= 0) {
                     mediaProgress = 1;
                 } else {
-                    // 确保不会除以0，并且进度不会超过1
                     mediaProgress = Math.min(1, payload.fileIndex / Math.max(1, payload.totalFiles));
                 }
                 
-                // 计算当前阶段的百分比
                 const calculatedPercentage = mediaPhaseStart + (mediaProgress * mediaPhaseWeight);
-                
-                // 确保百分比不会回撤，但也不会超过该阶段的最大值
                 newState.percentage = Math.max(currentPercentage, Math.min(calculatedPercentage, mediaPhaseStart + mediaPhaseWeight));
                 
-                newState.status = `Compressing media (${payload.fileIndex}/${payload.totalFiles})...`;
+                // 为媒体压缩添加动画效果
+                const baseMediaStatus = `Compressing media (${payload.fileIndex}/${payload.totalFiles})`;
+                
+                // 如果已经有动画计时器，只更新基础状态文本
+                if (newState.animationTimer) {
+                    stopAnimation(newState.animationTimer);
+                }
+                
+                const mediaAnimation = startAnimation(baseMediaStatus);
+                newState.status = baseMediaStatus + loadingAnimations[newState.animationIndex];
+                newState.animationTimer = mediaAnimation.timer;
                 break;
             case 'finalize':
                 // 最终处理阶段从85%到99%，占总进度的14%
