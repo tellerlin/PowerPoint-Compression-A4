@@ -212,7 +212,7 @@
            <Alert variant="destructive" title="Compression Error">
              {$compressionProgress.error}
              <div class="mt-4">
-               <Button on:click={resetCompression} variant="outline">Try Again</Button>
+               <Button on:click={resetCompression} variant="outline" class="w-full sm:w-auto">Try Again</Button>
              </div>
            </Alert>
         {:else}
@@ -260,10 +260,12 @@
                   <p class="font-medium text-green-400">{compressionStats.savedPercentage}%</p>
                 </div>
               </div>
-              <div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
-                <Button on:click={handleDownload} variant="default" size="lg" class="w-full sm:w-auto">Download Compressed File</Button>
-                <Button on:click={resetCompression} variant="outline" size="lg" class="w-full sm:w-auto">Compress Another File</Button>
-              </div>
+
+<div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
+  <Button on:click={handleDownload} variant="default" size="lg" classList="w-full sm:w-auto">Download Compressed File</Button>
+  <Button on:click={resetCompression} variant="outline" size="lg" classList="w-full sm:w-auto">Compress Another File</Button>
+</div>
+
             </div>
           {:else if !processing && !$compressionProgress.error}
              <!-- Fallback / Initial state within processing block -->

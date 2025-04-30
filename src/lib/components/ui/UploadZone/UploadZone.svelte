@@ -1,5 +1,5 @@
 <script>
-  import { Button } from '../Button';
+  import { Button } from '$lib/components/ui/Button';
   import { handleKeyDown } from './keyboard';
   import { gtag, initializeGoogleAnalytics } from '$lib/utils/analytics';
   
