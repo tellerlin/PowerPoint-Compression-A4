@@ -2,7 +2,7 @@ import { parseXml, buildXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX, SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX } from './constants';
 import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters, analyzeLayoutsAndMasters } from './layout-cleaner';
 import { findMediaFiles } from './media';
-import { resolvePath, parseXmlDOM } from './utils';
+import { resolvePath, parseXmlDOM, processGenericRelationshipFiles } from './utils';
 
 export async function cleanUnusedResources(zip, onProgress, options) {
     let finalUsedLayouts = new Set();
@@ -103,50 +103,51 @@ async function processRelationshipFiles(zip, usedSlides, usedLayouts, usedMaster
     await processGenericRelationshipFiles(zip, relsFilesToCheck, usedMedia, "slide/layout/master");
 }
 
-async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, context) {
-    if (!relsFilePaths || relsFilePaths.length === 0) {
-        return;
-    }
-    await Promise.all(relsFilePaths.map(async (relsPath) => {
-        try {
-            const relsDoc = await parseXmlDOM(zip, relsPath);
-            if (!relsDoc) {
-                console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
-                return;
-            }
-            const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
-            if (!relationships.length) {
-                console.warn(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
-            }
-            relationships.forEach(rel => {
-                if (!rel) return;
-                const relType = rel.getAttribute('Type');
-                const target = rel.getAttribute('Target');
-                const targetMode = rel.getAttribute('TargetMode');
-                if (!relType || !target) {
-                    console.warn(`[processGenericRelationshipFiles] Relationship missing Type or Target: ${rel.outerHTML}`);
-                    return;
-                }
-                if (targetMode === 'External') {
-                    return;
-                }
-                if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ||
-                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' ||
-                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' ||
-                    relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
-                    let mediaPath = resolvePath(relsPath, target);
-                    if (mediaPath && mediaPath.startsWith(MEDIA_PATH_PREFIX)) {
-                        usedMedia.add(mediaPath);
-                    } else {
-                        console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" (target="${target}", relsPath="${relsPath}") does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
-                    }
-                }
-            });
-        } catch (error) {
-            console.error(`[processGenericRelationshipFiles] Error processing ${relsPath} (context: ${context}):`, error.message, error.stack);
-        }
-    }));
-}
+// 删除这个函数定义，因为它已经在 utils.js 中定义了
+// async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, context) {
+//     if (!relsFilePaths || relsFilePaths.length === 0) {
+//         return;
+//     }
+//     await Promise.all(relsFilePaths.map(async (relsPath) => {
+//         try {
+//             const relsDoc = await parseXmlDOM(zip, relsPath);
+//             if (!relsDoc) {
+//                 console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
+//                 return;
+//             }
+//             const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
+//             if (!relationships.length) {
+//                 console.warn(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
+//             }
+//             relationships.forEach(rel => {
+//                 if (!rel) return;
+//                 const relType = rel.getAttribute('Type');
+//                 const target = rel.getAttribute('Target');
+//                 const targetMode = rel.getAttribute('TargetMode');
+//                 if (!relType || !target) {
+//                     console.warn(`[processGenericRelationshipFiles] Relationship missing Type or Target: ${rel.outerHTML}`);
+//                     return;
+//                 }
+//                 if (targetMode === 'External') {
+//                     return;
+//                 }
+//                 if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ||
+//                     relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' ||
+//                     relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' ||
+//                     relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
+//                     let mediaPath = resolvePath(relsPath, target);
+//                     if (mediaPath && mediaPath.startsWith(MEDIA_PATH_PREFIX)) {
+//                         usedMedia.add(mediaPath);
+//                     } else {
+//                         console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" (target="${target}", relsPath="${relsPath}") does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
+//                     }
+//                 }
+//             });
+//         } catch (error) {
+//             console.error(`[processGenericRelationshipFiles] Error processing ${relsPath} (context: ${context}):`, error.message, error.stack);
+//         }
+//     }));
+// }
 
 async function getUsedSlides(zip) {
     try {
