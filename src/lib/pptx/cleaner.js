@@ -26,6 +26,9 @@ export async function cleanUnusedResources(zip, onProgress, options) {
         finalUsedLayouts = analysisResult.usedLayouts instanceof Set ? analysisResult.usedLayouts : new Set();
         finalUsedMasters = analysisResult.usedMasters instanceof Set ? analysisResult.usedMasters : new Set();
         
+        // === 新增：清理注释和未引用嵌入对象 ===
+        await removeAllComments(zip);
+        await removeUnusedEmbeddedObjects(zip, usedSlides, finalUsedLayouts, finalUsedMasters);
         console.log(`[Cleaner] Analysis results - Used Layouts: ${finalUsedLayouts.size}, Used Masters: ${finalUsedMasters.size}`);
         
         // 3. 收集和处理媒体文件
@@ -343,4 +346,260 @@ async function updateContentTypes(zip) {
     } catch (error) {
         console.error('[updateContentTypes] Error updating content types:', error.message, error.stack);
     }
+}
+
+
+/**
+ * 删除所有注释（包括幻灯片、notes、comments等）
+ */
+export async function removeAllComments(zip) {
+    console.log('[removeAllComments] Starting removal of all comments (slides, notes, comments*.xml)...');
+    
+    // 统计信息
+    let removedCommentFiles = 0;
+    let cleanedSlides = 0;
+    let totalNotesFiles = 0;
+    let totalSlideFiles = 0;
+    let notesFilesWithoutComments = 0;
+    let slideFilesWithoutComments = 0;
+    
+    // 1. 删除comments*.xml及其rels
+    const commentFileRegex = /^ppt\/comments\d+\.xml$/;
+    const commentRelsRegex = /^ppt\/_rels\/comments\d+\.xml\.rels$/;
+    const notesRegex = /^ppt\/notesSlides\/notesSlide\d+\.xml$/;
+    
+    // 记录所有文件类型
+    const allFiles = Object.keys(zip.files);
+    const commentFiles = allFiles.filter(path => commentFileRegex.test(path));
+    const commentRelsFiles = allFiles.filter(path => commentRelsRegex.test(path));
+    const notesFiles = allFiles.filter(path => notesRegex.test(path));
+    const slideFiles = allFiles.filter(path => path.startsWith('ppt/slides/slide') && path.endsWith('.xml'));
+    
+    console.log(`[removeAllComments] Found ${commentFiles.length} comment files, ${commentRelsFiles.length} comment rels files, ${notesFiles.length} notes files, ${slideFiles.length} slide files`);
+    
+    // 删除comments*.xml及其rels
+    for (const filePath of [...commentFiles, ...commentRelsFiles]) {
+        zip.remove(filePath);
+        removedCommentFiles++;
+        console.log(`[removeAllComments] Removed comment file: ${filePath}`);
+    }
+    
+    // 2. 处理notes文件
+    for (const filePath of notesFiles) {
+        totalNotesFiles++;
+        try {
+            const xmlStr = await zip.file(filePath).async('string');
+            if (!xmlStr) {
+                console.log(`[removeAllComments] Notes file is empty: ${filePath}`);
+                continue;
+            }
+            
+            console.log(`[removeAllComments] Processing notes file: ${filePath} (size: ${xmlStr.length} bytes)`);
+            
+            // 检查是否包含注释节点
+            const hasCommentsList = xmlStr.includes('<p:cmLst') || xmlStr.includes('<p:cm ') || xmlStr.includes('<p:comment');
+            
+            if (hasCommentsList) {
+                // 使用正则移除注释节点
+                const originalLength = xmlStr.length;
+                const cleaned = xmlStr
+                    .replace(/<p:cmLst[\s\S]*?<\/p:cmLst>/g, '')
+                    .replace(/<p:cm[\s\S]*?<\/p:cm>/g, '')
+                    .replace(/<p:comment[\s\S]*?<\/p:comment>/g, '');
+                
+                if (cleaned !== xmlStr) {
+                    zip.file(filePath, cleaned);
+                    cleanedSlides++;
+                    console.log(`[removeAllComments] Cleaned comments from notes file: ${filePath} (removed ${originalLength - cleaned.length} bytes)`);
+                }
+            } else {
+                notesFilesWithoutComments++;
+                console.log(`[removeAllComments] No comment nodes found in notes file: ${filePath}`);
+            }
+        } catch (error) {
+            console.error(`[removeAllComments] Error processing notes file ${filePath}:`, error.message);
+        }
+    }
+    
+    // 3. 处理slide文件
+    for (const filePath of slideFiles) {
+        totalSlideFiles++;
+        try {
+            const xmlStr = await zip.file(filePath).async('string');
+            if (!xmlStr) {
+                console.log(`[removeAllComments] Slide file is empty: ${filePath}`);
+                continue;
+            }
+            
+            console.log(`[removeAllComments] Processing slide file: ${filePath} (size: ${xmlStr.length} bytes)`);
+            
+            // 检查是否包含注释节点
+            const hasCommentsList = xmlStr.includes('<p:cmLst') || xmlStr.includes('<p:cm ') || xmlStr.includes('<p:comment');
+            
+            if (hasCommentsList) {
+                // 使用正则移除注释节点
+                const originalLength = xmlStr.length;
+                const cleaned = xmlStr
+                    .replace(/<p:cmLst[\s\S]*?<\/p:cmLst>/g, '')
+                    .replace(/<p:cm[\s\S]*?<\/p:cm>/g, '')
+                    .replace(/<p:comment[\s\S]*?<\/p:comment>/g, '');
+                
+                if (cleaned !== xmlStr) {
+                    zip.file(filePath, cleaned);
+                    cleanedSlides++;
+                    console.log(`[removeAllComments] Cleaned comments from slide file: ${filePath} (removed ${originalLength - cleaned.length} bytes)`);
+                }
+            } else {
+                slideFilesWithoutComments++;
+                console.log(`[removeAllComments] No comment nodes found in slide file: ${filePath}`);
+            }
+        } catch (error) {
+            console.error(`[removeAllComments] Error processing slide file ${filePath}:`, error.message);
+        }
+    }
+    
+    // 4. 尝试直接删除整个notesSlides目录（如果业务允许）
+    // 注意：取消注释以下代码将删除所有讲义页
+    /*
+    if (notesFiles.length > 0) {
+        console.log(`[removeAllComments] Removing all notes slides (${notesFiles.length} files)`);
+        for (const filePath of notesFiles) {
+            zip.remove(filePath);
+        }
+        // 同时删除notesSlides的rels文件
+        const notesRelsFiles = allFiles.filter(path => path.startsWith('ppt/notesSlides/_rels/'));
+        for (const filePath of notesRelsFiles) {
+            zip.remove(filePath);
+        }
+    }
+    */
+    
+    console.log(`[removeAllComments] Summary: Removed ${removedCommentFiles} comment files, cleaned ${cleanedSlides} files with comments`);
+    console.log(`[removeAllComments] Notes files: ${totalNotesFiles} total, ${notesFilesWithoutComments} without comments`);
+    console.log(`[removeAllComments] Slide files: ${totalSlideFiles} total, ${slideFilesWithoutComments} without comments`);
+}
+
+/**
+ * 清理未被引用的嵌入对象（如OLE、embeddings等）
+ */
+export async function removeUnusedEmbeddedObjects(zip, usedSlides, usedLayouts, usedMasters) {
+    console.log('[removeUnusedEmbeddedObjects] Starting cleanup of unused embedded objects...');
+    
+    // 1. 收集所有嵌入对象文件
+    const embeddingFiles = Object.keys(zip.files).filter(path => 
+        path.startsWith('ppt/embeddings/') || 
+        path.startsWith('ppt/oleObjects/') ||
+        path.includes('/activeX/') ||
+        path.includes('/ctrlProps/')
+    );
+    
+    if (embeddingFiles.length === 0) {
+        console.log('[removeUnusedEmbeddedObjects] No embedded object files found in the presentation');
+        return;
+    }
+    
+    console.log(`[removeUnusedEmbeddedObjects] Found ${embeddingFiles.length} embedded object files`);
+    
+    // 2. 收集所有关系文件，不仅仅是slide/layout/master
+    const allRelsFiles = Object.keys(zip.files).filter(path => 
+        path.includes('/_rels/') && path.endsWith('.rels')
+    );
+    
+    console.log(`[removeUnusedEmbeddedObjects] Analyzing ${allRelsFiles.length} relationship files for embedded object references`);
+    
+    // 3. 收集所有被引用的嵌入对象
+    const usedEmbeddings = new Set();
+    const embeddingRelTypes = [
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject',
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/package',
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/activeXControl',
+        'http://schemas.microsoft.com/office/2006/relationships/activeXControlBinary',
+        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/control'
+    ];
+    
+    // 记录每种类型找到的引用数量
+    const typeCount = {};
+    embeddingRelTypes.forEach(type => typeCount[type] = 0);
+    
+    // 分析所有关系文件
+    for (const relsPath of allRelsFiles) {
+        try {
+            const xmlStr = await zip.file(relsPath).async('string');
+            if (!xmlStr) continue;
+            
+            // 使用DOM解析而不是正则，更健壮
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(xmlStr, 'application/xml');
+            const relationships = doc.querySelectorAll('Relationship');
+            
+            if (relationships.length === 0) {
+                continue;
+            }
+            
+            // 检查每个关系
+            for (const rel of relationships) {
+                const type = rel.getAttribute('Type');
+                const target = rel.getAttribute('Target');
+                
+                if (!type || !target) continue;
+                
+                // 检查是否是嵌入对象类型
+                if (embeddingRelTypes.includes(type) || 
+                    type.includes('/oleObject') || 
+                    type.includes('/package') || 
+                    type.includes('/activeX') || 
+                    type.includes('/control')) {
+                    
+                    // 记录类型统计
+                    if (embeddingRelTypes.includes(type)) {
+                        typeCount[type]++;
+                    } else {
+                        typeCount['other'] = (typeCount['other'] || 0) + 1;
+                    }
+                    
+                    // 解析目标路径
+                    let resolvedPath = resolvePath(relsPath, target);
+                    if (resolvedPath) {
+                        usedEmbeddings.add(resolvedPath);
+                        console.log(`[removeUnusedEmbeddedObjects] Found reference to embedded object: ${resolvedPath} (in ${relsPath})`);
+                    }
+                }
+                
+                // 特殊处理：检查Target属性中是否包含embeddings路径
+                if (target.includes('/embeddings/') || 
+                    target.includes('/oleObjects/') || 
+                    target.includes('/activeX/') || 
+                    target.includes('/ctrlProps/')) {
+                    
+                    let resolvedPath = resolvePath(relsPath, target);
+                    if (resolvedPath) {
+                        usedEmbeddings.add(resolvedPath);
+                        console.log(`[removeUnusedEmbeddedObjects] Found direct path reference to embedded object: ${resolvedPath} (in ${relsPath})`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error(`[removeUnusedEmbeddedObjects] Error processing relationship file ${relsPath}:`, error.message);
+        }
+    }
+    
+    // 4. 删除未被引用的嵌入对象
+    const unusedEmbeddings = embeddingFiles.filter(path => !usedEmbeddings.has(path));
+    
+    console.log(`[removeUnusedEmbeddedObjects] Relationship type statistics:`, typeCount);
+    console.log(`[removeUnusedEmbeddedObjects] Found ${usedEmbeddings.size} used embedded objects and ${unusedEmbeddings.length} unused embedded objects`);
+    
+    // 删除未被引用的嵌入对象
+    let removedCount = 0;
+    for (const path of unusedEmbeddings) {
+        try {
+            zip.remove(path);
+            removedCount++;
+            console.log(`[removeUnusedEmbeddedObjects] Removed unused embedded object: ${path}`);
+        } catch (error) {
+            console.error(`[removeUnusedEmbeddedObjects] Error removing embedded object ${path}:`, error.message);
+        }
+    }
+    
+    console.log(`[removeUnusedEmbeddedObjects] Finished. Removed ${removedCount}/${unusedEmbeddings.length} unused embedded objects`);
 }
