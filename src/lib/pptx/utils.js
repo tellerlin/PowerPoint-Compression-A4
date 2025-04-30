@@ -11,9 +11,8 @@ export async function parseXmlDOM(zip, path, options = { verbose: true }) {
         const file = zip.file(path);
         if (!file) {
             if (options.verbose) {
-                // 降低日志级别，对于常见的缺失文件使用debug级别而不是warn
-                const logLevel = path.includes('_rels/') ? 'debug' : 'warn';
-                if (logLevel === 'debug') {
+                // 对于关系文件使用debug级别日志，其他文件使用warn级别
+                if (path.includes('_rels/') && path.endsWith('.xml.rels')) {
                     console.debug(`[parseXmlDOM] File not found: ${path}`);
                 } else {
                     console.warn(`[parseXmlDOM] File not found: ${path}`);

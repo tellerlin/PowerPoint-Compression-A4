@@ -6,6 +6,12 @@ async function parseXmlSafely(zip, path) {
     try {
         const xmlString = await zip.file(path)?.async('string');
         if (!xmlString) {
+            // 对于关系文件，使用更低级别的日志
+            if (path.includes('_rels/') && path.endsWith('.xml.rels')) {
+                console.debug(`[LayoutCleaner] File not found or empty: ${path}`);
+            } else {
+                console.warn(`[LayoutCleaner] File not found or empty: ${path}`);
+            }
             return { _notFoundOrEmpty: true };
         }
         const parsed = await parseXml(xmlString);

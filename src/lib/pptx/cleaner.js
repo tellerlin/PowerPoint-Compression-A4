@@ -161,7 +161,7 @@ async function getUsedSlides(zip) {
             const type = rel.getAttribute('Type');
             const target = rel.getAttribute('Target');
             if (!type || !target) {
-                console.warn(`[getUsedSlides] Relationship missing Type or Target: ${rel.outerHTML}`);
+                console.debug(`[getUsedSlides] Relationship missing Type or Target: ${rel.outerHTML}`);
                 return false;
             }
             return type === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide';
@@ -174,9 +174,17 @@ async function getUsedSlides(zip) {
                 const filename = parts.pop();
                 const dir = parts.join('/');
                 const slideRelsPath = `${dir}/_rels/${filename}.rels`;
-                return { rId, path: resolvedPath, relsPath: slideRelsPath };
+                
+                // 检查关系文件是否存在，但不抛出警告
+                const hasRels = zip.file(slideRelsPath) !== null;
+                
+                return { 
+                    rId, 
+                    path: resolvedPath, 
+                    relsPath: hasRels ? slideRelsPath : null 
+                };
             } else {
-                console.warn(`[getUsedSlides] Target file does not exist: ${resolvedPath} (target=${target})`);
+                console.debug(`[getUsedSlides] Target file does not exist: ${resolvedPath} (target=${target})`);
             }
             return null;
         }).filter(s => s);
