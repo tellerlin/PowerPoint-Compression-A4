@@ -9,8 +9,7 @@
       enabled: true,
       quality: 0.7
     },
-    removeHiddenSlides: false,
-    removeUnusedLayouts: true  // 默认启用
+    removeHiddenSlides: false
   };
   
   function handleQualityChange(event) {
@@ -21,6 +20,8 @@
   function handleOptionChange() {
     dispatch('change', options);
   }
+  
+  $: compressionPercentage = Math.round((1 - options.compressImages.quality) * 100);
 </script>
 
 <div class="compression-options">
@@ -44,7 +45,8 @@
           on:change={handleQualityChange}
         />
         <div class="quality-labels">
-          <span>Higher compression</span>
+          <span>Better compression</span>
+          <span class="percentage-value">{compressionPercentage}% compression</span>
           <span>Better quality</span>
         </div>
       </div>
@@ -60,19 +62,8 @@
       />
       Remove hidden slides
     </label>
-  </div>
-  
-  <div class="option">
-    <label>
-      <input 
-        type="checkbox" 
-        bind:checked={options.removeUnusedLayouts} 
-        on:change={handleOptionChange}
-      />
-      Remove unused layouts and masters
-    </label>
     <div class="option-description">
-      Remove layouts and masters not referenced by any slides to reduce file size
+      Remove hidden slides to reduce file size
     </div>
   </div>
 </div>
@@ -89,11 +80,13 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    width: 100%;
   }
   
   .quality-slider {
     margin-top: 0.5rem;
     margin-left: 1.5rem;
+    width: calc(100% - 1.5rem);
   }
   
   .quality-labels {
@@ -102,6 +95,16 @@
     font-size: 0.75rem;
     color: var(--text-secondary);
     margin-top: 0.25rem;
+    position: relative;
+    width: 100%;
+  }
+  
+  .percentage-value {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    font-weight: 500;
+    color: var(--text-primary);
   }
   
   .option-description {

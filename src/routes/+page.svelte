@@ -1,6 +1,5 @@
 <script>
   import { optimizePPTX } from '$lib/pptx/optimizer.js';
-  // Import the store and the functions to update/reset it
   import { compressionProgress, updateProgress, resetProgress as resetProgressStore } from '$lib/pptx/progress.js';
   import { createDownloadLink, cleanupDownload } from '$lib/utils/file.js';
   import { Button } from '$lib/components/ui/Button';
@@ -8,44 +7,42 @@
   import { Container } from '$lib/components/ui';
   import { browser } from '$app/environment';
   import { onDestroy } from 'svelte';
+  import CompressionOptions from '$lib/components/CompressionOptions.svelte';
 
   let files;
   let processing = false;
-  // Remove progressManager variable
-  // let progressManager;
   let downloadUrl = null;
   let downloadLink = null;
 
-  // Unified bytes formatting function
+  let compressionOptions = {
+    compressImages: {
+      enabled: true,
+      quality: 0.7
+    },
+    removeHiddenSlides: true,
+    removeUnusedLayouts: true
+  };
+
+  function handleOptionsChange(event) {
+    compressionOptions = event.detail;
+  }
+
   function formatBytes(bytes, decimals = 2) {
-    // Ensure bytes is a non-negative number
     const numericBytes = Number(bytes);
     if (isNaN(numericBytes) || numericBytes <= 0) return '0 Bytes';
-
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-
     const i = Math.floor(Math.log(numericBytes) / Math.log(k));
     const formattedValue = parseFloat((numericBytes / Math.pow(k, i)).toFixed(dm));
-
-    // Ensure the index is within the bounds of the sizes array
     const sizeIndex = Math.min(i, sizes.length - 1);
-
     return `${formattedValue} ${sizes[sizeIndex]}`;
   }
 
-
-  // File change listener (optional, just for logging)
-  $: if (files && browser) {
-      // console.log('Files selected:', files);
-  }
-
+  $: if (files && browser) {}
   $: fileName = files?.[0]?.name;
   $: fileInfo = $compressionProgress.fileInfo;
   $: compressionComplete = $compressionProgress.percentage === 100 && !$compressionProgress.error;
-
-  // Reactive statement for stats using the store directly
   $: compressionStats = {
     originalSize: $compressionProgress.stats.originalSize || 0,
     compressedSize: $compressionProgress.stats.compressedSize || 0,
@@ -59,114 +56,91 @@
   async function handleSubmit() {
     const file = files?.[0];
     if (!file) return;
-
+    if (!file.name.toLowerCase().endsWith('.pptx')) {
+      updateProgress('error', { message: "Only PowerPoint (.pptx) files are supported." });
+      return;
+    }
+    if (file.size > 314572800) {
+      updateProgress('error', { message: `File size (${formatBytes(file.size)}) exceeds the 300MB limit.` });
+      return;
+    }
     processing = true;
-    resetProgressStore(); // Reset progress before starting
-
+    resetProgressStore();
     try {
-      // Call optimizePPTX and pass the updateProgress function directly
       const optimizedBlob = await optimizePPTX(file, {
-        compressImages: { quality: 0.9 },
-        removeHiddenSlides: true,
-        removeUnusedLayouts: true,
-        // cleanMediaInUnusedLayouts: true, // This is handled by cleaner.js default now
-        // preprocessImages: false, // Keep defaults simple unless needed
-        // debug: true, // Keep debug true for now if needed
-        onProgress: updateProgress // Pass the imported function directly
+        compressImages: compressionOptions.compressImages.enabled
+          ? { quality: compressionOptions.compressImages.quality }
+          : false,
+        removeHiddenSlides: compressionOptions.removeHiddenSlides,
+        removeUnusedLayouts: compressionOptions.removeUnusedLayouts,
+        onProgress: updateProgress
       });
-
       if (!optimizedBlob) {
-        // updateProgress should have been called with an error by optimizer.js
-        // If not, trigger a generic error state here
         if (!$compressionProgress.error) {
-             updateProgress('error', { message: "Processing completed but no file was generated." });
+          updateProgress('error', { message: "Processing completed but no file was generated." });
         }
-        return; // Stop execution
+        return;
       }
-
-      // Create download link only if successful and blob exists
       const { url, a } = createDownloadLink(optimizedBlob, file.name);
       downloadUrl = url;
       downloadLink = a;
-
     } catch (error) {
-      // optimizePPTX should call onProgress('error', ...) on failure.
-      // If it somehow throws before calling onProgress, catch it here.
-      if (!$compressionProgress.error) { // Check if progress store already has error
-          updateProgress('error', {
-              message: error.message || "File processing failed unexpectedly.",
-              stats: $compressionProgress.stats // Pass current stats
-          });
+      if (!$compressionProgress.error) {
+        updateProgress('error', {
+          message: error.message || "File processing failed unexpectedly.",
+          stats: $compressionProgress.stats
+        });
       }
     } finally {
-       // Although processing might finish (success/error), keep processing=true
-       // until user explicitly resets or downloads. Reset button handles this.
-       // processing = false; // Reconsider this - maybe set to false only on error?
-       if ($compressionProgress.error) {
-           processing = false; // Allow retry if there was an error
-       }
+      if ($compressionProgress.error) {
+        processing = false;
+      }
     }
   }
 
   function handleDownload() {
     if (!browser || !downloadLink || !downloadUrl) return;
-
-    // Detect Safari browser
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
     if (isSafari) {
-      // Special handling for Safari - opening in new tab often works better
       try {
         const newWindow = window.open(downloadUrl, '_blank');
-        if (!newWindow) { // Handle pop-up blocker
-             console.warn('Safari download might be blocked by pop-up blocker. Trying direct click.');
-             downloadLink.click();
+        if (!newWindow) {
+          downloadLink.click();
         }
       } catch (error) {
-        console.error('Safari download failed:', error);
-        // Fallback: direct link click
         downloadLink.click();
       }
     } else {
-      // Normal handling for other browsers
       downloadLink.click();
     }
-     // Optionally reset after download starts
-     // resetCompression();
   }
 
   function resetCompression() {
     files = null;
     processing = false;
     if (downloadUrl) {
-      cleanupDownload(downloadUrl); // Clean up Object URL
+      cleanupDownload(downloadUrl);
       downloadUrl = null;
       downloadLink = null;
     }
-    resetProgressStore(); // Use the imported reset function
-
-    // Trigger file input click after reset
+    resetProgressStore();
     if (browser) {
-      // Use requestAnimationFrame to ensure DOM updates before click
       requestAnimationFrame(() => {
         const fileUpload = document.getElementById('file-upload');
         if (fileUpload) {
-            // Reset the input value to allow selecting the same file again
-            fileUpload.value = '';
-            fileUpload.click();
+          fileUpload.value = '';
+          fileUpload.click();
         }
       });
     }
   }
 
-  // Cleanup Object URL when component is destroyed
   onDestroy(() => {
-      if (downloadUrl) {
-          cleanupDownload(downloadUrl);
-      }
+    if (downloadUrl) {
+      cleanupDownload(downloadUrl);
+    }
   });
 
-  // Add debounce function here (moved from outside the script tag)
   function debounce(func, wait) {
     let timeout;
     return function(...args) {
@@ -175,16 +149,24 @@
       timeout = setTimeout(() => func.apply(context, args), wait);
     };
   }
-  
-  // Using debounce to optimize UI updates
-  const debouncedUpdateUI = debounce(() => {
-    // Update UI logic here
-    // You can add specific UI update logic if needed
-  }, 100);
-  
-  // Monitor compression progress changes
+
+  const debouncedUpdateUI = debounce(() => {}, 100);
+
   $: if ($compressionProgress) {
     debouncedUpdateUI();
+  }
+
+  function cancelCompression() {
+    if (processing) {
+      processing = false;
+      resetProgressStore();
+      if (downloadUrl) {
+        cleanupDownload(downloadUrl);
+        downloadUrl = null;
+        downloadLink = null;
+      }
+      updateProgress('info', { message: "Compression cancelled by user." });
+    }
   }
 </script>
 
@@ -219,6 +201,10 @@
         <div class="mt-4 p-3 bg-gray-700 rounded-md text-gray-200 text-sm">
           <p class="font-medium truncate">Selected: {files[0].name} ({formatBytes(files[0].size)})</p>
         </div>
+        
+        <div class="mt-4">
+          <CompressionOptions options={compressionOptions} on:change={handleOptionsChange} />
+        </div>
 
         <div class="mt-5 flex justify-center">
           <Button on:click={handleSubmit} size="lg">Start Compression</Button>
@@ -247,9 +233,21 @@
             <div class="w-full bg-gray-700 rounded-full h-2.5 overflow-hidden">
               <div
                 class="bg-gradient-to-r from-blue-500 to-purple-500 h-2.5 rounded-full transition-all duration-300 ease-out"
-                style="width: {$compressionProgress.percentage}%"
+                style="width: {$compressionProgress.percentage || 0}%"
               ></div>
             </div>
+            
+            <!-- 添加更详细的处理信息 -->
+            {#if $compressionProgress.processedMediaCount > 0 && $compressionProgress.mediaCount > 0}
+              <div class="mt-2 text-xs text-gray-400">
+                Processing media: {$compressionProgress.processedMediaCount}/{$compressionProgress.mediaCount}
+                {#if $compressionProgress.stats.savedMediaSize > 0}
+                  <span class="ml-2 text-green-400">
+                    Saved {($compressionProgress.stats.savedMediaSize / (1024 * 1024)).toFixed(2)} MB from media
+                  </span>
+                {/if}
+              </div>
+            {/if}
           </div>
 
           {#if fileInfo}
@@ -280,15 +278,19 @@
                   <p class="font-medium text-green-400">{compressionStats.savedPercentage}%</p>
                 </div>
               </div>
-
-<div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
-  <Button on:click={handleDownload} variant="default" size="lg" classList="w-full sm:w-auto">Download Compressed File</Button>
-  <Button on:click={resetCompression} variant="outline" size="lg" classList="w-full sm:w-auto">Compress Another File</Button>
-</div>
-
+              <div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
+                <Button on:click={handleDownload} variant="default" size="lg" classList="w-full sm:w-auto">Download Compressed File</Button>
+                <Button on:click={resetCompression} variant="outline" size="lg" classList="w-full sm:w-auto">Compress Another File</Button>
+              </div>
+            </div>
+          {/if}
+          {#if $compressionProgress.percentage > 0 && $compressionProgress.percentage < 100}
+            <div class="mt-4">
+              <Button on:click={cancelCompression} variant="outline" size="sm">
+                Cancel Compression
+              </Button>
             </div>
           {:else if !processing && !$compressionProgress.error}
-             <!-- Fallback / Initial state within processing block -->
              <p class="text-center text-gray-400">Preparing...</p>
           {/if}
         {/if}

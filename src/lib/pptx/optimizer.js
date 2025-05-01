@@ -58,7 +58,6 @@ export async function optimizePPTX(file, options = {}) {
 		onProgress('init', { percentage: 15, status: 'Cleaning unused resources...' });
 		try {
             const cleanupSuccess = await cleanUnusedResources(zip, onProgress, {
-                removeUnusedLayouts: options.removeUnusedLayouts,
                 cleanMediaInUnusedLayouts: options.cleanMediaInUnusedLayouts,
             });
              if (!cleanupSuccess) {
@@ -135,6 +134,21 @@ export async function optimizePPTX(file, options = {}) {
 							failedMediaCount++;
 						}
 					});
+
+					// 添加内存清理
+					try {
+					// 释放不再需要的变量
+					batchPromises.length = 0;
+					batch.length = 0;
+					
+					// 尝试触发垃圾回收
+					if (i % 3 === 0) { // 每处理3批次尝试一次
+					await new Promise(resolve => setTimeout(resolve, 10)); // 短暂暂停
+					attemptGarbageCollection();
+					}
+					} catch (e) {
+					console.warn('Memory cleanup failed:', e);
+					}
 					const elapsed = Date.now() - startTime;
 					const currentProcessedTotal = processedMediaCount + failedMediaCount;
 					const estimatedTotalTime = mediaFiles.length > 0 && currentProcessedTotal > 0 ? (elapsed / currentProcessedTotal) * mediaFiles.length : 0;

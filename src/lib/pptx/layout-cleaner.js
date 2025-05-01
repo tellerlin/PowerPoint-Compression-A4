@@ -2,30 +2,6 @@ import { parseXml, buildXml } from './xml/parser';
 import { SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX, CONTENT_TYPES_PATH } from './constants';
 import { resolvePath, parseXmlDOM, parseXmlSafely } from './utils';
 
-// 删除这个函数定义，因为它已经在 utils.js 中定义了
-// async function parseXmlSafely(zip, path) {
-//     try {
-//         const xmlString = await zip.file(path)?.async('string');
-//         if (!xmlString) {
-//             // 对于关系文件，使用更低级别的日志
-//             if (path.includes('_rels/') && path.endsWith('.xml.rels')) {
-//                 console.debug(`[LayoutCleaner] File not found or empty: ${path}`);
-//             } else {
-//                 console.warn(`[LayoutCleaner] File not found or empty: ${path}`);
-//             }
-//             return { _notFoundOrEmpty: true };
-//         }
-//         const parsed = await parseXml(xmlString);
-//         if (parsed._parseFailed) {
-//              console.error(`[LayoutCleaner] Failed to parse XML: ${path}`);
-//         }
-//         return parsed;
-//     } catch (error) {
-//         console.error(`[LayoutCleaner] Error reading/parsing XML from ${path}:`, error.message);
-//         return { _parseFailed: true, _error: error.message };
-//     }
-// }
-
 export async function analyzeLayoutsAndMasters(zip, usedSlides, onProgress = () => {}) {
     const result = { success: false, layouts: [], masters: [], usedLayouts: new Set(), usedMasters: new Set() };
     try {

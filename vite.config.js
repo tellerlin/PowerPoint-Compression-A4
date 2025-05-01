@@ -23,16 +23,6 @@ export default defineConfig({
           ]
         }
       }
-    },
-    // 启用源码映射以便调试
-    sourcemap: true,
-    // 启用代码压缩
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: false, // 保留console以便调试
-        drop_debugger: true
-      }
     }
   },
   server: {

@@ -1,6 +1,6 @@
 import { parseXml, buildXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX, SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX } from './constants';
-import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters, analyzeLayoutsAndMasters } from './layout-cleaner';
+import { analyzeLayoutsAndMasters } from './layout-cleaner';
 import { findMediaFiles } from './media';
 import { resolvePath, parseXmlDOM, processGenericRelationshipFiles } from './utils';
 
@@ -8,7 +8,7 @@ export async function cleanUnusedResources(zip, onProgress, options) {
     let finalUsedLayouts = new Set();
     let finalUsedMasters = new Set();
     try {
-        const cleanOptions = { removeUnusedLayouts: false, ...options };
+        const cleanOptions = { ...options };
         onProgress('init', { percentage: 10, status: 'Analyzing presentation structure...' });
         
         // 1. 获取使用中的幻灯片

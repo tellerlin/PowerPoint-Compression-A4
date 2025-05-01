@@ -1,7 +1,7 @@
 // 图像压缩Web Worker
 
 // 导入压缩所需的工具函数
-self.importScripts('/path/to/compression-lib.js');
+self.importScripts('/compression-lib.js');
 
 // 监听主线程消息
 self.addEventListener('message', async (event) => {
