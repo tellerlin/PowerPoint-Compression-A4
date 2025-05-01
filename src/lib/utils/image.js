@@ -28,24 +28,24 @@ async function resizeImage(bitmap, targetWidth, targetHeight) {
   return canvas;
 }
 
-// 使用Web Worker进行图像压缩
+// Use Web Worker for image compression
 async function compressImageInWorker(data, quality, format) {
   return new Promise((resolve, reject) => {
     try {
       console.log(`[compressImageInWorker] Starting worker compression: size=${data.byteLength}, quality=${quality}, format=${format || 'auto'}`);
       
-      // 创建Worker
+      // Create Worker
       const workerPath = new URL('../workers/imageCompression.worker.js', import.meta.url).href;
       const worker = new Worker(workerPath);
       
-      // 设置超时
+      // Set timeout
       const timeoutId = setTimeout(() => {
         console.warn('[compressImageInWorker] Worker compression timed out after 30s');
         worker.terminate();
         reject(new Error('Worker compression timed out'));
-      }, 30000); // 30秒超时
+      }, 30000); // 30 seconds timeout
       
-      // 监听Worker消息
+      // Listen for Worker messages
       worker.onmessage = (event) => {
         clearTimeout(timeoutId);
         const { success, result, error } = event.data;
@@ -58,11 +58,11 @@ async function compressImageInWorker(data, quality, format) {
           reject(new Error(error || 'Worker compression failed'));
         }
         
-        // 终止Worker
+        // Terminate Worker
         worker.terminate();
       };
       
-      // 监听Worker错误
+      // Listen for Worker errors
       worker.onerror = (error) => {
         clearTimeout(timeoutId);
         console.error(`[compressImageInWorker] Worker error: ${error.message}`);
@@ -70,15 +70,15 @@ async function compressImageInWorker(data, quality, format) {
         reject(new Error(`Worker error: ${error.message}`));
       };
       
-      // 创建可传输的数据副本
+      // Create transferable data copy
       const dataClone = new Uint8Array(data);
       
-      // 发送数据到Worker
+      // Send data to Worker
       worker.postMessage({
         data: dataClone,
         quality,
         format
-      }, [dataClone.buffer]); // 使用Transferable Objects提高性能
+      }, [dataClone.buffer]); // Use Transferable Objects for better performance
     } catch (error) {
       console.error(`[compressImageInWorker] Failed to initialize worker: ${error.message}`);
       reject(new Error(`Failed to initialize worker: ${error.message}`));
@@ -97,25 +97,56 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   const originalSize = data.byteLength;
   
   try {
-    // 添加缓存检查以避免重复压缩
+    // Add cache check to avoid repeated compression
     const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
     let cached = null;
     try {
       cached = imageCache.get(cacheKey);
       if (cached) {
+        console.log(`[compressImage] Using cached result for ${cacheKey}`);
         return cached;
       }
     } catch (e) {
-      // 缓存错误处理，继续执行压缩
       console.warn('Image cache error:', e.message);
     }
     
-    // 使用Web Worker进行图像压缩以避免阻塞主线程
+    // Check file size, skip if too small
+    if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
+      console.log(`[compressImage] Skipping compression: image too small (${originalSize} bytes)`);
+      const result = {
+        data: data,
+        format: 'original',
+        compressionMethod: 'skipped-small',
+        originalSize: originalSize,
+        compressedSize: originalSize,
+        originalDimensions: { width: 0, height: 0 },
+        finalDimensions: { width: 0, height: 0 }
+      };
+      return result;
+    }
+    
+    // Detect format
+    const format = await detectFormat(data);
+    if (format === 'unknown' || format === 'tiff' || format === 'gif') {
+      console.log(`[compressImage] Skipping compression: unsupported format (${format})`);
+      return {
+        data: data,
+        format: format || 'original',
+        compressionMethod: 'skipped-format',
+        originalSize: originalSize,
+        compressedSize: originalSize,
+        originalDimensions: { width: 0, height: 0 },
+        finalDimensions: { width: 0, height: 0 }
+      };
+    }
+    
+    // Use Web Worker for image compression to avoid blocking the main thread
     if (typeof Worker !== 'undefined' && originalSize > COMPRESSION_SETTINGS.WORKER_THRESHOLD_SIZE) {
       try {
-        const result = await compressImageInWorker(data, quality);
+        console.log(`[compressImage] Using worker for compression (size: ${originalSize} bytes)`);
+        const result = await compressImageInWorker(data, quality, format);
         
-        // 缓存结果
+        // Cache result
         try {
           imageCache.set(cacheKey, result);
         } catch (e) {
@@ -125,29 +156,14 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
         return result;
       } catch (workerError) {
         console.warn('Worker compression failed, falling back to main thread:', workerError.message);
-        // 继续使用主线程压缩
       }
     }
     
-    // 如果Worker不可用或失败，在主线程中处理
-    const format = await detectFormat(data);
-    if (format === 'unknown' || format === 'tiff') {
-      return {
-        data: data,
-        format: format || 'original',
-        compressionMethod: 'original',
-        originalSize: originalSize,
-        compressedSize: originalSize,
-        originalDimensions: { width: 0, height: 0 },
-        finalDimensions: { width: 0, height: 0 },
-        error: `Unsupported format: ${format}`
-      };
-    }
-    
-    // 使用共享的处理函数
+    // If Worker is unavailable or fails, process in main thread
+    console.log(`[compressImage] Using main thread for compression (size: ${originalSize} bytes)`);
     const result = await processImage(data, quality, format);
     
-    // 缓存结果
+    // Cache result
     try {
       imageCache.set(cacheKey, result);
     } catch (e) {
@@ -160,7 +176,7 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     return {
       data: data,
       format: 'original',
-      compressionMethod: 'original',
+      compressionMethod: 'error',
       originalSize: originalSize,
       compressedSize: originalSize,
       originalDimensions: { width: 0, height: 0 },
@@ -170,7 +186,7 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   }
 }
 
-// 导出其他需要的函数
+// Export other needed functions
 export { 
   ImageType, 
   analyzeImageType, 

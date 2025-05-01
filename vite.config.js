@@ -14,7 +14,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          jszip: ['jszip'],
+
           parser: ['fast-xml-parser', 'xml2js'],
           utils: [
             // 将工具函数分组到单独的chunk

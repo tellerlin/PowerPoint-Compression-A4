@@ -1,14 +1,14 @@
 import { parseXml, buildXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX, SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX } from './constants';
-import { analyzeLayoutsAndMasters } from './layout-cleaner';
+import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters, analyzeLayoutsAndMasters } from './layout-cleaner';
 import { findMediaFiles } from './media';
-import { resolvePath, parseXmlDOM, processGenericRelationshipFiles } from './utils';
+import { resolvePath, parseXmlDOM } from './utils';
 
 export async function cleanUnusedResources(zip, onProgress, options) {
     let finalUsedLayouts = new Set();
     let finalUsedMasters = new Set();
     try {
-        const cleanOptions = { ...options };
+        const cleanOptions = { removeUnusedLayouts: false, ...options };
         onProgress('init', { percentage: 10, status: 'Analyzing presentation structure...' });
         
         // 1. 获取使用中的幻灯片
@@ -26,9 +26,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
         finalUsedLayouts = analysisResult.usedLayouts instanceof Set ? analysisResult.usedLayouts : new Set();
         finalUsedMasters = analysisResult.usedMasters instanceof Set ? analysisResult.usedMasters : new Set();
         
-        // === 新增：清理注释和未引用嵌入对象 ===
-        await removeAllComments(zip);
-        await removeUnusedEmbeddedObjects(zip, usedSlides, finalUsedLayouts, finalUsedMasters);
         console.log(`[Cleaner] Analysis results - Used Layouts: ${finalUsedLayouts.size}, Used Masters: ${finalUsedMasters.size}`);
         
         // 3. 收集和处理媒体文件
@@ -103,51 +100,50 @@ async function processRelationshipFiles(zip, usedSlides, usedLayouts, usedMaster
     await processGenericRelationshipFiles(zip, relsFilesToCheck, usedMedia, "slide/layout/master");
 }
 
-// 删除这个函数定义，因为它已经在 utils.js 中定义了
-// async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, context) {
-//     if (!relsFilePaths || relsFilePaths.length === 0) {
-//         return;
-//     }
-//     await Promise.all(relsFilePaths.map(async (relsPath) => {
-//         try {
-//             const relsDoc = await parseXmlDOM(zip, relsPath);
-//             if (!relsDoc) {
-//                 console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
-//                 return;
-//             }
-//             const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
-//             if (!relationships.length) {
-//                 console.warn(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
-//             }
-//             relationships.forEach(rel => {
-//                 if (!rel) return;
-//                 const relType = rel.getAttribute('Type');
-//                 const target = rel.getAttribute('Target');
-//                 const targetMode = rel.getAttribute('TargetMode');
-//                 if (!relType || !target) {
-//                     console.warn(`[processGenericRelationshipFiles] Relationship missing Type or Target: ${rel.outerHTML}`);
-//                     return;
-//                 }
-//                 if (targetMode === 'External') {
-//                     return;
-//                 }
-//                 if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ||
-//                     relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' ||
-//                     relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' ||
-//                     relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
-//                     let mediaPath = resolvePath(relsPath, target);
-//                     if (mediaPath && mediaPath.startsWith(MEDIA_PATH_PREFIX)) {
-//                         usedMedia.add(mediaPath);
-//                     } else {
-//                         console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" (target="${target}", relsPath="${relsPath}") does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
-//                     }
-//                 }
-//             });
-//         } catch (error) {
-//             console.error(`[processGenericRelationshipFiles] Error processing ${relsPath} (context: ${context}):`, error.message, error.stack);
-//         }
-//     }));
-// }
+async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, context) {
+    if (!relsFilePaths || relsFilePaths.length === 0) {
+        return;
+    }
+    await Promise.all(relsFilePaths.map(async (relsPath) => {
+        try {
+            const relsDoc = await parseXmlDOM(zip, relsPath);
+            if (!relsDoc) {
+                console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
+                return;
+            }
+            const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
+            if (!relationships.length) {
+                console.warn(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
+            }
+            relationships.forEach(rel => {
+                if (!rel) return;
+                const relType = rel.getAttribute('Type');
+                const target = rel.getAttribute('Target');
+                const targetMode = rel.getAttribute('TargetMode');
+                if (!relType || !target) {
+                    console.warn(`[processGenericRelationshipFiles] Relationship missing Type or Target: ${rel.outerHTML}`);
+                    return;
+                }
+                if (targetMode === 'External') {
+                    return;
+                }
+                if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ||
+                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' ||
+                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' ||
+                    relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
+                    let mediaPath = resolvePath(relsPath, target);
+                    if (mediaPath && mediaPath.startsWith(MEDIA_PATH_PREFIX)) {
+                        usedMedia.add(mediaPath);
+                    } else {
+                        console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" (target="${target}", relsPath="${relsPath}") does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
+                    }
+                }
+            });
+        } catch (error) {
+            console.error(`[processGenericRelationshipFiles] Error processing ${relsPath} (context: ${context}):`, error.message, error.stack);
+        }
+    }));
+}
 
 async function getUsedSlides(zip) {
     try {
@@ -347,214 +343,4 @@ async function updateContentTypes(zip) {
     } catch (error) {
         console.error('[updateContentTypes] Error updating content types:', error.message, error.stack);
     }
-}
-
-
-async function removeAllComments(zip) {
-    console.log('[removeAllComments] Starting comment removal process...');
-    
-    // Find all comment-related files
-    const commentFiles = Object.keys(zip.files).filter(path => 
-        path.includes('/comments/') || 
-        path.includes('/commentAuthors.xml') ||
-        path.endsWith('comment.xml')
-    );
-    
-    if (commentFiles.length === 0) {
-        console.log('[removeAllComments] No comment files found in the presentation');
-        return;
-    }
-    
-    console.log(`[removeAllComments] Found ${commentFiles.length} comment-related files`);
-    
-    // Remove all comment files
-    let removedCount = 0;
-    for (const path of commentFiles) {
-        try {
-            zip.remove(path);
-            removedCount++;
-        } catch (error) {
-            console.error(`[removeAllComments] Error removing comment file ${path}:`, error.message);
-        }
-    }
-    
-    // Remove comment relationships from slides
-    const slideRelsFiles = Object.keys(zip.files).filter(path => 
-        path.includes('/slides/_rels/') && path.endsWith('.xml.rels')
-    );
-    
-    let modifiedRelsCount = 0;
-    for (const relsPath of slideRelsFiles) {
-        try {
-            const relsDoc = await parseXmlDOM(zip, relsPath);
-            if (!relsDoc) continue;
-            
-            const commentRels = Array.from(relsDoc.querySelectorAll('Relationship')).filter(rel => {
-                const type = rel.getAttribute('Type') || '';
-                return type.includes('/comments') || type.includes('/comment');
-            });
-            
-            if (commentRels.length === 0) continue;
-            
-            // Remove comment relationships
-            commentRels.forEach(rel => {
-                if (rel.parentNode) {
-                    rel.parentNode.removeChild(rel);
-                }
-            });
-            
-            // Save modified relationships file
-            const serializer = new XMLSerializer();
-            const updatedXml = serializer.serializeToString(relsDoc);
-            zip.file(relsPath, updatedXml);
-            modifiedRelsCount++;
-        } catch (error) {
-            console.error(`[removeAllComments] Error processing relationship file ${relsPath}:`, error.message);
-        }
-    }
-    
-    // Update presentation to remove comment references
-    try {
-        const presentationDoc = await parseXmlDOM(zip, PRESENTATION_PATH);
-        if (presentationDoc) {
-            const commentNodes = Array.from(presentationDoc.querySelectorAll('cmLst, p\\:cmLst'));
-            let presentationModified = false;
-            
-            commentNodes.forEach(node => {
-                if (node.parentNode) {
-                    node.parentNode.removeChild(node);
-                    presentationModified = true;
-                }
-            });
-            
-            if (presentationModified) {
-                const serializer = new XMLSerializer();
-                const updatedXml = serializer.serializeToString(presentationDoc);
-                zip.file(PRESENTATION_PATH, updatedXml);
-            }
-        }
-    } catch (error) {
-        console.error('[removeAllComments] Error updating presentation file:', error.message);
-    }
-    
-    console.log(`[removeAllComments] Removed ${removedCount} comment files and updated ${modifiedRelsCount} relationship files`);
-}
-
-async function removeUnusedEmbeddedObjects(zip, usedSlides, usedLayouts, usedMasters) {
-    console.log('[removeUnusedEmbeddedObjects] Starting cleanup of unused embedded objects...');
-    
-    // 1. Collect all embedded object files
-    const embeddingFiles = Object.keys(zip.files).filter(path => 
-        path.startsWith('ppt/embeddings/') || 
-        path.startsWith('ppt/oleObjects/') ||
-        path.includes('/activeX/') ||
-        path.includes('/ctrlProps/')
-    );
-    
-    if (embeddingFiles.length === 0) {
-        console.log('[removeUnusedEmbeddedObjects] No embedded object files found in the presentation');
-        return;
-    }
-    
-    console.log(`[removeUnusedEmbeddedObjects] Found ${embeddingFiles.length} embedded object files`);
-    
-    // 2. Collect all relationship files, not just slide/layout/master
-    const allRelsFiles = Object.keys(zip.files).filter(path => 
-        path.includes('/_rels/') && path.endsWith('.rels')
-    );
-    
-    console.log(`[removeUnusedEmbeddedObjects] Analyzing ${allRelsFiles.length} relationship files for embedded object references`);
-    
-    // 3. Collect all referenced embedded objects
-    const usedEmbeddings = new Set();
-    const embeddingRelTypes = [
-        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject',
-        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/package',
-        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/activeXControl',
-        'http://schemas.microsoft.com/office/2006/relationships/activeXControlBinary',
-        'http://schemas.openxmlformats.org/officeDocument/2006/relationships/control'
-    ];
-    
-    // Record the number of references found for each type
-    const typeCount = {};
-    embeddingRelTypes.forEach(type => typeCount[type] = 0);
-    
-    // Analyze all relationship files
-    for (const relsPath of allRelsFiles) {
-        try {
-            const xmlStr = await zip.file(relsPath).async('string');
-            if (!xmlStr) continue;
-            
-            // Use DOM parsing instead of regex, more robust
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(xmlStr, 'application/xml');
-            const relationships = doc.querySelectorAll('Relationship');
-            
-            if (relationships.length === 0) {
-                continue;
-            }
-            
-            // Check each relationship
-            for (const rel of relationships) {
-                const type = rel.getAttribute('Type');
-                const target = rel.getAttribute('Target');
-                
-                if (!type || !target) continue;
-                
-                // Check if it's an embedded object type
-                if (embeddingRelTypes.includes(type) || 
-                    type.includes('/oleObject') || 
-                    type.includes('/package') || 
-                    type.includes('/activeX') || 
-                    type.includes('/control')) {
-                    
-                    // Record type statistics
-                    if (embeddingRelTypes.includes(type)) {
-                        typeCount[type]++;
-                    } else {
-                        typeCount['other'] = (typeCount['other'] || 0) + 1;
-                    }
-                    
-                    // Parse target path
-                    let resolvedPath = resolvePath(relsPath, target);
-                    if (resolvedPath) {
-                        usedEmbeddings.add(resolvedPath);
-                    }
-                }
-                
-                // Special handling: Check if Target attribute contains embeddings path
-                if (target.includes('/embeddings/') || 
-                    target.includes('/oleObjects/') || 
-                    target.includes('/activeX/') || 
-                    target.includes('/ctrlProps/')) {
-                    
-                    let resolvedPath = resolvePath(relsPath, target);
-                    if (resolvedPath) {
-                        usedEmbeddings.add(resolvedPath);
-                    }
-                }
-            }
-        } catch (error) {
-            console.error(`[removeUnusedEmbeddedObjects] Error processing relationship file ${relsPath}:`, error.message);
-        }
-    }
-    
-    // 4. Remove unreferenced embedded objects
-    const unusedEmbeddings = embeddingFiles.filter(path => !usedEmbeddings.has(path));
-        
-    console.log(`[removeUnusedEmbeddedObjects] Found ${usedEmbeddings.size} used embedded objects and ${unusedEmbeddings.length} unused embedded objects`);
-    
-    // Remove unreferenced embedded objects
-    let removedCount = 0;
-    for (const path of unusedEmbeddings) {
-        try {
-            zip.remove(path);
-            removedCount++;
-            console.log(`[removeUnusedEmbeddedObjects] Removed unused embedded object: ${path}`);
-        } catch (error) {
-            console.error(`[removeUnusedEmbeddedObjects] Error removing embedded object ${path}:`, error.message);
-        }
-    }
-    
-    console.log(`[removeUnusedEmbeddedObjects] Finished. Removed ${removedCount}/${unusedEmbeddings.length} unused embedded objects`);
 }
