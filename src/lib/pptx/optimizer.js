@@ -13,6 +13,49 @@ async function preprocessImages(zip, options = {}) {
   return true;
 }
 
+// 将图像处理逻辑抽取为单独函数
+async function processMediaBatch(zip, batch, options, cpuCount, onProgress) {
+  const batchPromises = batch.map(mediaPath => {
+    return (async () => {
+      let fileOriginalSize = 0;
+      let fileCompressedSize = 0;
+      let success = false;
+      let error = null;
+      try {
+        const fileExtension = mediaPath.split('.').pop()?.toLowerCase() || '';
+        const isSupportedImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
+        await processMediaFile(zip, mediaPath, async (data) => {
+          fileOriginalSize = data.byteLength;
+          fileCompressedSize = fileOriginalSize;
+          if (isSupportedImage && fileOriginalSize > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
+            const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
+            const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
+            const compressResult = await compressImage(data, adjustedQuality);
+            if (compressResult.error) {
+              error = compressResult.error;
+              return data;
+            }
+            fileCompressedSize = compressResult.compressedSize;
+            return compressResult.data;
+          } else {
+            return data;
+          }
+        });
+        success = error === null;
+      } catch (processError) {
+        error = processError.message;
+        try {
+          const file = zip.file(mediaPath);
+          if (file) fileOriginalSize = (await file.async('uint8array')).byteLength;
+        } catch (e) {}
+        fileCompressedSize = fileOriginalSize;
+      }
+      return { path: mediaPath, originalSize: fileOriginalSize, compressedSize: fileCompressedSize, success, error };
+    })();
+  });
+  return await Promise.all(batchPromises);
+}
+
 export async function optimizePPTX(file, options = {}) {
   let zip;
   const { onProgress = updateProgress } = options;
@@ -30,6 +73,16 @@ export async function optimizePPTX(file, options = {}) {
     error: null
   };
 
+  // 添加内存使用监控
+  let memoryMonitorStop = null;
+  if (typeof window !== 'undefined' && window.performance && window.performance.memory) {
+    const { monitorMemory } = await import('../utils/memory.js');
+    memoryMonitorStop = monitorMemory((usage) => {
+      console.warn(`[Memory Warning] High memory usage: ${usage.toFixed(2)}MB`);
+      onProgress('warning', { message: `High memory usage detected (${usage.toFixed(0)}MB). Consider closing other applications.` });
+    });
+  }
+  
   try {
     validateFile(file);
 
@@ -88,45 +141,9 @@ export async function optimizePPTX(file, options = {}) {
 
         for (let i = 0; i < mediaFiles.length; i += batchSize) {
           const batch = mediaFiles.slice(i, i + batchSize);
-          const batchPromises = batch.map(mediaPath => {
-            return (async () => {
-              let fileOriginalSize = 0;
-              let fileCompressedSize = 0;
-              let success = false;
-              let error = null;
-              try {
-                const fileExtension = mediaPath.split('.').pop()?.toLowerCase() || '';
-                const isSupportedImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
-                await processMediaFile(zip, mediaPath, async (data) => {
-                  fileOriginalSize = data.byteLength;
-                  fileCompressedSize = fileOriginalSize;
-                  if (isSupportedImage && fileOriginalSize > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-                    const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
-                    const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-                    const compressResult = await compressImage(data, adjustedQuality);
-                    if (compressResult.error) {
-                      error = compressResult.error;
-                      return data;
-                    }
-                    fileCompressedSize = compressResult.compressedSize;
-                    return compressResult.data;
-                  } else {
-                    return data;
-                  }
-                });
-                success = error === null;
-              } catch (processError) {
-                error = processError.message;
-                try {
-                  const file = zip.file(mediaPath);
-                  if (file) fileOriginalSize = (await file.async('uint8array')).byteLength;
-                } catch (e) {}
-                fileCompressedSize = fileOriginalSize;
-              }
-              return { path: mediaPath, originalSize: fileOriginalSize, compressedSize: fileCompressedSize, success, error };
-            })();
-          });
-          const batchResults = await Promise.all(batchPromises);
+          const batchResults = await processMediaBatch(zip, batch, options, cpuCount, onProgress);
+          
+          // 处理结果...
           batchResults.forEach(result => {
             totalOriginalMediaSize += result.originalSize || 0;
             totalCompressedMediaSize += result.compressedSize || 0;
@@ -182,12 +199,18 @@ export async function optimizePPTX(file, options = {}) {
     finalStats.error = error.message;
 
     let userFriendlyMessage = 'An unexpected error occurred during optimization.';
+    
+    // 扩展错误类型识别
     if (error.message.includes('Invalid or corrupted file format')) {
       userFriendlyMessage = error.message;
     } else if (error.message.includes('memory') || error.message.includes('buffer') || error instanceof RangeError) {
       userFriendlyMessage = 'Processing failed due to memory or size constraints. Try closing other tabs or using a smaller file.';
     } else if (error.message.includes('Invalid or unsupported image data')) {
       userFriendlyMessage = `Unsupported image found: ${error.message}. Please check image formats.`;
+    } else if (error.message.includes('timeout') || error.message.includes('time limit')) {
+      userFriendlyMessage = 'Processing timed out. Try with a smaller file or fewer images.';
+    } else if (error.message.includes('network') || error.message.includes('connection')) {
+      userFriendlyMessage = 'Network error occurred. Please check your internet connection and try again.';
     } else if (error instanceof TypeError || error instanceof ReferenceError) {
       userFriendlyMessage = 'A programming error occurred. Please report this issue.';
     }
@@ -200,5 +223,10 @@ export async function optimizePPTX(file, options = {}) {
     });
 
     throw error;
+  }
+  
+  // 清理内存监控
+  if (memoryMonitorStop) {
+    memoryMonitorStop();
   }
 }
