@@ -13,7 +13,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          // parser: ['xml2js'], // 暂时移除 fast-xml-parser
           utils: [
             '/src/lib/utils/image.js',
             '/src/lib/utils/file.js'

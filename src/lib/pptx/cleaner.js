@@ -11,7 +11,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
         const cleanOptions = { removeUnusedLayouts: false, ...options };
         onProgress('init', { percentage: 10, status: 'Analyzing presentation structure...' });
         
-        // 1. 获取使用中的幻灯片
         const usedSlides = await getUsedSlides(zip);
         if (usedSlides.length === 0) {
             console.warn('[Cleaner] No used slides found in the presentation. Cleanup might be limited.');
@@ -19,7 +18,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
             console.log(`[Cleaner] Found ${usedSlides.length} slides marked as used in presentation.xml.rels.`);
         }
         
-        // 2. 分析布局和母版
         console.log('[Cleaner] Analyzing existing layouts/masters...');
         const analysisResult = await analyzeLayoutsAndMasters(zip, usedSlides, onProgress);
         
@@ -28,7 +26,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
         
         console.log(`[Cleaner] Analysis results - Used Layouts: ${finalUsedLayouts.size}, Used Masters: ${finalUsedMasters.size}`);
         
-        // 3. 收集和处理媒体文件
         onProgress('init', { percentage: 70, status: 'Analyzing media file usage...' });
         const usedMedia = await collectUsedMedia(zip, usedSlides, finalUsedLayouts, finalUsedMasters);
         const allMediaPaths = findMediaFiles(zip);
@@ -40,7 +37,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
             identifiedAsUnused: unusedMediaPaths.length 
         });
         
-        // 4. 安全检查并移除未使用的媒体
         const shouldSkip = shouldSkipMediaRemoval(allMediaPaths.length, unusedMediaPaths.length, usedMedia.size);
         if (!shouldSkip) {
             await removeUnusedMedia(zip, usedMedia);
@@ -48,7 +44,6 @@ export async function cleanUnusedResources(zip, onProgress, options) {
             console.warn('[Cleaner] Skipping media removal due to safety check.');
         }
         
-        // 5. 更新内容类型
         onProgress('init', { percentage: 95, status: 'Updating content types...' });
         await updateContentTypes(zip);
         

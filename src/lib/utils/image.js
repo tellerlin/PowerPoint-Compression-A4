@@ -1,5 +1,3 @@
-// File: image.js
-
 import { COMPRESSION_SETTINGS } from '../pptx/constants.js';
 import { imageCache } from './cache';
 import { 
@@ -28,24 +26,20 @@ async function resizeImage(bitmap, targetWidth, targetHeight) {
   return canvas;
 }
 
-// Use Web Worker for image compression
 async function compressImageInWorker(data, quality, format) {
   return new Promise((resolve, reject) => {
     try {
       console.log(`[compressImageInWorker] Starting worker compression: size=${data.byteLength}, quality=${quality}, format=${format || 'auto'}`);
       
-      // Create Worker
       const workerPath = new URL('../workers/imageCompression.worker.js', import.meta.url).href;
       const worker = new Worker(workerPath);
       
-      // Set timeout
       const timeoutId = setTimeout(() => {
         console.warn('[compressImageInWorker] Worker compression timed out after 30s');
         worker.terminate();
         reject(new Error('Worker compression timed out'));
-      }, 30000); // 30 seconds timeout
+      }, 30000);
       
-      // Listen for Worker messages
       worker.onmessage = (event) => {
         clearTimeout(timeoutId);
         const { success, result, error } = event.data;
@@ -58,11 +52,9 @@ async function compressImageInWorker(data, quality, format) {
           reject(new Error(error || 'Worker compression failed'));
         }
         
-        // Terminate Worker
         worker.terminate();
       };
       
-      // Listen for Worker errors
       worker.onerror = (error) => {
         clearTimeout(timeoutId);
         console.error(`[compressImageInWorker] Worker error: ${error.message}`);
@@ -70,15 +62,13 @@ async function compressImageInWorker(data, quality, format) {
         reject(new Error(`Worker error: ${error.message}`));
       };
       
-      // Create transferable data copy
       const dataClone = new Uint8Array(data);
       
-      // Send data to Worker
       worker.postMessage({
         data: dataClone,
         quality,
         format
-      }, [dataClone.buffer]); // Use Transferable Objects for better performance
+      }, [dataClone.buffer]);
     } catch (error) {
       console.error(`[compressImageInWorker] Failed to initialize worker: ${error.message}`);
       reject(new Error(`Failed to initialize worker: ${error.message}`));
@@ -97,7 +87,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   const originalSize = data.byteLength;
   
   try {
-    // Add cache check to avoid repeated compression
     const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
     let cached = null;
     try {
@@ -110,7 +99,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       console.warn('Image cache error:', e.message);
     }
     
-    // Check file size, skip if too small
     if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
       console.log(`[compressImage] Skipping compression: image too small (${originalSize} bytes)`);
       const result = {
@@ -125,7 +113,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       return result;
     }
     
-    // Detect format
     const format = await detectFormat(data);
     if (format === 'unknown' || format === 'tiff' || format === 'gif') {
       console.log(`[compressImage] Skipping compression: unsupported format (${format})`);
@@ -140,13 +127,11 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       };
     }
     
-    // Use Web Worker for image compression to avoid blocking the main thread
     if (typeof Worker !== 'undefined' && originalSize > COMPRESSION_SETTINGS.WORKER_THRESHOLD_SIZE) {
       try {
         console.log(`[compressImage] Using worker for compression (size: ${originalSize} bytes)`);
         const result = await compressImageInWorker(data, quality, format);
         
-        // Cache result
         try {
           imageCache.set(cacheKey, result);
         } catch (e) {
@@ -159,11 +144,9 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       }
     }
     
-    // If Worker is unavailable or fails, process in main thread
     console.log(`[compressImage] Using main thread for compression (size: ${originalSize} bytes)`);
     const result = await processImage(data, quality, format);
     
-    // Cache result
     try {
       imageCache.set(cacheKey, result);
     } catch (e) {
@@ -186,7 +169,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
   }
 }
 
-// Export other needed functions
 export { 
   ImageType, 
   analyzeImageType, 
