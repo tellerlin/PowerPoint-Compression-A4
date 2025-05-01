@@ -10,14 +10,11 @@ export default defineConfig({
     commonjsOptions: {
       include: [/jszip/, /node_modules/, /fast-xml-parser/, /xml2js/]
     },
-    // 添加代码分割和懒加载配置
     rollupOptions: {
       output: {
         manualChunks: {
-
-          parser: ['fast-xml-parser', 'xml2js'],
+          // parser: ['xml2js'], // 暂时移除 fast-xml-parser
           utils: [
-            // 将工具函数分组到单独的chunk
             '/src/lib/utils/image.js',
             '/src/lib/utils/file.js'
           ]
@@ -29,5 +26,8 @@ export default defineConfig({
     fs: {
       strict: false
     }
+  },
+  ssr: {
+    noExternal: ['fast-xml-parser']
   }
 });
