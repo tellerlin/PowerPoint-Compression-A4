@@ -141,6 +141,9 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       console.warn('Failed to cache image:', e.message);
     }
     
+    // 删除对未定义变量的引用
+    // 或者如果需要释放内存，应该从processImage函数返回bitmap
+    
     return result;
   } catch (error) {
     console.error(`[compressImage] Error:`, error.message);

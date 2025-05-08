@@ -237,7 +237,6 @@
               ></div>
             </div>
             
-            <!-- 添加更详细的处理信息 -->
             {#if $compressionProgress.processedMediaCount > 0 && $compressionProgress.mediaCount > 0}
               <div class="mt-2 text-xs text-gray-400">
                 Processing media: {$compressionProgress.processedMediaCount}/{$compressionProgress.mediaCount}

@@ -47,6 +47,9 @@ export async function cleanUnusedResources(zip, onProgress, options) {
         onProgress('init', { percentage: 95, status: 'Updating content types...' });
         await updateContentTypes(zip);
         
+        console.log('[Cleaner] Resource cleanup completed successfully.');
+        onProgress('init', { percentage: 100, status: 'Cleanup completed successfully.' });
+        
         return true;
     } catch (error) {
         console.error('[Cleaner] Error during resource cleanup:', error.message, error.stack);
@@ -62,7 +65,6 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
         console.log(`[collectUsedMedia] Starting media collection (${usedSlides.length} slides, ${usedLayouts.size} layouts, ${usedMasters.size} masters)`);
         await processRelationshipFiles(zip, usedSlides, usedLayouts, usedMasters, usedMedia);
         
-        // 合并所有关系文件处理的日志，减少重复输出
         const fileTypes = [
             {pattern: /^ppt\/theme\/_rels\/theme\d+\.xml\.rels$/, name: "theme"},
             {pattern: /^ppt\/notesSlides\/_rels\/notesSlide\d+\.xml\.rels$/, name: "notes slide"},
@@ -73,7 +75,6 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
             {pattern: /^ppt\/handouts\/_rels\/[^/]+\.rels$/, name: "handouts"}
         ];
         
-        // 收集所有要处理的文件
         const filesByType = {};
         for (const {pattern, name} of fileTypes) {
             const files = Object.keys(zip.files).filter(p => p.match(pattern));
@@ -82,7 +83,6 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
             }
         }
         
-        // 输出一条汇总日志
         const typesFound = Object.entries(filesByType)
             .map(([type, files]) => `${type} (${files.length})`)
             .join(", ");
@@ -91,7 +91,6 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
             console.log(`[collectUsedMedia] Analyzing relationship files: ${typesFound}`);
         }
         
-        // 处理所有类型的文件
         for (const [type, files] of Object.entries(filesByType)) {
             await processGenericRelationshipFiles(zip, files, usedMedia, type);
         }
@@ -120,10 +119,8 @@ async function processRelationshipFiles(zip, usedSlides, usedLayouts, usedMaster
     }).filter(Boolean);
     const relsFilesToCheck = Array.from(new Set([...slideRelsFiles, ...layoutRelsFiles, ...masterRelsFiles])).filter(path => zip.file(path));
     
-    // 精简为一条日志，包含所有必要信息
     console.log(`[processRelationshipFiles] Analyzing ${relsFilesToCheck.length} relationship files (Slides: ${slideRelsFiles.length}, Layouts: ${layoutRelsFiles.length}, Masters: ${masterRelsFiles.length})`);
     
-    // 删除详细文件列表日志，这些信息通常不需要
     await processGenericRelationshipFiles(zip, relsFilesToCheck, usedMedia, "slide/layout/master");
 }
 
@@ -132,7 +129,6 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
         return;
     }
     
-    // 删除详细的处理日志，只保留错误日志
     await Promise.all(relsFilePaths.map(async (relsPath) => {
         try {
             const relsDoc = await parseXmlDOM(zip, relsPath);
@@ -175,7 +171,6 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
                     if (mediaPath) {
                         if (mediaPath.startsWith('ppt/media/')) {
                             usedMedia.add(mediaPath);
-                            // 删除每个媒体文件的添加日志，减少输出量
                         } else if (mediaPath.includes('/media/') || mediaPath.includes('\\media\\')) {
                             const normalizedPath = 'ppt/media/' + mediaPath.split(/[\/\\]media[\/\\]/).pop();
                             usedMedia.add(normalizedPath);
@@ -223,7 +218,6 @@ async function getUsedSlides(zip) {
                 const dir = parts.join('/');
                 const slideRelsPath = `${dir}/_rels/${filename}.rels`;
                 
-                // 检查关系文件是否存在，但不抛出警告
                 const hasRels = zip.file(slideRelsPath) !== null;
                 
                 return { 
@@ -256,11 +250,9 @@ async function removeUnusedMedia(zip, usedMedia) {
         
         console.log(`[removeUnusedMedia] Found ${unusedMediaFiles.length} unused media files.`);
         
-        // 额外验证步骤：检查所有关系文件中引用的媒体
         const allRelsFiles = Object.keys(zip.files).filter(path => path.endsWith('.rels'));
         const referencedMedia = new Set();
         
-        // 删除每个引用的详细日志，只保留汇总信息
         for (const relsPath of allRelsFiles) {
             try {
                 const content = await zip.file(relsPath)?.async('string');
@@ -304,7 +296,6 @@ async function removeUnusedMedia(zip, usedMedia) {
         console.error('[removeUnusedMedia] Error during media replacement:', error.message);
     }
 }
-
 
 function shouldSkipMediaRemoval(totalCount, unusedCount, usedCount) {
     if (totalCount === 0 || unusedCount <= 0) {
@@ -381,7 +372,6 @@ async function updateContentTypes(zip) {
             const defaults = Array.isArray(contentTypesObj.Types.Default) ? contentTypesObj.Types.Default : [contentTypesObj.Types.Default];
             const initialCount = defaults.length;
             
-            // 收集ZIP中所有文件扩展名
             const allExtensions = new Set();
             Object.keys(zip.files).forEach(path => {
                 if (!zip.files[path].dir) {
@@ -420,6 +410,6 @@ async function updateContentTypes(zip) {
             console.log('[updateContentTypes] No changes needed for content types.');
         }
     } catch (error) {
-        console.error('[updateContentTypes] Error updating content types:', error.message, error.stack);
+        console.error('[updateContentTypes] Error updating content types:', error.message);
     }
 }

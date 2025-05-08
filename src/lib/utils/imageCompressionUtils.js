@@ -1,11 +1,17 @@
 // Shared image compression utility functions
 
 export function hashCode(data) {
+  // 优化：使用更高效的采样方法
   let hash = 0;
-  const step = Math.max(1, Math.floor(data.length / 100));
-  for (let i = 0; i < data.length; i += step) {
+  const length = data.length;
+  // 对于大文件，采样更少的点以提高性能
+  const step = length > 1000000 ? Math.floor(length / 50) : 
+               length > 100000 ? Math.floor(length / 100) : 
+               Math.max(1, Math.floor(length / 200));
+  
+  for (let i = 0; i < length; i += step) {
     hash = ((hash << 5) - hash) + data[i];
-    hash |= 0;
+    hash |= 0;  // 转换为32位整数
   }
   return hash.toString(16);
 }
@@ -58,27 +64,30 @@ export function calculateOptimalDimensions(originalWidth, originalHeight, maxSiz
   if (originalWidth <= maxSize && originalHeight <= maxSize) {
     return { width: originalWidth, height: originalHeight };
   }
+  
+  // 优化：使用一次性计算而不是多次条件判断
   const aspectRatio = originalWidth / originalHeight;
   let targetWidth, targetHeight;
+  
   if (originalWidth > originalHeight) {
-    targetWidth = maxSize;
+    targetWidth = Math.min(maxSize, originalWidth);
     targetHeight = Math.round(targetWidth / aspectRatio);
   } else {
-    targetHeight = maxSize;
+    targetHeight = Math.min(maxSize, originalHeight);
     targetWidth = Math.round(targetHeight * aspectRatio);
   }
+  
+  // 确保两个维度都不超过maxSize
   if (targetWidth > maxSize) {
     targetWidth = maxSize;
     targetHeight = Math.round(targetWidth / aspectRatio);
   }
-  if (targetHeight > maxSize) {
-    targetHeight = maxSize;
-    targetWidth = Math.round(targetHeight * aspectRatio);
-  }
-  if (targetWidth >= originalWidth || targetHeight >= originalHeight) {
-    return { width: originalWidth, height: originalHeight };
-  }
-  return { width: targetWidth, height: targetHeight };
+  
+  // 避免放大小图像
+  return {
+    width: Math.min(targetWidth, originalWidth),
+    height: Math.min(targetHeight, originalHeight)
+  };
 }
 
 export function getExtensionFromPath(path) {
@@ -112,8 +121,6 @@ export async function processImage(data, quality, originalFormat) {
     throw new TypeError('processImage: data must be a Uint8Array');
   }
   
-
-  
   const originalSize = data.byteLength;
   let format = originalFormat || await detectFormat(data);
   let compressedData = data;
@@ -125,7 +132,6 @@ export async function processImage(data, quality, originalFormat) {
   let targetHeight = 0;
   
   try {
-
     const blob = new Blob([data], { type: `image/${format}` });
     const bitmap = await createImageBitmap(blob).catch(err => {
       console.error(`[processImage] Failed to create image bitmap: ${err.message}`);
@@ -150,59 +156,49 @@ export async function processImage(data, quality, originalFormat) {
     targetWidth = dimensions.width;
     targetHeight = dimensions.height;
     
-    const blobs = [];
-    
-    try {
-      const webpBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
-      blobs.push({
-        type: 'webp',
-        blob: webpBlob
-      });
-    } catch (err) {
-      console.error(`[processImage] WebP compression failed: ${err.message}`);
-    }
-    
-    if (!hasAlpha) {
+    // 提取重复的图像格式转换逻辑为单独函数
+    async function convertCanvasToOptimalFormat(canvas, quality, hasAlpha) {
+      const blobs = [];
+      
       try {
-        const jpegBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
-        blobs.push({
-          type: 'jpeg',
-          blob: jpegBlob
-        });
+        const webpBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
+        blobs.push({ type: 'webp', blob: webpBlob });
       } catch (err) {
-        console.error(`[processImage] JPEG compression failed: ${err.message}`);
+        console.error(`WebP compression failed: ${err.message}`);
       }
-    }
-    
-    if (hasAlpha) {
-      try {
-        const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-        blobs.push({
-          type: 'png',
-          blob: pngBlob
-        });
-      } catch (err) {
-        console.error(`[processImage] PNG compression failed: ${err.message}`);
-      }
-    }
-    
-    if (blobs.length > 0) {
-      let best = blobs[0];
-      for (const candidate of blobs) {
-        if (candidate.blob && candidate.blob.size < best.blob.size) {
-          best = candidate;
+      
+      if (!hasAlpha) {
+        try {
+          const jpegBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+          blobs.push({ type: 'jpeg', blob: jpegBlob });
+        } catch (err) {
+          console.error(`JPEG compression failed: ${err.message}`);
         }
       }
       
-      
-      if (best.blob.size < originalSize * 0.95) {
-        compressedData = new Uint8Array(await best.blob.arrayBuffer());
-        outputFormat = best.type;
-        method = best.type;
-      } else {
+      if (hasAlpha) {
+        try {
+          const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
+          blobs.push({ type: 'png', blob: pngBlob });
+        } catch (err) {
+          console.error(`PNG compression failed: ${err.message}`);
+        }
       }
-    } else {
-
+      
+      if (blobs.length === 0) return null;
+      
+      // 找出最小的blob
+      return blobs.reduce((best, current) => 
+        (current.blob && current.blob.size < best.blob.size) ? current : best, blobs[0]);
+    }
+    
+    // 在processImage函数中使用
+    const bestResult = await convertCanvasToOptimalFormat(canvas, quality, hasAlpha);
+    
+    if (bestResult && bestResult.blob.size < originalSize * 0.95) {
+      compressedData = new Uint8Array(await bestResult.blob.arrayBuffer());
+      outputFormat = bestResult.type;
+      method = bestResult.type;
     }
     
     if ((targetWidth !== originalWidth || targetHeight !== originalHeight) && method === 'original') {
@@ -216,64 +212,12 @@ export async function processImage(data, quality, originalFormat) {
       resizedCtx.imageSmoothingQuality = 'high';
       resizedCtx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
       
-      const resizedBlobs = [];
+      const resizedBestResult = await convertCanvasToOptimalFormat(resizedCanvas, quality, hasAlpha);
       
-      try {
-        const webpBlob = await resizedCanvas.convertToBlob({ type: 'image/webp', quality });
-
-        resizedBlobs.push({
-          type: 'webp',
-          blob: webpBlob
-        });
-      } catch (err) {
-        console.error(`[processImage] Resized WebP failed: ${err.message}`);
-      }
-      
-      if (!hasAlpha) {
-        try {
-          const jpegBlob = await resizedCanvas.convertToBlob({ type: 'image/jpeg', quality });
-
-          resizedBlobs.push({
-            type: 'jpeg',
-            blob: jpegBlob
-          });
-        } catch (err) {
-          console.error(`[processImage] Resized JPEG failed: ${err.message}`);
-        }
-      }
-      
-      if (hasAlpha) {
-        try {
-          const pngBlob = await resizedCanvas.convertToBlob({ type: 'image/png' });
-
-          resizedBlobs.push({
-            type: 'png',
-            blob: pngBlob
-          });
-        } catch (err) {
-          console.error(`[processImage] Resized PNG failed: ${err.message}`);
-        }
-      }
-      
-      if (resizedBlobs.length > 0) {
-        let best = resizedBlobs[0];
-        for (const candidate of resizedBlobs) {
-          if (candidate.blob && candidate.blob.size < best.blob.size) {
-            best = candidate;
-          }
-        }
-        
-
-        
-        if (best.blob.size < originalSize * 0.95) {
-          compressedData = new Uint8Array(await best.blob.arrayBuffer());
-          outputFormat = best.type;
-          method = `resized-${best.type}`;
-        } else {
-
-        }
-      } else {
-        console.warn(`[processImage] No resized compression formats succeeded, keeping original`);
+      if (resizedBestResult && resizedBestResult.blob.size < originalSize * 0.95) {
+        compressedData = new Uint8Array(await resizedBestResult.blob.arrayBuffer());
+        outputFormat = resizedBestResult.type;
+        method = `resized-${resizedBestResult.type}`;
       }
     }
   } catch (error) {
@@ -292,6 +236,5 @@ export async function processImage(data, quality, originalFormat) {
     finalDimensions: { width: targetWidth, height: targetHeight }
   };
   
-
   return result;
 }

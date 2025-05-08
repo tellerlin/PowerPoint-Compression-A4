@@ -7,10 +7,8 @@
   export let class_ = '';
   export let classList = '';
   
-  // 合并classList、class_和className
   $: combinedClass = classList || class_ || className;
   
-  // 定义不同尺寸的样式
   $: sizeClass = {
     'sm': 'px-3 py-1.5 text-sm',
     'md': 'px-6 py-3 text-base',

@@ -36,21 +36,18 @@
 
     const file = e.dataTransfer.files[0];
     
-    // More detailed file validation
     if (!file.name.toLowerCase().endsWith('.pptx')) {
       alert('Please select a PowerPoint (.pptx) format file');
       return;
     }
     
-    if (file.size > 314572800) { // 300MB
+    if (file.size > 314572800) {
       alert(`File size ${(file.size / 1024 / 1024).toFixed(2)}MB exceeds the 300MB limit`);
       return;
     }
     
-    // Update file name display
     fileName = file.name;
     
-    // Trigger change event
     const changeEvent = new Event('change', { bubbles: true });
     Object.defineProperty(changeEvent, 'target', {
       writable: false,
