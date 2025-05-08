@@ -112,7 +112,7 @@ export async function processImage(data, quality, originalFormat) {
     throw new TypeError('processImage: data must be a Uint8Array');
   }
   
-  console.log(`[processImage] Starting compression: size=${data.byteLength}, quality=${quality}, format=${originalFormat || 'auto'}`);
+
   
   const originalSize = data.byteLength;
   let format = originalFormat || await detectFormat(data);
@@ -125,7 +125,7 @@ export async function processImage(data, quality, originalFormat) {
   let targetHeight = 0;
   
   try {
-    console.log(`[processImage] Detected format: ${format}`);
+
     const blob = new Blob([data], { type: `image/${format}` });
     const bitmap = await createImageBitmap(blob).catch(err => {
       console.error(`[processImage] Failed to create image bitmap: ${err.message}`);
@@ -134,7 +134,6 @@ export async function processImage(data, quality, originalFormat) {
     
     originalWidth = bitmap.width;
     originalHeight = bitmap.height;
-    console.log(`[processImage] Image dimensions: ${originalWidth}x${originalHeight}`);
     
     const canvas = new OffscreenCanvas(originalWidth, originalHeight);
     const ctx = canvas.getContext('2d');
@@ -146,18 +145,15 @@ export async function processImage(data, quality, originalFormat) {
     const imageData = ctx.getImageData(0, 0, originalWidth, originalHeight);
     
     const hasAlpha = checkAlphaChannel(imageData);
-    console.log(`[processImage] Image has alpha channel: ${hasAlpha}`);
     
     const dimensions = calculateOptimalDimensions(originalWidth, originalHeight);
     targetWidth = dimensions.width;
     targetHeight = dimensions.height;
-    console.log(`[processImage] Target dimensions: ${targetWidth}x${targetHeight}`);
     
     const blobs = [];
     
     try {
       const webpBlob = await canvas.convertToBlob({ type: 'image/webp', quality });
-      console.log(`[processImage] WebP compression result: ${webpBlob.size} bytes`);
       blobs.push({
         type: 'webp',
         blob: webpBlob
@@ -169,7 +165,6 @@ export async function processImage(data, quality, originalFormat) {
     if (!hasAlpha) {
       try {
         const jpegBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
-        console.log(`[processImage] JPEG compression result: ${jpegBlob.size} bytes`);
         blobs.push({
           type: 'jpeg',
           blob: jpegBlob
@@ -182,7 +177,6 @@ export async function processImage(data, quality, originalFormat) {
     if (hasAlpha) {
       try {
         const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-        console.log(`[processImage] PNG compression result: ${pngBlob.size} bytes`);
         blobs.push({
           type: 'png',
           blob: pngBlob
@@ -200,17 +194,15 @@ export async function processImage(data, quality, originalFormat) {
         }
       }
       
-      console.log(`[processImage] Best compression: ${best.type}, size: ${best.blob.size} bytes (${((1 - best.blob.size/originalSize) * 100).toFixed(1)}% reduction)`);
       
       if (best.blob.size < originalSize * 0.95) {
         compressedData = new Uint8Array(await best.blob.arrayBuffer());
         outputFormat = best.type;
         method = best.type;
       } else {
-        console.log(`[processImage] Compression not effective enough, keeping original`);
       }
     } else {
-      console.warn(`[processImage] No compression formats succeeded, keeping original`);
+
     }
     
     if ((targetWidth !== originalWidth || targetHeight !== originalHeight) && method === 'original') {
@@ -228,7 +220,7 @@ export async function processImage(data, quality, originalFormat) {
       
       try {
         const webpBlob = await resizedCanvas.convertToBlob({ type: 'image/webp', quality });
-        console.log(`[processImage] Resized WebP result: ${webpBlob.size} bytes (${((1 - webpBlob.size/originalSize) * 100).toFixed(1)}% reduction)`);
+
         resizedBlobs.push({
           type: 'webp',
           blob: webpBlob
@@ -240,7 +232,7 @@ export async function processImage(data, quality, originalFormat) {
       if (!hasAlpha) {
         try {
           const jpegBlob = await resizedCanvas.convertToBlob({ type: 'image/jpeg', quality });
-          console.log(`[processImage] Resized JPEG result: ${jpegBlob.size} bytes (${((1 - jpegBlob.size/originalSize) * 100).toFixed(1)}% reduction)`);
+
           resizedBlobs.push({
             type: 'jpeg',
             blob: jpegBlob
@@ -253,7 +245,7 @@ export async function processImage(data, quality, originalFormat) {
       if (hasAlpha) {
         try {
           const pngBlob = await resizedCanvas.convertToBlob({ type: 'image/png' });
-          console.log(`[processImage] Resized PNG result: ${pngBlob.size} bytes (${((1 - pngBlob.size/originalSize) * 100).toFixed(1)}% reduction)`);
+
           resizedBlobs.push({
             type: 'png',
             blob: pngBlob
@@ -271,14 +263,14 @@ export async function processImage(data, quality, originalFormat) {
           }
         }
         
-        console.log(`[processImage] Best resized compression: ${best.type}, size: ${best.blob.size} bytes (${((1 - best.blob.size/originalSize) * 100).toFixed(1)}% reduction)`);
+
         
         if (best.blob.size < originalSize * 0.95) {
           compressedData = new Uint8Array(await best.blob.arrayBuffer());
           outputFormat = best.type;
           method = `resized-${best.type}`;
         } else {
-          console.log(`[processImage] Resized compression not effective enough, keeping original`);
+
         }
       } else {
         console.warn(`[processImage] No resized compression formats succeeded, keeping original`);
@@ -300,6 +292,6 @@ export async function processImage(data, quality, originalFormat) {
     finalDimensions: { width: targetWidth, height: targetHeight }
   };
   
-  console.log(`[processImage] Compression complete: originalSize=${result.originalSize}, compressedSize=${result.compressedSize}, method=${result.compressionMethod}`);
+
   return result;
 }

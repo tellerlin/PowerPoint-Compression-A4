@@ -59,19 +59,47 @@ async function collectUsedMedia(zip, usedSlides, usedLayouts, usedMasters) {
     const usedMedia = new Set();
     const startTime = performance.now();
     try {
-        console.log(`[collectUsedMedia] Starting media collection. Analyzing ${usedSlides.length} slides, ${usedLayouts.size} layouts, ${usedMasters.size} masters, and themes.`);
+        console.log(`[collectUsedMedia] Starting media collection (${usedSlides.length} slides, ${usedLayouts.size} layouts, ${usedMasters.size} masters)`);
         await processRelationshipFiles(zip, usedSlides, usedLayouts, usedMasters, usedMedia);
-        const themeRelsFiles = Object.keys(zip.files).filter(p => p.match(/^ppt\/theme\/_rels\/theme\d+\.xml\.rels$/));
-        if (themeRelsFiles.length > 0) {
-            console.log(`[collectUsedMedia] Analyzing ${themeRelsFiles.length} theme relationship files.`);
-            await processGenericRelationshipFiles(zip, themeRelsFiles, usedMedia, "theme");
-        } else {
-            console.log(`[collectUsedMedia] No theme relationship files found (ppt/theme/_rels/theme*.xml.rels).`);
+        
+        // 合并所有关系文件处理的日志，减少重复输出
+        const fileTypes = [
+            {pattern: /^ppt\/theme\/_rels\/theme\d+\.xml\.rels$/, name: "theme"},
+            {pattern: /^ppt\/notesSlides\/_rels\/notesSlide\d+\.xml\.rels$/, name: "notes slide"},
+            {pattern: /^ppt\/comments\/_rels\/comment\d+\.xml\.rels$/, name: "comments"},
+            {pattern: /^ppt\/charts\/_rels\/chart\d+\.xml\.rels$/, name: "chart"},
+            {pattern: /^ppt\/embeddings\/_rels\/[^/]+\.rels$/, name: "embeddings"},
+            {pattern: /^ppt\/slides\/notes\/_rels\/[^/]+\.rels$/, name: "slide notes"},
+            {pattern: /^ppt\/handouts\/_rels\/[^/]+\.rels$/, name: "handouts"}
+        ];
+        
+        // 收集所有要处理的文件
+        const filesByType = {};
+        for (const {pattern, name} of fileTypes) {
+            const files = Object.keys(zip.files).filter(p => p.match(pattern));
+            if (files.length > 0) {
+                filesByType[name] = files;
+            }
         }
+        
+        // 输出一条汇总日志
+        const typesFound = Object.entries(filesByType)
+            .map(([type, files]) => `${type} (${files.length})`)
+            .join(", ");
+        
+        if (typesFound) {
+            console.log(`[collectUsedMedia] Analyzing relationship files: ${typesFound}`);
+        }
+        
+        // 处理所有类型的文件
+        for (const [type, files] of Object.entries(filesByType)) {
+            await processGenericRelationshipFiles(zip, files, usedMedia, type);
+        }
+        
         const duration = performance.now() - startTime;
         console.log(`[collectUsedMedia] Media collection finished in ${duration.toFixed(0)} ms. Final count: ${usedMedia.size}`);
     } catch (error) {
-        console.error('[collectUsedMedia] Error collecting used media files:', error.message, error.stack);
+        console.error('[collectUsedMedia] Error collecting used media files:', error.message);
     }
     return usedMedia;
 }
@@ -91,7 +119,11 @@ async function processRelationshipFiles(zip, usedSlides, usedLayouts, usedMaster
         return `${dir}/_rels/${filename}.rels`;
     }).filter(Boolean);
     const relsFilesToCheck = Array.from(new Set([...slideRelsFiles, ...layoutRelsFiles, ...masterRelsFiles])).filter(path => zip.file(path));
-    console.log(`[processRelationshipFiles] Analyzing ${relsFilesToCheck.length} relationship files for used slides/layouts/masters.`);
+    
+    // 精简为一条日志，包含所有必要信息
+    console.log(`[processRelationshipFiles] Analyzing ${relsFilesToCheck.length} relationship files (Slides: ${slideRelsFiles.length}, Layouts: ${layoutRelsFiles.length}, Masters: ${masterRelsFiles.length})`);
+    
+    // 删除详细文件列表日志，这些信息通常不需要
     await processGenericRelationshipFiles(zip, relsFilesToCheck, usedMedia, "slide/layout/master");
 }
 
@@ -99,6 +131,8 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
     if (!relsFilePaths || relsFilePaths.length === 0) {
         return;
     }
+    
+    // 删除详细的处理日志，只保留错误日志
     await Promise.all(relsFilePaths.map(async (relsPath) => {
         try {
             const relsDoc = await parseXmlDOM(zip, relsPath);
@@ -106,36 +140,55 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
                 console.warn(`[processGenericRelationshipFiles] Failed to parse: ${relsPath}`);
                 return;
             }
+            
             const relationships = Array.from(relsDoc.querySelectorAll('Relationship'));
             if (!relationships.length) {
-                console.warn(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
+                console.debug(`[processGenericRelationshipFiles] No Relationship nodes found: ${relsPath}`);
+                return;
             }
+            
             relationships.forEach(rel => {
                 if (!rel) return;
                 const relType = rel.getAttribute('Type');
                 const target = rel.getAttribute('Target');
                 const targetMode = rel.getAttribute('TargetMode');
+                
                 if (!relType || !target) {
-                    console.warn(`[processGenericRelationshipFiles] Relationship missing Type or Target: ${rel.outerHTML}`);
+                    console.debug(`[processGenericRelationshipFiles] Relationship missing Type or Target`);
                     return;
                 }
-                if (targetMode === 'External') {
-                    return;
-                }
-                if (relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' ||
-                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio' ||
-                    relType === 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/video' ||
-                    relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
+                
+                if (targetMode === 'External') return;
+                
+                if (relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
                     let mediaPath = resolvePath(relsPath, target);
-                    if (mediaPath && mediaPath.startsWith(MEDIA_PATH_PREFIX)) {
-                        usedMedia.add(mediaPath);
+                    
+                    if (!mediaPath && target.includes('media/')) {
+                        mediaPath = 'ppt/' + target.replace(/^\.\.\//, '');
+                    }
+                    
+                    if (!mediaPath && target.startsWith('../media/')) {
+                        const slideDir = relsPath.split('/_rels/')[0];
+                        mediaPath = resolvePath(slideDir, target);
+                    }
+                    
+                    if (mediaPath) {
+                        if (mediaPath.startsWith('ppt/media/')) {
+                            usedMedia.add(mediaPath);
+                            // 删除每个媒体文件的添加日志，减少输出量
+                        } else if (mediaPath.includes('/media/') || mediaPath.includes('\\media\\')) {
+                            const normalizedPath = 'ppt/media/' + mediaPath.split(/[\/\\]media[\/\\]/).pop();
+                            usedMedia.add(normalizedPath);
+                        } else {
+                            console.debug(`[processGenericRelationshipFiles] Non-standard media path: ${mediaPath}`);
+                        }
                     } else {
-                        console.warn(`[processGenericRelationshipFiles] Resolved path "${mediaPath}" (target="${target}", relsPath="${relsPath}") does not start with ${MEDIA_PATH_PREFIX}. Skipping.`);
+                        console.debug(`[processGenericRelationshipFiles] Failed to resolve media path for target="${target}"`);
                     }
                 }
             });
         } catch (error) {
-            console.error(`[processGenericRelationshipFiles] Error processing ${relsPath} (context: ${context}):`, error.message, error.stack);
+            console.error(`[processGenericRelationshipFiles] Error processing ${relsPath}:`, error.message);
         }
     }));
 }
@@ -203,10 +256,41 @@ async function removeUnusedMedia(zip, usedMedia) {
         
         console.log(`[removeUnusedMedia] Found ${unusedMediaFiles.length} unused media files.`);
         
+        // 额外验证步骤：检查所有关系文件中引用的媒体
+        const allRelsFiles = Object.keys(zip.files).filter(path => path.endsWith('.rels'));
+        const referencedMedia = new Set();
+        
+        // 删除每个引用的详细日志，只保留汇总信息
+        for (const relsPath of allRelsFiles) {
+            try {
+                const content = await zip.file(relsPath)?.async('string');
+                if (!content) continue;
+                
+                const mediaMatches = content.match(/Target="\.\.\/media\/[^"]+"/g) || [];
+                for (const match of mediaMatches) {
+                    const target = match.replace(/Target="\.\.\/media\/([^"]+)"/, '$1');
+                    if (target) {
+                        const mediaPath = `ppt/media/${target}`;
+                        referencedMedia.add(mediaPath);
+                    }
+                }
+            } catch (error) {
+                console.error(`[removeUnusedMedia] Error checking references in ${relsPath}:`, error.message);
+            }
+        }
+        
+        const actualUnusedFiles = unusedMediaFiles.filter(path => !referencedMedia.has(path));
+        
+        if (actualUnusedFiles.length < unusedMediaFiles.length) {
+            console.warn(`[removeUnusedMedia] Found ${unusedMediaFiles.length - actualUnusedFiles.length} media files referenced in .rels files but marked as unused. These will NOT be removed.`);
+        }
+        
+        console.log(`[removeUnusedMedia] Will replace ${actualUnusedFiles.length} unused media files with placeholders.`);
+        
         const oneByteContent = new Uint8Array([0]);
         let replacedCount = 0;
         
-        for (const mediaPath of unusedMediaFiles) {
+        for (const mediaPath of actualUnusedFiles) {
             try {
                 zip.file(mediaPath, oneByteContent);
                 replacedCount++;
@@ -215,7 +299,7 @@ async function removeUnusedMedia(zip, usedMedia) {
             }
         }
         
-        console.log(`[removeUnusedMedia] Successfully replaced ${replacedCount}/${unusedMediaFiles.length} unused media files with placeholders.`);
+        console.log(`[removeUnusedMedia] Successfully replaced ${replacedCount}/${actualUnusedFiles.length} unused media files with placeholders.`);
     } catch (error) {
         console.error('[removeUnusedMedia] Error during media replacement:', error.message);
     }

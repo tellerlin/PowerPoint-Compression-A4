@@ -29,13 +29,10 @@ async function resizeImage(bitmap, targetWidth, targetHeight) {
 async function compressImageInWorker(data, quality, format) {
   return new Promise((resolve, reject) => {
     try {
-      console.log(`[compressImageInWorker] Starting worker compression: size=${data.byteLength}, quality=${quality}, format=${format || 'auto'}`);
-      
       const workerPath = new URL('../workers/imageCompression.worker.js', import.meta.url).href;
       const worker = new Worker(workerPath);
       
       const timeoutId = setTimeout(() => {
-        console.warn('[compressImageInWorker] Worker compression timed out after 30s');
         worker.terminate();
         reject(new Error('Worker compression timed out'));
       }, 30000);
@@ -45,10 +42,8 @@ async function compressImageInWorker(data, quality, format) {
         const { success, result, error } = event.data;
         
         if (success && result) {
-          console.log(`[compressImageInWorker] Worker compression successful: originalSize=${result.originalSize}, compressedSize=${result.compressedSize}, method=${result.compressionMethod}`);
           resolve(result);
         } else {
-          console.error(`[compressImageInWorker] Worker compression failed: ${error}`);
           reject(new Error(error || 'Worker compression failed'));
         }
         
@@ -57,7 +52,6 @@ async function compressImageInWorker(data, quality, format) {
       
       worker.onerror = (error) => {
         clearTimeout(timeoutId);
-        console.error(`[compressImageInWorker] Worker error: ${error.message}`);
         worker.terminate();
         reject(new Error(`Worker error: ${error.message}`));
       };
@@ -70,7 +64,6 @@ async function compressImageInWorker(data, quality, format) {
         format
       }, [dataClone.buffer]);
     } catch (error) {
-      console.error(`[compressImageInWorker] Failed to initialize worker: ${error.message}`);
       reject(new Error(`Failed to initialize worker: ${error.message}`));
     }
   });
@@ -92,7 +85,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     try {
       cached = imageCache.get(cacheKey);
       if (cached) {
-        console.log(`[compressImage] Using cached result for ${cacheKey}`);
         return cached;
       }
     } catch (e) {
@@ -100,7 +92,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     }
     
     if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-      console.log(`[compressImage] Skipping compression: image too small (${originalSize} bytes)`);
       const result = {
         data: data,
         format: 'original',
@@ -115,7 +106,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     
     const format = await detectFormat(data);
     if (format === 'unknown' || format === 'tiff' || format === 'gif') {
-      console.log(`[compressImage] Skipping compression: unsupported format (${format})`);
       return {
         data: data,
         format: format || 'original',
@@ -129,7 +119,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     
     if (typeof Worker !== 'undefined' && originalSize > COMPRESSION_SETTINGS.WORKER_THRESHOLD_SIZE) {
       try {
-        console.log(`[compressImage] Using worker for compression (size: ${originalSize} bytes)`);
         const result = await compressImageInWorker(data, quality, format);
         
         try {
@@ -144,7 +133,6 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
       }
     }
     
-    console.log(`[compressImage] Using main thread for compression (size: ${originalSize} bytes)`);
     const result = await processImage(data, quality, format);
     
     try {
@@ -155,7 +143,7 @@ export async function compressImage(data, quality = COMPRESSION_SETTINGS.DEFAULT
     
     return result;
   } catch (error) {
-    console.error(`[compressImage] General error compressing image:`, error.message);
+    console.error(`[compressImage] Error:`, error.message);
     return {
       data: data,
       format: 'original',
