@@ -1,5 +1,6 @@
 <script>
   import { browser } from '$app/environment';
+  import AudioTools from '$lib/components/AudioTools.svelte';
   
   let ClientOnlyCompressor;
   console.log('[AudioPage] Initializing page component');
@@ -35,4 +36,6 @@
       Loading audio compression tool...
     </div>
   </div>
-{/if} 
+{/if}
+
+<AudioTools /> 

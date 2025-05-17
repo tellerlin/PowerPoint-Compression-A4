@@ -1,40 +1,40 @@
 <script>
   import { page } from '$app/stores';
-  import { NAVIGATION_ITEMS } from './constants';
+  import { NAV_ITEMS } from './constants';
+  import ThemeToggle from '$lib/components/ThemeToggle.svelte';
   
   $: currentPath = $page.url.pathname;
 </script>
 
-<header class="fixed top-0 w-full bg-dark-surface backdrop-blur-sm border-b border-dark-surface z-50">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <nav class="flex items-center justify-between h-16">
-      <div class="flex items-center">
-        <img src="/images/logo.svg" alt="Logo" class="logo" style="max-height: 64px; max-width: auto;" />
-        <a href="/" class="flex items-center space-x-2">
-          <span class="text-xl font-display font-bold text-white">ByteSlim Compression</span>
-        </a>
-      </div>
-      
-      <div class="hidden md:flex items-center space-x-1">
-        {#each NAVIGATION_ITEMS as item}
+<header class="bg-gray-800 shadow-lg">
+  <nav class="container mx-auto px-4 py-4">
+    <div class="flex items-center justify-between">
+      <!-- Logo -->
+      <a href="/" class="text-xl font-bold text-white">
+        Media Tools
+      </a>
+
+      <!-- Navigation -->
+      <div class="hidden md:flex space-x-8">
+        {#each NAV_ITEMS as item}
           <a
             href={item.href}
-            class="px-4 py-2 rounded-md text-sm font-medium transition-all duration-200
-              {currentPath === item.href 
-                ? 'bg-surface/20 text-white' 
-                : 'text-white hover:bg-dark-surface hover:text-gray-300'}"
+            class="text-gray-300 hover:text-white transition-colors relative group"
           >
-            {item.label}
+            {item.name}
+            <div class="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500 transform scale-x-0 group-hover:scale-x-100 transition-transform"></div>
           </a>
         {/each}
       </div>
-    </nav>
-  </div>
+
+      <!-- Theme Toggle -->
+      <div class="flex items-center space-x-4">
+        <ThemeToggle />
+      </div>
+    </div>
+  </nav>
 </header>
 
 <style>
-  .logo {
-    max-height: 64px;
-    max-width: 64px;
-  }
+  /* .logo类未被使用，已移除 */
 </style>
