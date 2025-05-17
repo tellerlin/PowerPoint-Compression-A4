@@ -49,11 +49,22 @@ export function analyzeImageType(imageData) {
 }
 
 export function checkAlphaChannel(imageData) {
-  const data = imageData.data;
-  for (let i = 3; i < data.length; i += 4) {
-    if (data[i] < 255) return true;
+  // 添加健壮性检查
+  if (!imageData || !imageData.data) {
+    console.warn('[checkAlphaChannel] Invalid imageData received');
+    return false; // 默认认为没有透明度通道
   }
-  return false;
+  
+  try {
+    const data = imageData.data;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] < 255) return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('[checkAlphaChannel] Error checking alpha channel:', error);
+    return false; // 出错时安全地返回无透明通道
+  }
 }
 
 export function analyzeImage(imageData) {
@@ -178,10 +189,32 @@ export async function processImage(data, quality, originalFormat) {
       
       if (hasAlpha) {
         try {
-          const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-          blobs.push({ type: 'png', blob: pngBlob });
+          const pngBlob = await canvas.convertToBlob({ 
+            type: 'image/png',
+            compressionLevel: 9,  // 最高压缩级别
+            quality: 1.0  // PNG是无损格式，quality参数不影响大小
+          });
+          console.log(`[ImageCompressionWorker] PNG compression result: ${pngBlob.size} bytes`);
+          blobs.push({
+            type: 'png',
+            blob: pngBlob
+          });
         } catch (err) {
-          console.error(`PNG compression failed: ${err.message}`);
+          console.error(`[ImageCompressionWorker] PNG compression failed: ${err.message}`);
+          // 尝试使用更保守的设置
+          try {
+            const pngBlob = await canvas.convertToBlob({ 
+              type: 'image/png',
+              compressionLevel: 6
+            });
+            console.log(`[ImageCompressionWorker] PNG fallback compression result: ${pngBlob.size} bytes`);
+            blobs.push({
+              type: 'png',
+              blob: pngBlob
+            });
+          } catch (fallbackErr) {
+            console.error(`[ImageCompressionWorker] PNG fallback compression failed: ${fallbackErr.message}`);
+          }
         }
       }
       

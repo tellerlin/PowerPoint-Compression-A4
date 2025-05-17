@@ -258,12 +258,15 @@ async function removeUnusedMedia(zip, usedMedia) {
                 const content = await zip.file(relsPath)?.async('string');
                 if (!content) continue;
                 
-                const mediaMatches = content.match(/Target="\.\.\/media\/[^"]+"/g) || [];
+                const mediaMatches = content.match(/Target="[^"]*media\/[^"]+"/g) || [];
                 for (const match of mediaMatches) {
-                    const target = match.replace(/Target="\.\.\/media\/([^"]+)"/, '$1');
+                    const target = match.replace(/Target="([^"]+)"/, '$1');
                     if (target) {
-                        const mediaPath = `ppt/media/${target}`;
-                        referencedMedia.add(mediaPath);
+                        const mediaPath = resolveMediaPath(relsPath, target);
+                        if (mediaPath) {
+                            referencedMedia.add(mediaPath);
+                            console.debug(`[removeUnusedMedia] Found media reference in ${relsPath}: ${mediaPath}`);
+                        }
                     }
                 }
             } catch (error) {
@@ -271,7 +274,15 @@ async function removeUnusedMedia(zip, usedMedia) {
             }
         }
         
-        const actualUnusedFiles = unusedMediaFiles.filter(path => !referencedMedia.has(path));
+        console.log(`[removeUnusedMedia] Found ${referencedMedia.size} media files referenced in .rels files.`);
+        
+        const actualUnusedFiles = unusedMediaFiles.filter(path => {
+            const isReferenced = referencedMedia.has(path);
+            if (isReferenced) {
+                console.debug(`[removeUnusedMedia] Media file ${path} is referenced in .rels files.`);
+            }
+            return !isReferenced;
+        });
         
         if (actualUnusedFiles.length < unusedMediaFiles.length) {
             console.warn(`[removeUnusedMedia] Found ${unusedMediaFiles.length - actualUnusedFiles.length} media files referenced in .rels files but marked as unused. These will NOT be removed.`);
@@ -279,13 +290,23 @@ async function removeUnusedMedia(zip, usedMedia) {
         
         console.log(`[removeUnusedMedia] Will replace ${actualUnusedFiles.length} unused media files with placeholders.`);
         
-        const oneByteContent = new Uint8Array([0]);
         let replacedCount = 0;
-        
         for (const mediaPath of actualUnusedFiles) {
             try {
-                zip.file(mediaPath, oneByteContent);
-                replacedCount++;
+                const file = zip.file(mediaPath);
+                if (file) {
+                    const placeholderData = new Uint8Array([
+                        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+                        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+                        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+                        0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+                        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+                        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82
+                    ]);
+                    
+                    zip.file(mediaPath, placeholderData);
+                    replacedCount++;
+                }
             } catch (error) {
                 console.error(`[removeUnusedMedia] Error replacing media file ${mediaPath}:`, error.message);
             }
@@ -293,7 +314,31 @@ async function removeUnusedMedia(zip, usedMedia) {
         
         console.log(`[removeUnusedMedia] Successfully replaced ${replacedCount}/${actualUnusedFiles.length} unused media files with placeholders.`);
     } catch (error) {
-        console.error('[removeUnusedMedia] Error during media replacement:', error.message);
+        console.error('[removeUnusedMedia] Error during media cleanup:', error.message);
+    }
+}
+
+function resolveMediaPath(basePath, target) {
+    if (!target) return null;
+    
+    try {
+        if (target.startsWith('/')) {
+            return 'ppt' + target;
+        }
+        
+        const baseDir = basePath.substring(0, basePath.lastIndexOf('/') + 1);
+        const resolvedPath = resolvePath(baseDir, target);
+        
+        if (resolvedPath && resolvedPath.includes('media/')) {
+            return resolvedPath.startsWith('ppt/media/') ? 
+                resolvedPath : 
+                'ppt/media/' + resolvedPath.split('media/').pop();
+        }
+        
+        return null;
+    } catch (error) {
+        console.error(`[resolveMediaPath] Error resolving path for target="${target}" relative to "${basePath}":`, error.message);
+        return null;
     }
 }
 

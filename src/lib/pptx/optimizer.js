@@ -1,7 +1,11 @@
 import * as JSZip from 'jszip';
 import { validateFile } from '../utils/validation';
 import { compressImage, compressImagesInParallel } from '../utils/image';
-import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
+import { 
+  COMPRESSION_SETTINGS, 
+  SUPPORTED_IMAGE_EXTENSIONS,
+  COMPRESSION_PRESETS 
+} from './constants';
 import { findMediaFiles, processMediaFile } from './media';
 import { removeHiddenSlides } from './slides';
 import { cleanUnusedResources } from './cleaner';
@@ -49,10 +53,18 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
 
   // 并行处理图片
   if (imagesToCompress.length > 0) {
-    const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
-    const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
+    // 获取完整的压缩选项
+    const compressionOptions = typeof options.compressImages === 'object' ? options.compressImages : {
+      quality: COMPRESSION_SETTINGS.DEFAULT_QUALITY,
+      allowFormatConversion: true,
+      allowDownsampling: true,
+      maxImageSize: COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
+      compressionMethod: 'mozjpeg'
+    };
     
-    const compressedImages = await compressImagesInParallel(imagesToCompress, adjustedQuality, (progress) => {
+    console.log('[processMediaBatch] Using compression options:', compressionOptions);
+    
+    const compressedImages = await compressImagesInParallel(imagesToCompress, compressionOptions, (progress) => {
       processedCount++;
       const batchProgress = (processedCount / totalBatchFiles) * 100;
       onProgress('media', {
@@ -124,8 +136,31 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
 }
 
 export async function optimizePPTX(file, options = {}) {
+  // Merge preset and user options
+  const preset = options.preset || COMPRESSION_SETTINGS.DEFAULT_PRESET;
+  const presetOptions = COMPRESSION_PRESETS[preset] || COMPRESSION_PRESETS.balanced;
+  
+  console.log('[optimizePPTX] Initial options:', options);
+  console.log('[optimizePPTX] Selected preset:', preset);
+  console.log('[optimizePPTX] Preset options:', presetOptions);
+  
+  const mergedOptions = {
+    ...presetOptions,
+    ...options,
+    compressImages: options.compressImages !== false ? {
+      quality: options.quality || presetOptions.quality,
+      allowFormatConversion: options.allowFormatConversion ?? presetOptions.allowFormatConversion,
+      allowDownsampling: options.allowDownsampling ?? presetOptions.allowDownsampling,
+      maxImageSize: options.maxImageSize || presetOptions.maxImageSize,
+      compressionMethod: options.compressionMethod || presetOptions.compressionMethod
+    } : false
+  };
+  
+  console.log('[optimizePPTX] Merged options:', mergedOptions);
+  console.log('[optimizePPTX] Compression settings:', mergedOptions.compressImages);
+
   let zip;
-  const { onProgress = updateProgress } = options;
+  const { onProgress = updateProgress } = mergedOptions;
   const startTime = Date.now();
   let finalStats = {
     originalSize: file?.size || 0,
@@ -167,7 +202,7 @@ export async function optimizePPTX(file, options = {}) {
       throw new Error(errorMessage);
     }
 
-    if (options.removeHiddenSlides) {
+    if (mergedOptions.removeHiddenSlides) {
       onProgress('init', { percentage: 5, status: 'Removing hidden slides...' });
       try {
         await removeHiddenSlides(zip, onProgress);
@@ -179,8 +214,8 @@ export async function optimizePPTX(file, options = {}) {
     onProgress('init', { percentage: 15, status: 'Cleaning unused resources...' });
     try {
       const cleanupSuccess = await cleanUnusedResources(zip, onProgress, {
-        removeUnusedLayouts: options.removeUnusedLayouts,
-        cleanMediaInUnusedLayouts: options.cleanMediaInUnusedLayouts,
+        removeUnusedLayouts: mergedOptions.removeUnusedLayouts,
+        cleanMediaInUnusedLayouts: mergedOptions.cleanMediaInUnusedLayouts,
       });
       if (!cleanupSuccess) {
         onProgress('warning', { message: 'Resource cleanup encountered issues.' });
@@ -189,13 +224,14 @@ export async function optimizePPTX(file, options = {}) {
       onProgress('warning', { message: `Resource cleanup failed: ${error.message}` });
     }
 
-    if (options.preprocessImages) {
+    if (mergedOptions.preprocessImages) {
       onProgress('init', { percentage: 35, status: 'Preprocessing images...' });
       await preprocessImages(zip, { /* Options */ });
     }
 
-    if (options.compressImages !== false) {
+    if (mergedOptions.compressImages !== false) {
       const mediaFiles = findMediaFiles(zip);
+      console.log('[optimizePPTX] Found media files:', mediaFiles.length);
       onProgress('mediaCount', { count: mediaFiles.length });
 
       let totalOriginalMediaSize = 0;
@@ -211,10 +247,13 @@ export async function optimizePPTX(file, options = {}) {
           mediaFiles.some(f => f.size > 5 * 1024 * 1024) ? 2 :  // 如果有大于5MB的文件，一次处理两个
           4  // 其他情况一次处理4个
         );
+        
+        console.log('[optimizePPTX] Using batch size:', batchSize);
 
         for (let i = 0; i < mediaFiles.length; i += batchSize) {
           const batch = mediaFiles.slice(i, i + batchSize);
-          const batchResults = await processMediaBatch(zip, batch, options, cpuCount, onProgress, i, mediaFiles.length);
+          console.log(`[optimizePPTX] Processing batch ${i/batchSize + 1}/${Math.ceil(mediaFiles.length/batchSize)}`);
+          const batchResults = await processMediaBatch(zip, batch, mergedOptions, cpuCount, onProgress, i, mediaFiles.length);
           
           // 处理结果...
           batchResults.forEach(result => {
@@ -225,7 +264,9 @@ export async function optimizePPTX(file, options = {}) {
             } else {
               failedMediaCount++;
             }
+            console.log(`[optimizePPTX] File ${result.path}: ${result.originalSize} -> ${result.compressedSize} (${result.success ? 'success' : 'failed'})`);
           });
+          
           const elapsed = Date.now() - startTime;
           const currentProcessedTotal = processedMediaCount + failedMediaCount;
           const estimatedRemaining = calculateEstimatedTime(elapsed, currentProcessedTotal, mediaFiles.length);
@@ -237,6 +278,12 @@ export async function optimizePPTX(file, options = {}) {
             estimatedTimeRemaining: Math.round(estimatedRemaining / 1000)
           });
         }
+        
+        console.log('[optimizePPTX] Media compression summary:');
+        console.log('- Total original size:', totalOriginalMediaSize);
+        console.log('- Total compressed size:', totalCompressedMediaSize);
+        console.log('- Processed files:', processedMediaCount);
+        console.log('- Failed files:', failedMediaCount);
         
         finalStats.originalMediaSize = totalOriginalMediaSize;
         finalStats.compressedMediaSize = totalCompressedMediaSize;
@@ -251,6 +298,7 @@ export async function optimizePPTX(file, options = {}) {
       stats: finalStats
     });
 
+    console.log('[optimizePPTX] Generating final ZIP with compression level:', COMPRESSION_SETTINGS.ZIP_COMPRESSION_LEVEL);
     const compressedBlob = await zip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
@@ -263,6 +311,13 @@ export async function optimizePPTX(file, options = {}) {
     finalStats.savedSize = overallStats.savedSize;
     finalStats.savedPercentage = overallStats.savedPercentage;
     finalStats.processingTime = (Date.now() - startTime) / 1000;
+
+    console.log('[optimizePPTX] Final compression results:');
+    console.log('- Original size:', finalStats.originalSize);
+    console.log('- Compressed size:', finalStats.compressedSize);
+    console.log('- Saved size:', finalStats.savedSize);
+    console.log('- Saved percentage:', finalStats.savedPercentage);
+    console.log('- Processing time:', finalStats.processingTime);
 
     onProgress('complete', { stats: finalStats });
 

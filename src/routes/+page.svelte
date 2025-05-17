@@ -308,14 +308,14 @@
               </div>
             </div>
           {/if}
-          {#if $compressionProgress.percentage > 0 && $compressionProgress.percentage < 100}
+          {#if $compressionProgress.percentage > 0 && $compressionProgress.percentage < 100 && !compressionComplete}
             <div class="mt-4">
               <Button on:click={cancelCompression} variant="outline" size="sm">
                 Cancel Compression
               </Button>
             </div>
-          {:else if !processing && !$compressionProgress.error}
-             <p class="text-center text-muted">Preparing...</p>
+
+            <p class="text-center text-muted">Preparing...</p>
           {/if}
         {/if}
       </div>
