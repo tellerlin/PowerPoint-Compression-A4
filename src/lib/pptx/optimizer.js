@@ -1,6 +1,6 @@
 import * as JSZip from 'jszip';
 import { validateFile } from '../utils/validation';
-import { compressImage } from '../utils/image';
+import { compressImage, compressImagesInParallel } from '../utils/image';
 import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
 import { findMediaFiles, processMediaFile } from './media';
 import { removeHiddenSlides } from './slides';
@@ -13,47 +13,102 @@ async function preprocessImages(zip, options = {}) {
   return true;
 }
 
-// 将图像处理逻辑抽取为单独函数
+// 修改processMediaBatch函数以使用并行压缩
 async function processMediaBatch(zip, batch, options, cpuCount, onProgress) {
-  const batchPromises = batch.map(mediaPath => {
-    return (async () => {
+  const imagesToCompress = [];
+  const otherFiles = [];
+
+  // 分离图片和其他文件
+  for (const mediaPath of batch) {
+    const fileExtension = mediaPath.split('.').pop()?.toLowerCase() || '';
+    const isSupportedImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
+    
+    if (isSupportedImage) {
+      try {
+        const file = zip.file(mediaPath);
+        if (file) {
+          const data = await file.async('uint8array');
+          if (data.byteLength > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
+            imagesToCompress.push({ path: mediaPath, data });
+          } else {
+            otherFiles.push({ path: mediaPath, data });
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to read file ${mediaPath}:`, e);
+        otherFiles.push({ path: mediaPath, data: null });
+      }
+    } else {
+      otherFiles.push({ path: mediaPath, data: null });
+    }
+  }
+
+  const results = [];
+
+  // 并行处理图片
+  if (imagesToCompress.length > 0) {
+    const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
+    const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
+    
+    const compressedImages = await compressImagesInParallel(imagesToCompress, adjustedQuality);
+    
+    // 更新压缩后的图片
+    for (let i = 0; i < imagesToCompress.length; i++) {
+      const { path } = imagesToCompress[i];
+      const compressedData = compressedImages[i];
+      
+      try {
+        await processMediaFile(zip, path, async () => compressedData);
+        results.push({
+          path,
+          originalSize: imagesToCompress[i].data.byteLength,
+          compressedSize: compressedData.byteLength,
+          success: true,
+          error: null
+        });
+      } catch (error) {
+        results.push({
+          path,
+          originalSize: imagesToCompress[i].data.byteLength,
+          compressedSize: imagesToCompress[i].data.byteLength,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+  }
+
+  // 处理其他文件
+  for (const { path, data } of otherFiles) {
+    try {
       let fileOriginalSize = 0;
       let fileCompressedSize = 0;
-      let success = false;
-      let error = null;
-      try {
-        const fileExtension = mediaPath.split('.').pop()?.toLowerCase() || '';
-        const isSupportedImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
-        await processMediaFile(zip, mediaPath, async (data) => {
-          fileOriginalSize = data.byteLength;
-          fileCompressedSize = fileOriginalSize;
-          if (isSupportedImage && fileOriginalSize > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-            const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
-            const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-            const compressResult = await compressImage(data, adjustedQuality);
-            if (compressResult.error) {
-              error = compressResult.error;
-              return data;
-            }
-            fileCompressedSize = compressResult.compressedSize;
-            return compressResult.data;
-          } else {
-            return data;
-          }
-        });
-        success = error === null;
-      } catch (processError) {
-        error = processError.message;
-        try {
-          const file = zip.file(mediaPath);
-          if (file) fileOriginalSize = (await file.async('uint8array')).byteLength;
-        } catch (e) {}
+      
+      await processMediaFile(zip, path, async (fileData) => {
+        fileOriginalSize = fileData.byteLength;
         fileCompressedSize = fileOriginalSize;
-      }
-      return { path: mediaPath, originalSize: fileOriginalSize, compressedSize: fileCompressedSize, success, error };
-    })();
-  });
-  return await Promise.all(batchPromises);
+        return fileData;
+      });
+      
+      results.push({
+        path,
+        originalSize: fileOriginalSize,
+        compressedSize: fileCompressedSize,
+        success: true,
+        error: null
+      });
+    } catch (error) {
+      results.push({
+        path,
+        originalSize: 0,
+        compressedSize: 0,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  return results;
 }
 
 export async function optimizePPTX(file, options = {}) {
@@ -137,7 +192,13 @@ export async function optimizePPTX(file, options = {}) {
       let failedMediaCount = 0;
 
       if (mediaFiles.length > 0) {
-        const batchSize = Math.min(mediaFiles.length, Math.max(4, cpuCount * 2));
+        // 根据文件大小动态调整批处理大小
+        const batchSize = Math.min(
+          mediaFiles.length,
+          mediaFiles.some(f => f.size > 10 * 1024 * 1024) ? 1 : // 如果有大于10MB的文件，一次处理一个
+          mediaFiles.some(f => f.size > 5 * 1024 * 1024) ? 2 :  // 如果有大于5MB的文件，一次处理两个
+          4  // 其他情况一次处理4个
+        );
 
         for (let i = 0; i < mediaFiles.length; i += batchSize) {
           const batch = mediaFiles.slice(i, i + batchSize);

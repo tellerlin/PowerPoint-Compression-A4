@@ -6,13 +6,14 @@
   import { Alert } from '$lib/components/ui/Alert';
   import { Container } from '$lib/components/ui';
   import { browser } from '$app/environment';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import CompressionOptions from '$lib/components/CompressionOptions.svelte';
 
   let files;
   let processing = false;
   let downloadUrl = null;
   let downloadLink = null;
+  let isFFmpegLoaded = false;
 
   let compressionOptions = {
     compressImages: {
@@ -22,6 +23,27 @@
     removeHiddenSlides: true,
     removeUnusedLayouts: true
   };
+
+  onMount(async () => {
+    try {
+      // 加载FFmpeg
+      const script = document.createElement('script');
+      script.src = '/ffmpeg/ffmpeg.min.js';
+      script.async = true;
+      script.onload = () => {
+        isFFmpegLoaded = true;
+        console.log('[FFmpeg] Loaded successfully');
+      };
+      script.onerror = (error) => {
+        console.error('[FFmpeg] Failed to load:', error);
+        updateProgress('error', { message: 'Failed to load FFmpeg. Please refresh the page and try again.' });
+      };
+      document.head.appendChild(script);
+    } catch (error) {
+      console.error('[FFmpeg] Error during initialization:', error);
+      updateProgress('error', { message: 'Failed to initialize FFmpeg. Please refresh the page and try again.' });
+    }
+  });
 
   function handleOptionsChange(event) {
     compressionOptions = event.detail;
@@ -64,6 +86,10 @@
       updateProgress('error', { message: `File size (${formatBytes(file.size)}) exceeds the 300MB limit.` });
       return;
     }
+    if (!isFFmpegLoaded) {
+      updateProgress('error', { message: 'FFmpeg is not loaded yet. Please wait a moment and try again.' });
+      return;
+    }
     processing = true;
     resetProgressStore();
     try {
@@ -85,16 +111,10 @@
       downloadUrl = url;
       downloadLink = a;
     } catch (error) {
-      if (!$compressionProgress.error) {
-        updateProgress('error', {
-          message: error.message || "File processing failed unexpectedly.",
-          stats: $compressionProgress.stats
-        });
-      }
+      console.error('Compression error:', error);
+      updateProgress('error', { message: error.message || 'An error occurred during compression.' });
     } finally {
-      if ($compressionProgress.error) {
-        processing = false;
-      }
+      processing = false;
     }
   }
 
