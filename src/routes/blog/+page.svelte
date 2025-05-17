@@ -1,5 +1,6 @@
 <script>
   import { Container } from '$lib/components/ui';
+  import { siteMetadata } from '$lib/config/metadata';
   
   const posts = [
     {
@@ -11,12 +12,28 @@
       author: 'Sarah Johnson'
     },
     {
+      title: 'Audio Compression: Balancing Quality and File Size',
+      excerpt: 'Discover how to effectively compress audio files while maintaining sound quality.',
+      image: '/images/blog/audio-compression.jpg',
+      slug: 'audio-compression',
+      date: '2024-03-12',
+      author: 'Michael Chen'
+    },
+    {
       title: 'The Future of File Compression',
       excerpt: 'Exploring upcoming technologies in file compression and optimization.',
       image: '/images/blog/future-compression.jpg',
       slug: 'future-compression',
       date: '2024-03-10',
       author: 'Michael Chen'
+    },
+    {
+      title: 'Audio Trimming: A Guide to Perfect Sound Segments',
+      excerpt: 'Learn how to precisely trim audio files for professional results.',
+      image: '/images/blog/audio-trimming.jpg',
+      slug: 'audio-trimming',
+      date: '2024-03-08',
+      author: 'David Smith'
     },
     {
       title: 'Why File Size Matters in the Digital Age',
@@ -28,6 +45,17 @@
     }
   ];
 </script>
+
+<svelte:head>
+  <title>Blog - ByteSlim File Compression Tools</title>
+  <meta name="description" content="Read our latest articles about file compression, audio optimization, and PowerPoint presentation tips. Learn how to effectively manage your digital files.">
+  <meta property="og:title" content="Blog - ByteSlim File Compression Tools">
+  <meta property="og:description" content="Read our latest articles about file compression, audio optimization, and PowerPoint presentation tips. Learn how to effectively manage your digital files.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content={`${siteMetadata.url}/blog`}>
+  <meta name="twitter:title" content="Blog - ByteSlim File Compression Tools">
+  <meta name="twitter:description" content="Read our latest articles about file compression, audio optimization, and PowerPoint presentation tips. Learn how to effectively manage your digital files.">
+</svelte:head>
 
 <div class="py-24">
   <Container>

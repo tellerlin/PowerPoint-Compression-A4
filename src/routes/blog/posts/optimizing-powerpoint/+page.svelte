@@ -1,6 +1,20 @@
 <script>
   import { Container } from '$lib/components/ui';
+  import { siteMetadata } from '$lib/config/metadata';
 </script>
+
+<svelte:head>
+  <title>Optimizing PowerPoint Presentations: A Complete Guide - ByteSlim Blog</title>
+  <meta name="description" content="Learn the best practices for creating efficient and effective PowerPoint presentations. Discover how to optimize your slides while maintaining quality.">
+  <meta property="og:title" content="Optimizing PowerPoint Presentations: A Complete Guide - ByteSlim Blog">
+  <meta property="og:description" content="Learn the best practices for creating efficient and effective PowerPoint presentations. Discover how to optimize your slides while maintaining quality.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content={`${siteMetadata.url}/blog/posts/optimizing-powerpoint`}>
+  <meta name="twitter:title" content="Optimizing PowerPoint Presentations: A Complete Guide - ByteSlim Blog">
+  <meta name="twitter:description" content="Learn the best practices for creating efficient and effective PowerPoint presentations. Discover how to optimize your slides while maintaining quality.">
+  <meta name="article:published_time" content="2024-03-15">
+  <meta name="article:author" content="Sarah Johnson">
+</svelte:head>
 
 <div class="py-24">
   <Container>

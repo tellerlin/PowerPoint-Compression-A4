@@ -4,17 +4,17 @@
     const features = [
         {
             title: "Smart Compression",
-            description: "Optimize images and reduce file size.",
+            description: "Optimize PowerPoint and audio files while maintaining quality.",
             icon: "🚀"
         },
         {
             title: "Privacy First",
-            description: "Processing happens in your browser.",
+            description: "All processing happens in your browser.",
             icon: "🔒"
         },
         {
-            title: "Quality Preserved",
-            description: "Reduce file size while maintaining quality.",
+            title: "Multiple Tools",
+            description: "PPT compression, audio compression, and audio trimming in one place.",
             icon: "✨"
         }
     ];
@@ -22,8 +22,8 @@
     const jsonLd = {
         "@context": "https://schema.org",
         "@type": "WebPage",
-        "name": "About ByteSlim - PowerPoint Compression Tool",
-        "description": "Learn how ByteSlim's advanced compression technology helps reduce PowerPoint file sizes while maintaining quality. Discover our commitment to privacy and security.",
+        "name": "About ByteSlim - File Compression Tools",
+        "description": "Learn how ByteSlim's advanced compression technology helps reduce PowerPoint and audio file sizes while maintaining quality. Discover our commitment to privacy and security.",
         "mainEntity": {
             "@type": "WebApplication",
             "name": "ByteSlim",
@@ -39,8 +39,8 @@
 </script>
 
 <svelte:head>
-    <title>About ByteSlim Compression</title>
-    <meta name="description" content="Discover how ByteSlim's innovative compression technology reduces PowerPoint file sizes while maintaining quality. Learn about our privacy-first approach and commitment to security.">
+    <title>About ByteSlim - File Compression Tools</title>
+    <meta name="description" content="Discover how ByteSlim's innovative compression technology helps reduce PowerPoint and audio file sizes while maintaining quality. Features include PPT compression, audio compression, and audio trimming. Learn about our privacy-first approach and commitment to security.">
     <script type="application/ld+json">
         {JSON.stringify(jsonLd)}
     </script>

@@ -1,7 +1,7 @@
 <script>
   export let url = '';
-  export let title = 'Compress your PowerPoint files online - ByteSlim';
-  export let description = 'Free online tool to compress and optimize PowerPoint presentations without losing quality.';
+  export let title = 'ByteSlim - File Compression Tools';
+  export let description = 'Free online tools for PowerPoint and audio file compression, plus audio trimming. Reduce file sizes without quality loss.';
   
   const shareLinks = [
     {

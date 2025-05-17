@@ -1,6 +1,20 @@
 <script>
   import { Container } from '$lib/components/ui';
+  import { siteMetadata } from '$lib/config/metadata';
 </script>
+
+<svelte:head>
+  <title>The Future of File Compression - ByteSlim Blog</title>
+  <meta name="description" content="Exploring upcoming technologies in file compression and optimization. Learn about AI-powered compression, neural networks, and the future of file size reduction.">
+  <meta property="og:title" content="The Future of File Compression - ByteSlim Blog">
+  <meta property="og:description" content="Exploring upcoming technologies in file compression and optimization. Learn about AI-powered compression, neural networks, and the future of file size reduction.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content={`${siteMetadata.url}/blog/posts/future-compression`}>
+  <meta name="twitter:title" content="The Future of File Compression - ByteSlim Blog">
+  <meta name="twitter:description" content="Exploring upcoming technologies in file compression and optimization. Learn about AI-powered compression, neural networks, and the future of file size reduction.">
+  <meta name="article:published_time" content="2024-03-10">
+  <meta name="article:author" content="Michael Chen">
+</svelte:head>
 
 <div class="py-24">
   <Container>

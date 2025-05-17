@@ -3,9 +3,16 @@
   
   const sections = [
     {
+      title: 'Tools',
+      links: [
+        { title: 'PPT Compression', url: '/' },
+        { title: 'Audio Compression', url: '/audio/compress' },
+        { title: 'Audio Trimmer', url: '/audio/trim' }
+      ]
+    },
+    {
       title: 'Main',
       links: [
-        { title: 'Home', url: '/' },
         { title: 'About', url: '/about' },
         { title: 'Contact', url: '/contact' }
       ]

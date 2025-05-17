@@ -7,7 +7,7 @@
       questions: [
         {
           q: 'What is ByteSlim?',
-          a: 'ByteSlim is a free online tool that helps you compress and optimize PowerPoint presentations while maintaining their quality.'
+          a: 'ByteSlim is a free online tool that helps you compress PowerPoint presentations and audio files while maintaining their quality. It also provides audio trimming functionality.'
         },
         {
           q: 'Is ByteSlim free to use?',
@@ -20,11 +20,24 @@
       questions: [
         {
           q: 'What file types are supported?',
-          a: 'Currently, we support PPTX files (PowerPoint 2007 and newer).'
+          a: 'We support PPTX files (PowerPoint 2007 and newer) for compression, and common audio formats (MP3, WAV, etc.) for both compression and trimming.'
         },
         {
           q: 'Is there a file size limit?',
-          a: 'Yes, the maximum file size is 300MB.'
+          a: 'Yes, the maximum file size is 300MB for all supported file types.'
+        }
+      ]
+    },
+    {
+      category: 'Features',
+      questions: [
+        {
+          q: 'What features does ByteSlim offer?',
+          a: 'ByteSlim offers three main features: PPT Compression, Audio Compression, and Audio Trimming. All processing is done locally in your browser.'
+        },
+        {
+          q: 'How does audio trimming work?',
+          a: 'Our audio trimmer allows you to select specific segments of your audio files using a waveform visualization, preview the selection, and download the trimmed portion.'
         }
       ]
     },
