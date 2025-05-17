@@ -1,7 +1,7 @@
 export const NAVIGATION_ITEMS = [
-  { href: '/', label: 'Home' },
+  { href: '/', label: 'PPT Compression' },
+  { href: '/audio', label: 'Audio Compression' },
   { href: '/about', label: 'About' },
-  { href: '/blog', label: 'Blog' },
   { href: '/faq', label: 'FAQ' },
   { href: '/contact', label: 'Contact' }
 ];

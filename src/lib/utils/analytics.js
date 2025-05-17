@@ -39,7 +39,7 @@ export function initializeWeChatMetaTags(metadata) {
     });
 
     const wxScript = document.createElement('script');
-    wxScript.src = 'https://res.wx.qq.com/open/js/jweixin-1.6.0.js';
+    wxScript.src = '/jweixin-1.6.0.js';
     wxScript.async = true;
     document.head.appendChild(wxScript);
 }

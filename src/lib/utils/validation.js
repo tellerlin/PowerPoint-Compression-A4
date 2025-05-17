@@ -1,6 +1,6 @@
 import { APP_CONFIG } from "../constants/app";
 import { AppError, ErrorTypes } from "./error";
-import JSZip from 'jszip';
+import * as JSZip from 'jszip';
 
 export function validateFile(file) {
   // Basic validation

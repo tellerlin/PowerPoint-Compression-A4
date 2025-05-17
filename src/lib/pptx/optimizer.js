@@ -1,4 +1,4 @@
-import JSZip from 'jszip';
+import * as JSZip from 'jszip';
 import { validateFile } from '../utils/validation';
 import { compressImage } from '../utils/image';
 import { COMPRESSION_SETTINGS, SUPPORTED_IMAGE_EXTENSIONS } from './constants';
