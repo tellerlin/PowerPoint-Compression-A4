@@ -105,7 +105,6 @@ async function queueFFmpegTask(task) {
 
 async function compressImageWithFFmpeg(data, quality, format) {
   return queueFFmpegTask(async () => {
-    // 添加额外验证
     if (!data || data.length === 0) {
       console.error('[compressImageWithFFmpeg] Invalid input data');
       return data;
@@ -120,30 +119,27 @@ async function compressImageWithFFmpeg(data, quality, format) {
       ffmpeg.FS('writeFile', inputFileName, data);
       const args = ['-i', inputFileName];
       
-      // 更激进的压缩策略
       if (format === 'png') {
-        // 使用更安全的PNG压缩参数
-        args.push('-compression_level', '9');
+        // 使用更保守的PNG压缩参数
+        args.push('-compression_level', '4'); // 从6改为4，进一步降低压缩率
         
-        // 尝试使用更简单的过滤器
-        if (data.length > 512 * 1024) {
-          // 大文件使用简单的缩放过滤器
-          args.push('-vf', 'scale=iw*0.7:ih*0.7');
+        // 更保守的缩放策略
+        if (data.length > 1024 * 1024) { // 从512KB改为1MB
+          args.push('-vf', 'scale=iw*0.85:ih*0.85'); // 从0.8改为0.85
         }
         
-        // 使用安全的PNG编码参数
         args.push('-pred', 'none', '-f', 'png');
       } else if (format === 'jpeg' || format === 'jpg') {
-        // JPEG压缩参数不变
-        const qualityValue = data.length > 512 * 1024 ? 
-          Math.round(quality * 40) : 
-          Math.round(quality * 60);
+        // 提高JPEG质量
+        const qualityValue = data.length > 1024 * 1024 ? 
+          Math.round(quality * 75) : // 从60改为75
+          Math.round(quality * 90);  // 从80改为90
         args.push('-q:v', qualityValue.toString());
       } else if (format === 'webp') {
-        // WebP压缩参数不变
-        const qualityValue = Math.round(quality * 60);
+        // 提高WebP质量
+        const qualityValue = Math.round(quality * 90); // 从80改为90
         args.push('-quality', qualityValue.toString());
-        args.push('-lossless', '0', '-method', '6');
+        args.push('-lossless', '0', '-method', '3'); // 从4改为3，更注重质量
       }
       
       args.push(outputFileName);
@@ -165,9 +161,9 @@ async function compressImageWithFFmpeg(data, quality, format) {
 
       console.log(`[compressImageWithFFmpeg] Compression result: ${format}, ${data.length} -> ${outputData.length}`);
       
-      // 检查压缩效果
-      if (outputData.length >= data.length) {
-        console.log(`[compressImageWithFFmpeg] No size reduction: ${outputData.length} >= ${data.length}`);
+      // 检查压缩效果，提高阈值
+      if (outputData.length >= data.length * 0.95) { // 从1.0改为0.95
+        console.log(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length * 0.95}`);
         return data;
       }
       
@@ -218,8 +214,49 @@ export async function compressImagesInParallel(images, options, onProgress) {
   return results;
 }
 
-// 新增：图片自动降采样 - 增强处理大图片的能力
-async function downsampleImage(data, maxSize = 1600) {
+// 添加智能质量调整函数
+async function adjustQualityByContent(data, format, baseQuality) {
+  try {
+    const blob = new Blob([data], { type: `image/${format}` });
+    const bitmap = await createImageBitmap(blob);
+    
+    // 分析图片复杂度
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // 计算图片复杂度（这里使用简单的边缘检测作为示例）
+    let complexity = 0;
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const r = imageData.data[i];
+      const g = imageData.data[i + 1];
+      const b = imageData.data[i + 2];
+      // 简单的边缘检测
+      if (Math.abs(r - g) > 30 || Math.abs(g - b) > 30 || Math.abs(r - b) > 30) {
+        complexity++;
+      }
+    }
+    
+    // 根据复杂度调整质量
+    const complexityRatio = complexity / (bitmap.width * bitmap.height);
+    if (complexityRatio > 0.3) {
+      // 复杂图片使用更高质量
+      return baseQuality * 1.2;
+    } else if (complexityRatio < 0.1) {
+      // 简单图片可以适当降低质量
+      return baseQuality * 0.9;
+    }
+    
+    return baseQuality;
+  } catch (error) {
+    console.warn('[adjustQualityByContent] Error:', error);
+    return baseQuality;
+  }
+}
+
+// 修改降采样函数
+async function downsampleImage(data, maxSize = 1800) {
   // 仅支持常见格式
   const format = await detectFormat(data);
   if (!['png', 'jpeg', 'jpg', 'webp'].includes(format)) return data;
@@ -235,12 +272,12 @@ async function downsampleImage(data, maxSize = 1600) {
   
   const { width, height } = bitmap;
   
-  // 针对超大图片使用更激进的缩放
+  // 针对超大图片使用更保守的缩放
   let targetMaxSize = maxSize;
   if (data.byteLength > 5 * 1024 * 1024) {
-    targetMaxSize = 1200; // 5MB以上图片缩放更激进
+    targetMaxSize = 1400; // 从1200改为1400
   } else if (data.byteLength > 2 * 1024 * 1024) {
-    targetMaxSize = 1400; // 2MB以上图片适度缩放
+    targetMaxSize = 1800; // 从1600改为1800
   }
   
   if (width <= targetMaxSize && height <= targetMaxSize) {
@@ -267,39 +304,31 @@ async function downsampleImage(data, maxSize = 1600) {
 
 // 修改compressImage函数以接受完整的选项对象
 export async function compressImage(data, options = {}) {
-  // 处理向后兼容性
-  const quality = typeof options === 'number' ? options : options.quality || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
-  const allowFormatConversion = options.allowFormatConversion ?? true;
-  const allowDownsampling = options.allowDownsampling ?? true;
-  const maxImageSize = options.maxImageSize || COMPRESSION_SETTINGS.MAX_IMAGE_SIZE;
+  // 使用固定的高质量参数
+  const quality = 0.95; // 固定使用95%的质量
+  const allowFormatConversion = true; // 始终允许格式转换
+  const allowDownsampling = true; // 始终允许降采样
+  const maxImageSize = 2000; // 提高最大尺寸限制
   
-  console.log('[compressImage] Compression options:', {
-    quality,
-    allowFormatConversion,
-    allowDownsampling,
-    maxImageSize
-  });
+  console.log('[compressImage] Using high quality compression settings');
   
   if (!(data instanceof Uint8Array)) {
     throw new TypeError('compressImage: data must be a Uint8Array');
-  }
-  if (typeof quality !== 'number' || quality < 0 || quality > 1) {
-    throw new RangeError('compressImage: quality must be a number between 0 and 1');
   }
   
   let originalSize = data.byteLength;
   console.log('[compressImage] Original size:', originalSize);
   
-  // 根据选项决定是否进行降采样
+  // 更保守的降采样策略
   if (allowDownsampling) {
     if (originalSize > 5 * 1024 * 1024) {
       console.log('[compressImage] Downsampling large image (>5MB)');
-      data = await downsampleImage(data, Math.min(maxImageSize, 1200));
+      data = await downsampleImage(data, Math.min(maxImageSize, 1600)); // 从1400改为1600
       originalSize = data.byteLength;
       console.log('[compressImage] After downsampling:', originalSize);
     } else if (originalSize > 2 * 1024 * 1024) {
       console.log('[compressImage] Downsampling medium image (>2MB)');
-      data = await downsampleImage(data, Math.min(maxImageSize, 1600));
+      data = await downsampleImage(data, Math.min(maxImageSize, 2000)); // 从1800改为2000
       originalSize = data.byteLength;
       console.log('[compressImage] After downsampling:', originalSize);
     }
@@ -324,7 +353,7 @@ export async function compressImage(data, options = {}) {
     let format = await detectFormat(data);
     console.log('[compressImage] Detected format:', format);
     
-    // 根据选项决定是否转换格式
+    // 格式转换策略
     if (allowFormatConversion && ['bmp', 'tiff'].includes(format)) {
       console.log('[compressImage] Converting format from', format, 'to png');
       data = await compressImageWithFFmpeg(data, 1, 'png');
@@ -345,29 +374,33 @@ export async function compressImage(data, options = {}) {
         console.log('[compressImage] PNG alpha check:', hasAlpha);
       } catch (error) {
         console.warn('[compressImage] PNG alpha check failed, assuming alpha:', error);
-        hasAlpha = true; // 出错时保守处理
+        hasAlpha = true;
       }
       
       if (!hasAlpha) {
         console.log('[compressImage] PNG without alpha, trying multiple formats');
         const results = [];
         
-        // 尝试PNG压缩
-        console.log('[compressImage] Trying PNG compression');
-        const pngData = await compressImageWithFFmpeg(data, quality, 'png');
-        results.push({ data: pngData, format: 'png' });
-        
-        // 尝试WebP压缩
-        console.log('[compressImage] Trying WebP compression');
-        let webpQuality = quality;
+        // 优先尝试WebP
+        console.log('[compressImage] Trying WebP compression first');
+        let webpQuality = await adjustQualityByContent(data, 'webp', quality * 1.1);
         let webpData = await compressImageWithFFmpeg(data, webpQuality, 'webp');
         results.push({ data: webpData, format: 'webp' });
         
-        // 尝试JPEG压缩
-        console.log('[compressImage] Trying JPEG compression');
-        let jpegQuality = quality;
-        let jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
-        results.push({ data: jpegData, format: 'jpeg' });
+        // 如果WebP压缩效果不理想，尝试其他格式
+        if (webpData.length > originalSize * 0.9) { // 从0.8改为0.9
+          // 尝试PNG压缩
+          console.log('[compressImage] Trying PNG compression');
+          const pngQuality = await adjustQualityByContent(data, 'png', quality);
+          const pngData = await compressImageWithFFmpeg(data, pngQuality, 'png');
+          results.push({ data: pngData, format: 'png' });
+          
+          // 尝试JPEG压缩
+          console.log('[compressImage] Trying JPEG compression');
+          const jpegQuality = await adjustQualityByContent(data, 'jpeg', quality);
+          const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
+          results.push({ data: jpegData, format: 'jpeg' });
+        }
         
         bestResult = results.reduce((a, b) => (a.data.length < b.data.length ? a : b));
         console.log(`[compressImage] Best format: ${bestResult.format}, orig=${originalSize}, comp=${bestResult.data.length}`);
@@ -376,12 +409,14 @@ export async function compressImage(data, options = {}) {
     
     if (!bestResult) {
       console.log(`[compressImage] Compressing as ${format}`);
-      let compressedData = await compressImageWithFFmpeg(data, quality, format);
+      // 使用智能质量调整
+      const adjustedQuality = await adjustQualityByContent(data, format, quality);
+      let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
       
       // 如果压缩效果不好，尝试额外降低质量
-      if (compressedData.length > originalSize * 0.9) {
+      if (compressedData.length > originalSize * 0.9) { // 从0.85改为0.9
         console.log('[compressImage] Poor compression, trying lower quality');
-        const lowerQuality = quality * 0.7;
+        const lowerQuality = adjustedQuality * 0.9; // 从0.8改为0.9
         const recompressedData = await compressImageWithFFmpeg(data, lowerQuality, format);
         
         if (recompressedData.length < compressedData.length) {

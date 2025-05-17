@@ -136,28 +136,26 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
 }
 
 export async function optimizePPTX(file, options = {}) {
-  // Merge preset and user options
-  const preset = options.preset || COMPRESSION_SETTINGS.DEFAULT_PRESET;
-  const presetOptions = COMPRESSION_PRESETS[preset] || COMPRESSION_PRESETS.balanced;
+  // 使用标准预设，不再提供多种预设选择
+  const preset = COMPRESSION_SETTINGS.DEFAULT_PRESET;
+  const presetOptions = COMPRESSION_PRESETS[preset];
   
-  console.log('[optimizePPTX] Initial options:', options);
-  console.log('[optimizePPTX] Selected preset:', preset);
+  console.log('[optimizePPTX] Using preset:', preset);
   console.log('[optimizePPTX] Preset options:', presetOptions);
   
+  // 简化选项合并
   const mergedOptions = {
-    ...presetOptions,
     ...options,
     compressImages: options.compressImages !== false ? {
-      quality: options.quality || presetOptions.quality,
-      allowFormatConversion: options.allowFormatConversion ?? presetOptions.allowFormatConversion,
-      allowDownsampling: options.allowDownsampling ?? presetOptions.allowDownsampling,
-      maxImageSize: options.maxImageSize || presetOptions.maxImageSize,
-      compressionMethod: options.compressionMethod || presetOptions.compressionMethod
+      quality: presetOptions.quality,
+      allowFormatConversion: presetOptions.allowFormatConversion,
+      allowDownsampling: presetOptions.allowDownsampling,
+      maxImageSize: presetOptions.maxImageSize,
+      compressionMethod: presetOptions.compressionMethod
     } : false
   };
   
   console.log('[optimizePPTX] Merged options:', mergedOptions);
-  console.log('[optimizePPTX] Compression settings:', mergedOptions.compressImages);
 
   let zip;
   const { onProgress = updateProgress } = mergedOptions;

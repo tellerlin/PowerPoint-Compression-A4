@@ -7,7 +7,6 @@
   import { Container } from '$lib/components/ui';
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
-  import CompressionOptions from '$lib/components/CompressionOptions.svelte';
 
   let files;
   let processing = false;
@@ -15,13 +14,14 @@
   let downloadLink = null;
   let isFFmpegLoaded = false;
 
-  let compressionOptions = {
+  // 固定选项
+  const compressionOptions = {
     compressImages: {
-      enabled: true,
-      quality: 0.7
+      enabled: true
     },
     removeHiddenSlides: true,
-    removeUnusedLayouts: true
+    removeUnusedLayouts: true,
+    cleanMediaInUnusedLayouts: true
   };
 
   onMount(async () => {
@@ -32,38 +32,36 @@
       script.async = true;
       script.onload = () => {
         if (typeof window.FFmpeg === 'undefined') {
-          console.error('[FFmpeg] FFmpeg object not found after script load');
-          updateProgress('error', { message: 'FFmpeg failed to initialize properly. Please refresh the page and try again.' });
+          console.error('[FFmpeg] FFmpeg对象加载后未找到');
+          updateProgress('error', { message: 'FFmpeg初始化失败。请刷新页面重试。' });
           return;
         }
         isFFmpegLoaded = true;
-        console.log('[FFmpeg] Loaded successfully');
+        console.log('[FFmpeg] 加载成功');
       };
       script.onerror = (error) => {
-        console.error('[FFmpeg] Failed to load:', error);
-        updateProgress('error', { message: 'Failed to load FFmpeg. Please refresh the page and try again.' });
+        console.error('[FFmpeg] 加载失败:', error);
+        updateProgress('error', { message: '加载FFmpeg失败。请刷新页面重试。' });
       };
       document.head.appendChild(script);
     } catch (error) {
-      console.error('[FFmpeg] Error during initialization:', error);
-      updateProgress('error', { message: 'Failed to initialize FFmpeg. Please refresh the page and try again.' });
+      console.error('[FFmpeg] 初始化过程中发生错误:', error);
+      updateProgress('error', { message: 'FFmpeg初始化失败。请刷新页面重试。' });
     }
   });
 
-  function handleOptionsChange(event) {
-    compressionOptions = event.detail;
-  }
+  onDestroy(() => {
+    if (downloadUrl) {
+      cleanupDownload(downloadUrl);
+    }
+  });
 
-  function formatBytes(bytes, decimals = 2) {
-    const numericBytes = Number(bytes);
-    if (isNaN(numericBytes) || numericBytes <= 0) return '0 Bytes';
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
     const k = 1024;
-    const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(numericBytes) / Math.log(k));
-    const formattedValue = parseFloat((numericBytes / Math.pow(k, i)).toFixed(dm));
-    const sizeIndex = Math.min(i, sizes.length - 1);
-    return `${formattedValue} ${sizes[sizeIndex]}`;
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
   $: if (files && browser) {}
@@ -84,31 +82,30 @@
     const file = files?.[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.pptx')) {
-      updateProgress('error', { message: "Only PowerPoint (.pptx) files are supported." });
+      updateProgress('error', { message: "仅支持PowerPoint (.pptx) 文件格式。" });
       return;
     }
     if (file.size > 314572800) {
-      updateProgress('error', { message: `File size (${formatBytes(file.size)}) exceeds the 300MB limit.` });
+      updateProgress('error', { message: `文件大小 (${formatBytes(file.size)}) 超过300MB限制。` });
       return;
     }
     if (!isFFmpegLoaded) {
-      updateProgress('error', { message: 'FFmpeg is not loaded yet. Please wait a moment and try again.' });
+      updateProgress('error', { message: 'FFmpeg尚未加载完成，请稍候再试。' });
       return;
     }
     processing = true;
     resetProgressStore();
     try {
       const optimizedBlob = await optimizePPTX(file, {
-        compressImages: compressionOptions.compressImages.enabled
-          ? { quality: compressionOptions.compressImages.quality }
-          : false,
+        compressImages: compressionOptions.compressImages.enabled,
         removeHiddenSlides: compressionOptions.removeHiddenSlides,
         removeUnusedLayouts: compressionOptions.removeUnusedLayouts,
+        cleanMediaInUnusedLayouts: compressionOptions.cleanMediaInUnusedLayouts,
         onProgress: updateProgress
       });
       if (!optimizedBlob) {
         if (!$compressionProgress.error) {
-          updateProgress('error', { message: "Processing completed but no file was generated." });
+          updateProgress('error', { message: "处理完成但未生成文件。" });
         }
         return;
       }
@@ -117,7 +114,7 @@
       downloadLink = a;
     } catch (error) {
       console.error('Compression error:', error);
-      updateProgress('error', { message: error.message || 'An error occurred during compression.' });
+      updateProgress('error', { message: error.message || '压缩过程中发生错误。' });
     } finally {
       processing = false;
     }
@@ -160,12 +157,6 @@
     }
   }
 
-  onDestroy(() => {
-    if (downloadUrl) {
-      cleanupDownload(downloadUrl);
-    }
-  });
-
   function debounce(func, wait) {
     let timeout;
     return function(...args) {
@@ -198,8 +189,8 @@
 <!-- Your <Container> template remains the same -->
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-text">PowerPoint Compression Tool</h1>
-    <p class="text-muted">Reduce your PPTX file size without losing quality</p>
+    <h1 class="text-3xl font-bold mb-2 text-text">PowerPoint File Compression Tool</h1>
+    <p class="text-muted">One-click optimization of PPT files without complex settings</p>
   </div>
 
   <div class="rounded-lg shadow-md p-6 mb-6 bg-surface min-h-[250px] flex flex-col justify-center">
@@ -216,8 +207,8 @@
         <label for="file-upload" class="cursor-pointer">
           <div class="flex flex-col items-center justify-center">
             <svg class="w-12 h-12 text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-            <p class="mt-2 text-base text-text font-semibold">Click or Drag to Select PowerPoint File</p>
-            <p class="text-xs text-muted mt-1">(.pptx format only)</p>
+            <p class="mt-2 text-base text-text font-semibold">Click or drag to select PowerPoint file</p>
+            <p class="text-xs text-muted mt-1">(Only .pptx format supported)</p>
           </div>
         </label>
       </div>
@@ -227,12 +218,18 @@
           <p class="font-medium truncate">Selected: {files[0].name} ({formatBytes(files[0].size)})</p>
         </div>
         
-        <div class="mt-4">
-          <CompressionOptions options={compressionOptions} on:change={handleOptionsChange} />
-        </div>
-
-        <div class="mt-5 flex justify-center">
-          <Button on:click={handleSubmit} size="lg">Start Compression</Button>
+        <div class="mt-6">
+          <Button
+            on:click={handleSubmit}
+            disabled={processing}
+            class="w-full"
+          >
+            {#if processing}
+              Processing...
+            {:else}
+              Optimize File
+            {/if}
+          </Button>
         </div>
       {/if}
     {:else}
@@ -252,7 +249,7 @@
             <div class="flex justify-between items-center mb-1">
                  <p class="font-medium text-sm text-text">{$compressionProgress.status || 'Processing...'}</p>
                  {#if $compressionProgress.percentage > 0 && $compressionProgress.percentage < 100 && $compressionProgress.estimatedTimeRemaining != null}
-                     <p class="text-xs text-muted">ETA: ~{$compressionProgress.estimatedTimeRemaining}s</p>
+                     <p class="text-xs text-muted">Estimated time remaining: ~{$compressionProgress.estimatedTimeRemaining}s</p>
                  {/if}
             </div>
             <div class="w-full bg-border/50 rounded-full h-2.5 overflow-hidden">
@@ -264,10 +261,10 @@
             
             {#if $compressionProgress.processedMediaCount > 0 && $compressionProgress.mediaCount > 0}
               <div class="mt-2 text-xs text-muted">
-                Processing media: {$compressionProgress.processedMediaCount}/{$compressionProgress.mediaCount}
+                Processing media files: {$compressionProgress.processedMediaCount}/{$compressionProgress.mediaCount}
                 {#if $compressionProgress.stats.savedMediaSize > 0}
                   <span class="ml-2 text-green-400">
-                    Saved {($compressionProgress.stats.savedMediaSize / (1024 * 1024)).toFixed(2)} MB from media
+                    Saved {($compressionProgress.stats.savedMediaSize / (1024 * 1024)).toFixed(2)} MB of media space
                   </span>
                 {/if}
               </div>
