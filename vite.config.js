@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [sveltekit()],
   worker: {
     format: 'es',
-    plugins: () => []
+    plugins: []
   },
   optimizeDeps: {
     exclude: [
