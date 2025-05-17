@@ -14,7 +14,7 @@ async function preprocessImages(zip, options = {}) {
 }
 
 // 修改processMediaBatch函数以使用并行压缩
-async function processMediaBatch(zip, batch, options, cpuCount, onProgress) {
+async function processMediaBatch(zip, batch, options, cpuCount, onProgress, currentIndex, totalFiles) {
   const imagesToCompress = [];
   const otherFiles = [];
 
@@ -44,13 +44,25 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress) {
   }
 
   const results = [];
+  let processedCount = 0;
+  const totalBatchFiles = imagesToCompress.length + otherFiles.length;
 
   // 并行处理图片
   if (imagesToCompress.length > 0) {
     const qualityOption = typeof options.compressImages === 'object' ? options.compressImages.quality : undefined;
     const adjustedQuality = qualityOption || COMPRESSION_SETTINGS.DEFAULT_QUALITY;
     
-    const compressedImages = await compressImagesInParallel(imagesToCompress, adjustedQuality);
+    const compressedImages = await compressImagesInParallel(imagesToCompress, adjustedQuality, (progress) => {
+      processedCount++;
+      const batchProgress = (processedCount / totalBatchFiles) * 100;
+      onProgress('media', {
+        fileIndex: currentIndex + processedCount,
+        totalFiles: totalFiles,
+        processedFiles: batch.map(r => r.split('/').pop()),
+        estimatedTimeRemaining: null,
+        batchProgress: batchProgress
+      });
+    });
     
     // 更新压缩后的图片
     for (let i = 0; i < imagesToCompress.length; i++) {
@@ -202,7 +214,7 @@ export async function optimizePPTX(file, options = {}) {
 
         for (let i = 0; i < mediaFiles.length; i += batchSize) {
           const batch = mediaFiles.slice(i, i + batchSize);
-          const batchResults = await processMediaBatch(zip, batch, options, cpuCount, onProgress);
+          const batchResults = await processMediaBatch(zip, batch, options, cpuCount, onProgress, i, mediaFiles.length);
           
           // 处理结果...
           batchResults.forEach(result => {

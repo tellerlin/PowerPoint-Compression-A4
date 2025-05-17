@@ -74,7 +74,7 @@ export function updateProgressState(store, type, payload) {
     let currentPercentage = newState.percentage || 0;
     
     const now = Date.now();
-    if (newState._lastUpdateTime && (now - newState._lastUpdateTime < 40) && type !== 'complete' && type !== 'error') {
+    if (newState._lastUpdateTime && (now - newState._lastUpdateTime < 20) && type !== 'complete' && type !== 'error') {
       return state;
     }
     newState._lastUpdateTime = now;
@@ -147,7 +147,9 @@ export function updateProgressState(store, type, payload) {
         if (newState.mediaCount <= 0) {
           mediaProgress = 1;
         } else {
-          mediaProgress = Math.min(1, payload.fileIndex / Math.max(1, payload.totalFiles));
+          const fileProgress = payload.fileIndex / Math.max(1, payload.totalFiles);
+          const batchProgress = (payload.batchProgress || 0) / 100;
+          mediaProgress = Math.min(1, fileProgress + (batchProgress / payload.totalFiles));
         }
         
         const calculatedPercentage = mediaPhaseStart + (mediaProgress * mediaPhaseWeight);

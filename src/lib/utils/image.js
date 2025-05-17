@@ -229,20 +229,27 @@ async function compressImageWithFFmpeg(data, quality, format) {
 }
 
 // 修改为完全串行处理，解决FFmpeg只能运行一个命令的问题
-async function compressImagesInParallel(images, quality) {
+export async function compressImagesInParallel(images, quality, onProgress) {
   const results = [];
+  const chunkSize = Math.max(1, Math.floor(images.length / navigator.hardwareConcurrency));
   
-  // 完全串行处理所有图片
-  for (const image of images) {
-    try {
-      const format = await detectFormat(image.data);
-      const compressedData = await compressImageWithFFmpeg(image.data, quality, format);
-      results.push(compressedData);
-    } catch (error) {
-      console.error("Error compressing image:", error);
-      // 出错时使用原图
-      results.push(image.data);
-    }
+  for (let i = 0; i < images.length; i += chunkSize) {
+    const chunk = images.slice(i, i + chunkSize);
+    const chunkPromises = chunk.map(async (image, index) => {
+      try {
+        const compressed = await compressImage(image.data, quality);
+        if (onProgress) {
+          onProgress((i + index + 1) / images.length);
+        }
+        return compressed;
+      } catch (error) {
+        console.error(`Failed to compress image ${image.path}:`, error);
+        return image.data;
+      }
+    });
+    
+    const chunkResults = await Promise.all(chunkPromises);
+    results.push(...chunkResults);
   }
   
   return results;
@@ -409,6 +416,5 @@ export {
   checkAlphaChannel, 
   analyzeImage, 
   calculateOptimalDimensions, 
-  detectFormat,
-  compressImagesInParallel
+  detectFormat
 };

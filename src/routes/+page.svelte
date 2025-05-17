@@ -31,6 +31,11 @@
       script.src = '/ffmpeg/ffmpeg.min.js';
       script.async = true;
       script.onload = () => {
+        if (typeof window.FFmpeg === 'undefined') {
+          console.error('[FFmpeg] FFmpeg object not found after script load');
+          updateProgress('error', { message: 'FFmpeg failed to initialize properly. Please refresh the page and try again.' });
+          return;
+        }
         isFFmpegLoaded = true;
         console.log('[FFmpeg] Loaded successfully');
       };
