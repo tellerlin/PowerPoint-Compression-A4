@@ -28,7 +28,7 @@
 
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-gray-100">Media Tools</h1>
+    <h1 class="text-3xl font-bold mb-2 text-gray-100">Byte Slim</h1>
     <p class="text-gray-400">Choose a tool to get started</p>
   </div>
 

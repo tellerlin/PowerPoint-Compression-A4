@@ -52,6 +52,7 @@
   let currentTime = 0;
   let waveformCanvas = null;
   let waveformData = null;
+  let showLoadingMessage = true;
 
   // Theme tracking
   let currentTheme;
@@ -133,6 +134,7 @@
           if (readData.length === testData.length) {
             console.log('[AudioCompressor] FFmpeg filesystem test successful');
             isFFmpegLoaded = true;
+            showLoadingMessage = false;
           } else {
             console.error('[AudioCompressor] FFmpeg filesystem test failed');
             isFFmpegLoaded = false;
@@ -173,20 +175,31 @@
       return;
     }
     const selectedFiles = Array.from(event.target.files);
-    console.log('[AudioCompressor] Files selected:', selectedFiles.map(f => f.name));
+    console.log('[AudioCompressor] Files selected:', selectedFiles.map(f => ({
+      name: f.name,
+      size: f.size
+    })));
     
     // Reset trim settings
     trimSettings.startTime = 0;
     trimSettings.endTime = 0;
     audioDuration = 0;
     
-    // Create URLs for each file
-    selectedFiles.forEach(file => {
+    // Create new file objects with additional properties
+    const processedFiles = selectedFiles.map(file => {
       const url = URL.createObjectURL(file);
-      file.originalUrl = url;
+      return {
+        file, // Keep reference to original file
+        name: file.name,
+        size: file.size,
+        originalSize: file.size,
+        originalUrl: url,
+        type: file.type,
+        lastModified: file.lastModified
+      };
     });
     
-    files = [...files, ...selectedFiles];
+    files = [...files, ...processedFiles];
     
     // Set initial time
     if (files.length > 0) {
@@ -207,7 +220,7 @@
       audio.load();
     }
     
-    await processFiles(selectedFiles);
+    await processFiles(processedFiles);
   }
 
   // 格式化时间函数 - 修改为返回FFmpeg兼容的格式
@@ -232,7 +245,11 @@
   }
 
   async function processFiles(newFiles) {
-    console.log('[AudioCompressor] Processing files:', newFiles.map(f => f.name));
+    console.log('[AudioCompressor] Processing files:', newFiles.map(f => ({
+      name: f.name,
+      size: f.size,
+      originalSize: f.originalSize
+    })));
     if (!isFFmpegLoaded) {
       console.log('[AudioCompressor] FFmpeg not loaded, showing alert');
       alert('FFmpeg is not loaded. Please wait for it to load or refresh the page.');
@@ -264,30 +281,25 @@
     compressionProgress.status = 'Starting compression...';
     compressionProgress.error = null;
 
-    for (const file of newFiles) {
+    for (const fileObj of newFiles) {
       if (shouldCancel) {
         console.log('[AudioCompressor] Compression cancelled by user');
         break;
       }
 
       try {
-        console.log('[AudioCompressor] Processing file:', file.name);
-        console.log('[AudioCompressor] Trim settings:', {
-          isEnabled: trimSettings.isEnabled,
-          startTime: trimSettings.startTime,
-          endTime: trimSettings.endTime,
-          audioDuration
-        });
+        console.log('[AudioCompressor] Processing file:', fileObj.name);
+        console.log('[AudioCompressor] File size:', fileObj.size);
         
-        compressionProgress.status = `Processing ${file.name}...`;
-        compressionProgress.stats.originalSize = file.size;
+        compressionProgress.status = `Processing ${fileObj.name}...`;
+        compressionProgress.stats.originalSize = fileObj.originalSize;
         
         const inFileName = `in_${Math.random().toString(36).substring(2, 15)}.mp3`;
         const outFileName = `out_${Math.random().toString(36).substring(2, 15)}.mp3`;
         
         console.log('[AudioCompressor] Writing file to FFmpeg with name:', inFileName);
         
-        const fileArrayBuffer = await file.arrayBuffer();
+        const fileArrayBuffer = await fileObj.file.arrayBuffer();
         const fileData = new Uint8Array(fileArrayBuffer);
         
         try {
@@ -411,26 +423,31 @@
         
         if (shouldCancel) break;
 
-        const fileIndex = files.findIndex(f => f.name === file.name);
+        const fileIndex = files.findIndex(f => f.name === fileObj.name);
         if (fileIndex !== -1) {
-          console.log('[AudioCompressor] Updating file state:', file.name);
+          console.log('[AudioCompressor] Updating file state:', {
+            name: fileObj.name,
+            originalSize: fileObj.originalSize,
+            compressedSize: blob.size
+          });
           files[fileIndex] = {
             ...files[fileIndex],
             compressed: true,
             compressedUrl: url,
-            compressedName: `compressed-${file.name}`,
+            compressedName: `compressed-${fileObj.name}`,
             compressedSize: blob.size
           };
         }
 
         compressionProgress.stats.compressedSize = blob.size;
-        compressionProgress.stats.savedSize = file.size - blob.size;
-        compressionProgress.stats.savedPercentage = ((file.size - blob.size) / file.size * 100).toFixed(1);
+        compressionProgress.stats.originalSize = fileObj.originalSize;
+        compressionProgress.stats.savedSize = fileObj.originalSize - blob.size;
+        compressionProgress.stats.savedPercentage = ((fileObj.originalSize - blob.size) / fileObj.originalSize * 100).toFixed(1);
         compressionProgress.percentage = 100;
         compressionProgress.status = 'Compression complete!';
       } catch (error) {
         console.error('[AudioCompressor] Error processing file:', {
-          file: file.name,
+          file: fileObj.name,
           error,
           stack: error.stack,
           message: error.message
@@ -438,7 +455,7 @@
         if (shouldCancel) {
           compressionProgress.error = 'Compression cancelled by user';
         } else {
-          compressionProgress.error = `Error processing file ${file.name}: ${error.message}`;
+          compressionProgress.error = `Error processing file ${fileObj.name}: ${error.message}`;
         }
       }
     }
@@ -453,6 +470,8 @@
   }
 
   function formatFileSize(bytes) {
+    if (!bytes || isNaN(bytes)) return '0 KB';
+    
     if (bytes >= 1073741824) {
       return (bytes / 1073741824).toFixed(2) + ' GB';
     } else if (bytes >= 1048576) {
@@ -463,15 +482,23 @@
   }
 
   function resetCompression() {
+    console.log('[AudioCompressor] Resetting compression');
     shouldCancel = true;
     if (currentFFmpegProcess) {
       try {
+        console.log('[AudioCompressor] Terminating FFmpeg process');
         ffmpeg.exit();
         currentFFmpegProcess = null;
       } catch (e) {
         console.warn('[AudioCompressor] Error terminating FFmpeg:', e);
       }
     }
+    
+    // Reset FFmpeg instance
+    ffmpeg = null;
+    isFFmpegLoaded = false;
+    
+    // Reset state
     files = [];
     isProcessing = false;
     compressionProgress = {
@@ -485,6 +512,12 @@
         savedPercentage: 0
       }
     };
+
+    // Reload FFmpeg
+    console.log('[AudioCompressor] Reloading FFmpeg');
+    setTimeout(() => {
+      checkFFmpegAvailability();
+    }, 100);
   }
 </script>
 
@@ -502,6 +535,7 @@
         id="audio-file-upload"
         accept="audio/*"
         class="hidden"
+        on:change={handleFileSelect}
       />
       <label for="audio-file-upload" class="cursor-pointer">
         <div class="flex flex-col items-center justify-center">
@@ -514,13 +548,117 @@
       </label>
     </div>
     
-    <div class="mt-8 text-text">
-      <p class="text-center">
-        Loading audio compression tool...
-      </p>
-      <p class="text-center mt-4 text-muted">
-        If the tool doesn't load within a few seconds, please try refreshing the page.
-      </p>
-    </div>
+    {#if showLoadingMessage}
+      <div class="mt-8 text-text">
+        <p class="text-center">
+          Loading audio compression tool...
+        </p>
+        <p class="text-center mt-4 text-muted">
+          If the tool doesn't load within a few seconds, please try refreshing the page.
+        </p>
+      </div>
+    {/if}
+
+    {#if files.length > 0}
+      <div class="mt-8 space-y-4">
+        {#if compressionProgress.error}
+          <Alert variant="destructive" title="Compression Error">
+            {compressionProgress.error}
+            <div class="mt-4">
+              <Button on:click={resetCompression} variant="outline" class="w-full sm:w-auto">Try Again</Button>
+            </div>
+          </Alert>
+        {:else}
+          <!-- Progress Bar -->
+          <div class="mb-2">
+            <div class="flex justify-between items-center mb-1">
+              <p class="font-medium text-sm text-text">{compressionProgress.status || 'Processing...'}</p>
+              {#if compressionProgress.percentage > 0 && compressionProgress.percentage < 100}
+                <p class="text-xs text-muted">Progress: {Math.round(compressionProgress.percentage)}%</p>
+              {/if}
+            </div>
+            <div class="w-full bg-border/50 rounded-full h-2.5 overflow-hidden">
+              <div
+                class="bg-gradient-to-r from-primary to-secondary h-2.5 rounded-full transition-all duration-300 ease-out"
+                style="width: {compressionProgress.percentage || 0}%"
+              ></div>
+            </div>
+          </div>
+
+          <!-- File List -->
+          <div class="space-y-4">
+            {#each files as file, index}
+              <div class="flex items-center justify-between p-4 bg-surface/50 rounded-lg">
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-text truncate">{file.name || 'Unknown file'}</p>
+                  {#if file.compressed}
+                    <div class="mt-2 space-y-1">
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm text-muted">Original size:</span>
+                        <span class="text-sm font-medium">{formatFileSize(file.originalSize)}</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm text-muted">Compressed size:</span>
+                        <span class="text-sm font-medium text-green-400">{formatFileSize(file.compressedSize)}</span>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm text-muted">Space saved:</span>
+                        <span class="text-sm font-medium text-green-400">
+                          {formatFileSize(file.originalSize - file.compressedSize)} 
+                          ({((file.originalSize - file.compressedSize) / file.originalSize * 100).toFixed(1)}%)
+                        </span>
+                      </div>
+                    </div>
+                  {:else}
+                    <p class="text-xs text-muted mt-1">
+                      Original size: {formatFileSize(file.originalSize || file.size)}
+                    </p>
+                  {/if}
+                </div>
+                <div class="flex items-center space-x-2 ml-4">
+                  {#if file.compressed}
+                    <Button
+                      variant="default"
+                      class="px-6"
+                      on:click={() => {
+                        const link = document.createElement('a');
+                        link.href = file.compressedUrl;
+                        link.download = file.compressedName;
+                        link.click();
+                      }}
+                    >
+                      Download Compressed File
+                    </Button>
+                  {:else if isProcessing}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      on:click={resetCompression}
+                    >
+                      Cancel
+                    </Button>
+                  {:else}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      on:click={() => removeFile(index)}
+                    >
+                      Remove
+                    </Button>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
+
+          <!-- Remove the duplicate cancel button -->
+          {#if isProcessing}
+            <div class="mt-4">
+              <p class="text-center text-muted">Processing...</p>
+            </div>
+          {/if}
+        {/if}
+      </div>
+    {/if}
   </div>
 </Container> 

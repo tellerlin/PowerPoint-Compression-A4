@@ -11,7 +11,7 @@
     <div class="flex items-center justify-between">
       <!-- Logo -->
       <a href="/" class="text-xl font-bold text-text">
-        Media Tools
+        Byte Slim
       </a>
 
       <!-- Navigation -->

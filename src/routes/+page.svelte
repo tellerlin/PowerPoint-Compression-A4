@@ -227,7 +227,7 @@
             {#if processing}
               Processing...
             {:else}
-              Optimize File
+              Start Compress
             {/if}
           </Button>
         </div>
