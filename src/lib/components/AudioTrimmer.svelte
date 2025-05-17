@@ -352,14 +352,14 @@
 
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-gray-100">Audio Trimmer</h1>
-    <p class="text-gray-400">Trim your audio files with precision</p>
+    <h1 class="text-3xl font-bold mb-2 text-text">Audio Trimmer</h1>
+    <p class="text-muted">Trim your audio files with precision</p>
   </div>
 
-  <div class="rounded-lg shadow-md p-6 mb-6 bg-gray-800">
+  <div class="rounded-lg shadow-md p-6 mb-6 bg-surface">
     {#if !audioFile}
       <!-- File Upload Area -->
-      <div class="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-gray-500 transition-colors">
+      <div class="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
         <input
           type="file"
           id="file-upload"
@@ -369,11 +369,11 @@
         />
         <label for="file-upload" class="cursor-pointer">
           <div class="flex flex-col items-center justify-center">
-            <svg class="w-12 h-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-12 h-12 text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
             </svg>
-            <p class="mt-2 text-base text-gray-300 font-semibold">Click or drag audio file here</p>
-            <p class="text-xs text-gray-500 mt-1">Supports MP3, WAV, OGG formats</p>
+            <p class="mt-2 text-base text-text font-semibold">Click or drag audio file here</p>
+            <p class="text-xs text-muted mt-1">Supports MP3, WAV, OGG formats</p>
           </div>
         </label>
       </div>
@@ -381,7 +381,7 @@
       <!-- Audio Player and Controls -->
       <div class="space-y-6">
         <!-- Audio Player -->
-        <div class="bg-gray-700 p-4 rounded-lg">
+        <div class="bg-surface/70 border border-border p-4 rounded-lg">
           <audio
             controls
             class="w-full"
@@ -396,29 +396,29 @@
         </div>
 
         <!-- Trim Controls -->
-        <div class="bg-gray-700 p-4 rounded-lg">
-          <h3 class="text-lg font-semibold text-gray-200 mb-4">Trim Settings</h3>
+        <div class="bg-surface/70 border border-border p-4 rounded-lg">
+          <h3 class="text-lg font-semibold text-text mb-4">Trim Settings</h3>
           
           <!-- Visual Timeline -->
           <div class="mb-6">
-            <div class="flex justify-between text-sm text-gray-400 mb-2">
+            <div class="flex justify-between text-sm text-muted mb-2">
               <span>Start: {formatTime(trimSettings.startTime)}</span>
               <span>End: {formatTime(trimSettings.endTime)}</span>
               <span>Duration: {formatTime(trimSettings.endTime - trimSettings.startTime)}</span>
             </div>
             
             <div 
-              class="relative h-8 bg-gray-600 rounded-lg cursor-pointer"
+              class="relative h-8 bg-border/30 rounded-lg cursor-pointer"
               bind:this={timelineElement}
             >
               <!-- Background waveform visualization (placeholder) -->
-              <div class="absolute inset-0 flex items-center justify-center text-gray-500">
+              <div class="absolute inset-0 flex items-center justify-center text-muted">
                 Audio Waveform
               </div>
               
               <!-- Selected range -->
               <div
-                class="absolute h-full bg-blue-500/30 rounded-lg"
+                class="absolute h-full bg-primary/30 rounded-lg"
                 style="left: {(trimSettings.startTime / audioDuration) * 100}%; right: {100 - (trimSettings.endTime / audioDuration) * 100}%"
               ></div>
               
@@ -430,7 +430,7 @@
                 aria-valuemin="0"
                 aria-valuemax={audioDuration}
                 aria-valuenow={trimSettings.startTime}
-                class="absolute top-0 bottom-0 w-2 bg-blue-500 rounded-l cursor-ew-resize hover:w-3 transition-all"
+                class="absolute top-0 bottom-0 w-2 bg-primary rounded-l cursor-ew-resize hover:w-3 transition-all"
                 style="left: {(trimSettings.startTime / audioDuration) * 100}%"
                 on:mousedown={(e) => handleTimelineMouseDown(e, 'start')}
                 on:keydown={(e) => {
@@ -441,7 +441,7 @@
                   }
                 }}
               >
-                <div class="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-gray-800 px-2 py-1 rounded text-sm whitespace-nowrap">
+                <div class="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-surface px-2 py-1 rounded text-sm whitespace-nowrap border border-border">
                   {formatTime(trimSettings.startTime)}
                 </div>
               </div>
@@ -454,7 +454,7 @@
                 aria-valuemin="0"
                 aria-valuemax={audioDuration}
                 aria-valuenow={trimSettings.endTime}
-                class="absolute top-0 bottom-0 w-2 bg-blue-500 rounded-r cursor-ew-resize hover:w-3 transition-all"
+                class="absolute top-0 bottom-0 w-2 bg-primary rounded-r cursor-ew-resize hover:w-3 transition-all"
                 style="left: {(trimSettings.endTime / audioDuration) * 100}%"
                 on:mousedown={(e) => handleTimelineMouseDown(e, 'end')}
                 on:keydown={(e) => {
@@ -465,7 +465,7 @@
                   }
                 }}
               >
-                <div class="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-gray-800 px-2 py-1 rounded text-sm whitespace-nowrap">
+                <div class="absolute -top-6 left-1/2 transform -translate-x-1/2 bg-surface px-2 py-1 rounded text-sm whitespace-nowrap border border-border">
                   {formatTime(trimSettings.endTime)}
                 </div>
               </div>
@@ -475,7 +475,7 @@
           <!-- Time Input Fields -->
           <div class="grid grid-cols-2 gap-4">
             <div>
-              <label for="start-time-input" class="block text-sm text-gray-400 mb-1">Start Time (seconds)</label>
+              <label for="start-time-input" class="block text-sm text-muted mb-1">Start Time (seconds)</label>
               <input
                 id="start-time-input"
                 type="number"
@@ -483,12 +483,12 @@
                 min="0"
                 max={trimSettings.endTime - 1}
                 step="0.1"
-                class="w-full px-3 py-2 bg-gray-600 text-gray-200 rounded-md"
+                class="w-full px-3 py-2 bg-surface/80 text-text rounded-md border border-border"
                 on:input={(e) => handleTimeChange('start', parseFloat(e.target.value))}
               />
             </div>
             <div>
-              <label for="end-time-input" class="block text-sm text-gray-400 mb-1">End Time (seconds)</label>
+              <label for="end-time-input" class="block text-sm text-muted mb-1">End Time (seconds)</label>
               <input
                 id="end-time-input"
                 type="number"
@@ -496,7 +496,7 @@
                 min={trimSettings.startTime + 1}
                 max={audioDuration}
                 step="0.1"
-                class="w-full px-3 py-2 bg-gray-600 text-gray-200 rounded-md"
+                class="w-full px-3 py-2 bg-surface/80 text-text rounded-md border border-border"
                 on:input={(e) => handleTimeChange('end', parseFloat(e.target.value))}
               />
             </div>

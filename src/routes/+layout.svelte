@@ -1,16 +1,28 @@
 <script>
   import '../app.css';
-  import { onMount } from 'svelte';
+  import { onMount, beforeUpdate } from 'svelte';
   import { themeStore } from '$lib/stores/theme';
   import { Header } from '$lib/components/layout/Header';
   import { Footer } from '$lib/components/layout/Footer';
   import { Container } from '$lib/components/ui';
   import { siteMetadata } from '$lib/config/metadata';
   import { initializeGoogleAnalytics, initializeWeChatMetaTags } from '$lib/utils/analytics';
-  import { page } from '$app/stores'; // 导入 page store
+  import { page } from '$app/stores'; // Import page store
 
   // Replace both export statements with just this one:
   export const data = {};
+
+  // Initialize theme before page load
+  beforeUpdate(() => {
+    if (typeof window !== 'undefined') {
+      const storedTheme = localStorage.getItem('theme') || 'dark';
+      if (storedTheme === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+  });
 
   onMount(() => {
     themeStore.initialize();
@@ -44,10 +56,10 @@
   <meta name="twitter:image" content="{siteMetadata.url}{siteMetadata.images.twitter}">
 </svelte:head>
 
-<div class="min-h-screen flex flex-col bg-background text-text">
+<div class="min-h-screen flex flex-col bg-background text-text transition-colors duration-200">
   <Header />
   
-  <main class="flex-1">
+  <main class="flex-1 bg-background transition-colors duration-200">
     <Container>
       <slot />
     </Container>

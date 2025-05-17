@@ -1,15 +1,34 @@
 <script>
   import { themeStore } from '../stores/theme';
   import { fade } from 'svelte/transition';
+  import { onMount } from 'svelte';
+  
+  onMount(() => {
+    console.log('[ThemeToggle] Component mounted');
+    console.log('[ThemeToggle] Current theme:', $themeStore);
+    themeStore.initialize();
+  });
   
   function toggleTheme() {
-    themeStore.update(current => current === 'light' ? 'dark' : 'light');
+    console.log('[ThemeToggle] Toggling theme');
+    console.log('[ThemeToggle] Current theme before toggle:', $themeStore);
+    const newTheme = $themeStore === 'light' ? 'dark' : 'light';
+    console.log('[ThemeToggle] New theme will be:', newTheme);
+    themeStore.update(newTheme);
+    
+    // 直接操作DOM添加调试
+    const isDark = document.documentElement.classList.contains('dark');
+    console.log('[ThemeToggle] After toggle, dark class exists:', isDark);
+    
+    // 强制应用样式变化
+    const currentBackground = getComputedStyle(document.documentElement).getPropertyValue('--color-background');
+    console.log('[ThemeToggle] Current background color:', currentBackground);
   }
 </script>
 
 <button
   type="button"
-  class="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-surface/50 hover:bg-surface/80 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors"
+  class="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-surface hover:bg-primary/20 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors"
   aria-label="Toggle theme"
   on:click={toggleTheme}
 >
@@ -31,3 +50,10 @@
     </div>
   {/if}
 </button>
+
+<style>
+  /* 添加一些本地样式，帮助按钮在任何主题下都可见 */
+  button {
+    border: 1px solid rgb(var(--color-border));
+  }
+</style>

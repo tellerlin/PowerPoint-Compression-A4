@@ -2,24 +2,52 @@ import { writable } from 'svelte/store';
 import { browser } from '$app/environment';
 
 function createThemeStore() {
-  const { subscribe, set, update } = writable(browser ? localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : 'light');
+  // Set default theme to dark
+  const { subscribe, set } = writable('dark');
+
+  // Set default theme immediately
+  if (browser) {
+    const root = document.documentElement;
+    root.classList.add('dark');
+    localStorage.setItem('theme', 'dark');
+  }
 
   return {
     subscribe,
     update: (newTheme) => {
-      update(() => {
-        if (browser) {
-          document.documentElement.setAttribute('data-theme', newTheme);
-          localStorage.setItem('theme', newTheme);
+      console.log('[Theme] Updating theme to:', newTheme);
+      if (browser) {
+        const root = document.documentElement;
+        
+        if (newTheme === 'dark') {
+          root.classList.add('dark');
+        } else {
+          root.classList.remove('dark');
         }
-        return newTheme;
-      });
+        
+        localStorage.setItem('theme', newTheme);
+        set(newTheme);
+        console.log('[Theme] Theme updated, current class:', root.classList.contains('dark') ? 'dark' : 'light');
+      }
     },
     initialize: () => {
+      console.log('[Theme] Initializing theme...');
       if (browser) {
-        const theme = browser ? localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : 'light';
-        document.documentElement.setAttribute('data-theme', theme);
-        set(theme);
+        const root = document.documentElement;
+        // Use stored theme or default to dark
+        const storedTheme = localStorage.getItem('theme') || 'dark';
+        
+        console.log('[Theme] Stored theme:', storedTheme);
+        console.log('[Theme] Selected theme:', storedTheme);
+        
+        if (storedTheme === 'dark') {
+          root.classList.add('dark');
+        } else {
+          root.classList.remove('dark');
+        }
+        
+        set(storedTheme);
+        console.log('[Theme] Theme initialized, current class:', root.classList.contains('dark') ? 'dark' : 'light');
       }
     }
   };

@@ -6,11 +6,11 @@
   $: currentPath = $page.url.pathname;
 </script>
 
-<header class="bg-gray-800 shadow-lg">
+<header class="bg-surface shadow-lg border-b border-border">
   <nav class="container mx-auto px-4 py-4">
     <div class="flex items-center justify-between">
       <!-- Logo -->
-      <a href="/" class="text-xl font-bold text-white">
+      <a href="/" class="text-xl font-bold text-text">
         Media Tools
       </a>
 
@@ -19,10 +19,10 @@
         {#each NAV_ITEMS as item}
           <a
             href={item.href}
-            class="text-gray-300 hover:text-white transition-colors relative group"
+            class="text-muted hover:text-text transition-colors relative group"
           >
             {item.name}
-            <div class="absolute bottom-0 left-0 w-full h-0.5 bg-blue-500 transform scale-x-0 group-hover:scale-x-100 transition-transform"></div>
+            <div class="absolute bottom-0 left-0 w-full h-0.5 bg-primary transform scale-x-0 group-hover:scale-x-100 transition-transform"></div>
           </a>
         {/each}
       </div>

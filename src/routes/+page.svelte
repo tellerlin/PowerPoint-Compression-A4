@@ -173,14 +173,14 @@
 <!-- Your <Container> template remains the same -->
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-gray-100">PowerPoint Compression Tool</h1>
-    <p class="text-gray-400">Reduce your PPTX file size without losing quality</p>
+    <h1 class="text-3xl font-bold mb-2 text-text">PowerPoint Compression Tool</h1>
+    <p class="text-muted">Reduce your PPTX file size without losing quality</p>
   </div>
 
-  <div class="rounded-lg shadow-md p-6 mb-6 bg-gray-800 min-h-[250px] flex flex-col justify-center">
+  <div class="rounded-lg shadow-md p-6 mb-6 bg-surface min-h-[250px] flex flex-col justify-center">
     {#if !processing && !compressionComplete}
       <!-- File Upload Area -->
-      <div class="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center hover:border-gray-500 transition-colors">
+      <div class="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
         <input
           type="file"
           id="file-upload"
@@ -190,15 +190,15 @@
         />
         <label for="file-upload" class="cursor-pointer">
           <div class="flex flex-col items-center justify-center">
-            <svg class="w-12 h-12 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
-            <p class="mt-2 text-base text-gray-300 font-semibold">Click or Drag to Select PowerPoint File</p>
-            <p class="text-xs text-gray-500 mt-1">(.pptx format only)</p>
+            <svg class="w-12 h-12 text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            <p class="mt-2 text-base text-text font-semibold">Click or Drag to Select PowerPoint File</p>
+            <p class="text-xs text-muted mt-1">(.pptx format only)</p>
           </div>
         </label>
       </div>
 
       {#if files && files.length > 0}
-        <div class="mt-4 p-3 bg-gray-700 rounded-md text-gray-200 text-sm">
+        <div class="mt-4 p-3 bg-surface border border-border rounded-md text-text text-sm">
           <p class="font-medium truncate">Selected: {files[0].name} ({formatBytes(files[0].size)})</p>
         </div>
         
@@ -225,20 +225,20 @@
           <!-- Progress Bar -->
           <div class="mb-2">
             <div class="flex justify-between items-center mb-1">
-                 <p class="font-medium text-sm text-gray-200">{$compressionProgress.status || 'Processing...'}</p>
+                 <p class="font-medium text-sm text-text">{$compressionProgress.status || 'Processing...'}</p>
                  {#if $compressionProgress.percentage > 0 && $compressionProgress.percentage < 100 && $compressionProgress.estimatedTimeRemaining != null}
-                     <p class="text-xs text-gray-400">ETA: ~{$compressionProgress.estimatedTimeRemaining}s</p>
+                     <p class="text-xs text-muted">ETA: ~{$compressionProgress.estimatedTimeRemaining}s</p>
                  {/if}
             </div>
-            <div class="w-full bg-gray-700 rounded-full h-2.5 overflow-hidden">
+            <div class="w-full bg-border/50 rounded-full h-2.5 overflow-hidden">
               <div
-                class="bg-gradient-to-r from-blue-500 to-purple-500 h-2.5 rounded-full transition-all duration-300 ease-out"
+                class="bg-gradient-to-r from-primary to-secondary h-2.5 rounded-full transition-all duration-300 ease-out"
                 style="width: {$compressionProgress.percentage || 0}%"
               ></div>
             </div>
             
             {#if $compressionProgress.processedMediaCount > 0 && $compressionProgress.mediaCount > 0}
-              <div class="mt-2 text-xs text-gray-400">
+              <div class="mt-2 text-xs text-muted">
                 Processing media: {$compressionProgress.processedMediaCount}/{$compressionProgress.mediaCount}
                 {#if $compressionProgress.stats.savedMediaSize > 0}
                   <span class="ml-2 text-green-400">
@@ -250,31 +250,31 @@
           </div>
 
           {#if fileInfo}
-            <div class="p-3 bg-gray-700 rounded-md text-gray-200 text-sm">
+            <div class="p-3 bg-surface border border-border rounded-md text-text text-sm">
               <p class="font-medium truncate">Processing: {fileInfo.name}</p>
             </div>
           {/if}
 
           {#if compressionComplete}
              <!-- Completion Results -->
-            <div class="p-4 bg-gray-700 border border-green-600 rounded-md animate-fade-in">
-              <h3 class="font-bold text-lg text-green-400 mb-3 text-center">Compression Complete!</h3>
+            <div class="p-4 bg-surface border border-primary/50 rounded-md animate-fade-in">
+              <h3 class="font-bold text-lg text-primary mb-3 text-center">Compression Complete!</h3>
               <div class="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 text-sm">
                 <div>
-                  <p class="text-gray-400">Original Size:</p>
-                  <p class="font-medium text-gray-100">{compressionStats.formattedOriginalSize}</p>
+                  <p class="text-muted">Original Size:</p>
+                  <p class="font-medium text-text">{compressionStats.formattedOriginalSize}</p>
                 </div>
                 <div>
-                  <p class="text-gray-400">Compressed Size:</p>
-                  <p class="font-medium text-gray-100">{compressionStats.formattedCompressedSize}</p>
+                  <p class="text-muted">Compressed Size:</p>
+                  <p class="font-medium text-text">{compressionStats.formattedCompressedSize}</p>
                 </div>
                 <div>
-                  <p class="text-gray-400">Space Saved:</p>
-                  <p class="font-medium text-green-400">{compressionStats.formattedSavedSize}</p>
+                  <p class="text-muted">Space Saved:</p>
+                  <p class="font-medium text-primary">{compressionStats.formattedSavedSize}</p>
                 </div>
                 <div>
-                  <p class="text-gray-400">Reduction:</p>
-                  <p class="font-medium text-green-400">{compressionStats.savedPercentage}%</p>
+                  <p class="text-muted">Reduction:</p>
+                  <p class="font-medium text-primary">{compressionStats.savedPercentage}%</p>
                 </div>
               </div>
               <div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
@@ -290,7 +290,7 @@
               </Button>
             </div>
           {:else if !processing && !$compressionProgress.error}
-             <p class="text-center text-gray-400">Preparing...</p>
+             <p class="text-center text-muted">Preparing...</p>
           {/if}
         {/if}
       </div>

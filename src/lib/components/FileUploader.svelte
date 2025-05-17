@@ -1,7 +1,8 @@
 <script>
-    import { createEventDispatcher } from 'svelte';
+    import { createEventDispatcher, onMount } from 'svelte';
     import { fade } from 'svelte/transition';
     import Icon from './ui/Icon.svelte';
+    import { themeStore } from '$lib/stores/theme';
     
     const dispatch = createEventDispatcher();
     
@@ -10,17 +11,32 @@
     
     let dragActive = false;
     let fileInput;
+    let currentTheme = $themeStore;
+    
+    // Subscribe to theme changes
+    $: {
+      currentTheme = $themeStore;
+      console.log('[FileUploader] Theme changed to:', currentTheme);
+      console.log('[FileUploader] Dark class exists:', document.documentElement.classList.contains('dark'));
+      console.log('[FileUploader] Current background color:', getComputedStyle(document.documentElement).getPropertyValue('--color-background'));
+    }
+    
+    onMount(() => {
+      console.log('[FileUploader] Component mounted');
+      console.log('[FileUploader] Initial theme:', currentTheme);
+      console.log('[FileUploader] Initial dark class:', document.documentElement.classList.contains('dark'));
+    });
     
     function handleFileSelect(file) {
       if (!file) return;
       
       if (!file.name.toLowerCase().endsWith('.pptx')) {
-        dispatch('error', { message: '请选择 PowerPoint (PPTX) 文件' });
+        dispatch('error', { message: 'Please select a PowerPoint (PPTX) file' });
         return;
       }
       
       if (file.size > maxSize) {
-        dispatch('error', { message: '文件大小不能超过 300MB' });
+        dispatch('error', { message: 'File size cannot exceed 300MB' });
         return;
       }
       
@@ -31,6 +47,8 @@
       e.preventDefault();
       e.stopPropagation();
       dragActive = true;
+      console.log('[FileUploader] Drag enter, current theme:', currentTheme);
+      console.log('[FileUploader] Current background color:', getComputedStyle(e.currentTarget).backgroundColor);
     }
     
     function handleDragLeave(e) {
@@ -60,10 +78,10 @@
   </script>
   
   <div 
-    class="upload-area {dragActive ? 'drag-active' : ''}"
+    class="relative w-full min-h-64 border-2 border-dashed border-border bg-surface rounded-lg cursor-pointer transition-all duration-200 hover:border-primary hover:bg-primary/5 focus:outline-none focus:border-primary {dragActive ? 'border-primary bg-primary/5' : ''}"
     role="button"
     tabindex="0"
-    aria-label="点击或拖放文件以上传"
+    aria-label="Click or drag and drop file to upload"
     on:dragenter={handleDragEnter}
     on:dragleave={handleDragLeave}
     on:dragover={handleDragOver}
@@ -79,76 +97,21 @@
       on:change={e => handleFileSelect(e.target.files[0])}
     />
     
-    <div class="upload-content">
+    <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full p-8 text-center">
       <Icon name="upload" size="48" class="text-primary mb-4" />
-      <h3 class="text-lg font-medium mb-2">上传 PowerPoint 文件</h3>
+      <h3 class="text-lg font-medium mb-2 text-text">Upload PowerPoint File</h3>
       <p class="text-muted text-sm">
-        点击或拖放文件到此处<br>
-        支持 .pptx 格式，最大 300MB
+        Click or drag and drop file here<br>
+        Supports .pptx format, max 300MB
       </p>
     </div>
     
     {#if dragActive}
-      <div class="drag-overlay" transition:fade={{ duration: 200 }}>
-        <span class="text-lg font-medium">释放文件以上传</span>
+      <div 
+        class="absolute inset-0 flex items-center justify-center bg-surface/80 border-2 border-dashed border-primary rounded-lg z-10"
+        transition:fade={{ duration: 200 }}
+      >
+        <span class="text-lg font-medium text-text">Drop file to upload</span>
       </div>
     {/if}
   </div>
-  
-  <style>
-    .upload-area {
-      position: relative;
-      width: 100%;
-      min-height: 16rem;
-      border: 2px dashed rgb(var(--border));
-      border-radius: 0.5rem;
-      background-color: rgb(var(--surface));
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    
-    .upload-area:hover,
-    .upload-area:focus {
-      border-color: rgb(var(--primary));
-      background-color: rgba(var(--primary), 0.05);
-      outline: none;
-    }
-    
-    .upload-area:focus-visible {
-      box-shadow: 0 0 0 2px rgb(var(--background)), 0 0 0 4px rgb(var(--primary));
-    }
-    
-    .drag-active {
-      border-color: rgb(var(--primary));
-      background-color: rgba(var(--primary), 0.05);
-    }
-    
-    .upload-content {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 100%;
-      padding: 2rem;
-      text-align: center;
-    }
-    
-    .drag-overlay {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background-color: rgba(var(--background), 0.8);
-      border: 2px dashed rgb(var(--primary));
-      border-radius: 0.5rem;
-      z-index: 10;
-    }
-    
-    .hidden {
-      display: none;
-    }
-  </style>

@@ -32,7 +32,7 @@
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-[data-theme="dark"] {
+.dark {
   --color-background: var(--dark-background);
   --color-surface: var(--dark-surface);
   --color-primary: var(--dark-primary);
@@ -41,6 +41,11 @@
   --color-text: var(--dark-text);
   --color-muted: var(--dark-muted);
   --color-border: var(--dark-border);
+}
+
+html {
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-text));
 }
 
 body {
