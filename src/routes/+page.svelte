@@ -15,39 +15,36 @@
   let isFFmpegLoaded = false;
   let processedFileId = null;
 
-  // 固定选项
+  // Fixed options - simplify by only keeping image compression
   const compressionOptions = {
     compressImages: {
       enabled: true
-    },
-    removeHiddenSlides: true,
-    removeUnusedLayouts: true,
-    cleanMediaInUnusedLayouts: true
+    }
   };
 
   onMount(async () => {
     try {
-      // 加载FFmpeg
+      // Load FFmpeg
       const script = document.createElement('script');
       script.src = '/ffmpeg/ffmpeg.min.js';
       script.async = true;
       script.onload = () => {
         if (typeof window.FFmpeg === 'undefined') {
-          console.error('[FFmpeg] FFmpeg对象加载后未找到');
-          updateProgress('error', { message: 'FFmpeg初始化失败。请刷新页面重试。' });
+          console.error('[FFmpeg] FFmpeg object not found after loading');
+          updateProgress('error', { message: 'FFmpeg initialization failed. Please refresh and try again.' });
           return;
         }
         isFFmpegLoaded = true;
-        console.log('[FFmpeg] 加载成功');
+        console.log('[FFmpeg] Loaded successfully');
       };
       script.onerror = (error) => {
-        console.error('[FFmpeg] 加载失败:', error);
-        updateProgress('error', { message: '加载FFmpeg失败。请刷新页面重试。' });
+        console.error('[FFmpeg] Failed to load:', error);
+        updateProgress('error', { message: 'Failed to load FFmpeg. Please refresh and try again.' });
       };
       document.head.appendChild(script);
     } catch (error) {
-      console.error('[FFmpeg] 初始化过程中发生错误:', error);
-      updateProgress('error', { message: 'FFmpeg初始化失败。请刷新页面重试。' });
+      console.error('[FFmpeg] Error during initialization:', error);
+      updateProgress('error', { message: 'FFmpeg initialization failed. Please refresh and try again.' });
     }
   });
 
@@ -65,7 +62,7 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  // 监视files变化，如果有文件被选择且在浏览器环境中，自动开始压缩
+  // Monitor files changes, if a file is selected and in browser environment, start compression automatically
   $: if (files && files.length > 0 && browser && !processing && files[0].name !== processedFileId) {
     handleSubmit();
   }
@@ -87,33 +84,30 @@
     const file = files?.[0];
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.pptx')) {
-      updateProgress('error', { message: "仅支持PowerPoint (.pptx) 文件格式。" });
+      updateProgress('error', { message: "Only PowerPoint (.pptx) format is supported." });
       return;
     }
     if (file.size > 314572800) {
-      updateProgress('error', { message: `文件大小 (${formatBytes(file.size)}) 超过300MB限制。` });
+      updateProgress('error', { message: `File size (${formatBytes(file.size)}) exceeds the 300MB limit.` });
       return;
     }
     if (!isFFmpegLoaded) {
-      updateProgress('error', { message: 'FFmpeg尚未加载完成，请稍候再试。' });
+      updateProgress('error', { message: 'FFmpeg is not fully loaded yet. Please try again in a moment.' });
       return;
     }
     processing = true;
     resetProgressStore();
     try {
-      // 标记当前文件为已处理
+      // Mark current file as processed
       processedFileId = file.name;
       
       const optimizedBlob = await optimizePPTX(file, {
         compressImages: compressionOptions.compressImages.enabled,
-        removeHiddenSlides: compressionOptions.removeHiddenSlides,
-        removeUnusedLayouts: compressionOptions.removeUnusedLayouts,
-        cleanMediaInUnusedLayouts: compressionOptions.cleanMediaInUnusedLayouts,
         onProgress: updateProgress
       });
       if (!optimizedBlob) {
         if (!$compressionProgress.error) {
-          updateProgress('error', { message: "处理完成但未生成文件。" });
+          updateProgress('error', { message: "Processing completed but no file was generated." });
         }
         return;
       }
@@ -122,14 +116,14 @@
       downloadLink = a;
     } catch (error) {
       console.error('Compression error:', error);
-      updateProgress('error', { message: error.message || '压缩过程中发生错误。' });
+      updateProgress('error', { message: error.message || 'An error occurred during compression.' });
     } finally {
       processing = false;
       
-      // 检查是否完成压缩，如果完成则不再重新触发压缩
+      // Check if compression is complete, if so, don't trigger compression again
       if ($compressionProgress.percentage === 100 && !$compressionProgress.error) {
-        // 不清空files以保持UI显示当前文件，但添加标记防止重新处理
-        files = [...files]; // 创建新引用，防止反应式触发
+        // Keep files to maintain UI display of current file, but add a flag to prevent reprocessing
+        files = [...files]; // Create new reference to prevent reactive triggering
       }
     }
   }

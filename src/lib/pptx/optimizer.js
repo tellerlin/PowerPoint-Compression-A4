@@ -1,28 +1,19 @@
 import * as JSZip from 'jszip';
 import { validateFile } from '../utils/validation';
-import { compressImage, compressImagesInParallel } from '../utils/image';
+import { compressImagesInParallel } from '../utils/image';
 import { 
   COMPRESSION_SETTINGS, 
-  SUPPORTED_IMAGE_EXTENSIONS,
-  COMPRESSION_PRESETS 
+  SUPPORTED_IMAGE_EXTENSIONS
 } from './constants';
-import { findMediaFiles, processMediaFile } from './media';
-import { removeHiddenSlides } from './slides';
-import { cleanUnusedResources } from './cleaner';
 import { calculateEstimatedTime, calculateSavedStats } from '../utils/progressUtils';
 import { updateProgress } from './progress';
 
-async function preprocessImages(zip, options = {}) {
-  console.log('[preprocessImages] Preprocessing step (currently placeholder).');
-  return true;
-}
-
-// 修改processMediaBatch函数以使用并行压缩
+// Modified processMediaBatch function to use parallel compression
 async function processMediaBatch(zip, batch, options, cpuCount, onProgress, currentIndex, totalFiles) {
   const imagesToCompress = [];
   const otherFiles = [];
 
-  // 分离图片和其他文件
+  // Separate images and other files
   for (const mediaPath of batch) {
     const fileExtension = mediaPath.split('.').pop()?.toLowerCase() || '';
     const isSupportedImage = SUPPORTED_IMAGE_EXTENSIONS.includes(fileExtension);
@@ -32,14 +23,14 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
         const file = zip.file(mediaPath);
         if (file) {
           const data = await file.async('uint8array');
-          if (data.byteLength > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
+          if (data && data.byteLength > COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
             imagesToCompress.push({ path: mediaPath, data });
           } else {
             otherFiles.push({ path: mediaPath, data });
           }
         }
       } catch (e) {
-        console.warn(`Failed to read file ${mediaPath}:`, e);
+        console.error(`Error reading file ${mediaPath}:`, e);
         otherFiles.push({ path: mediaPath, data: null });
       }
     } else {
@@ -51,18 +42,15 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
   let processedCount = 0;
   const totalBatchFiles = imagesToCompress.length + otherFiles.length;
 
-  // 并行处理图片
+  // Process images in parallel
   if (imagesToCompress.length > 0) {
-    // 获取完整的压缩选项
     const compressionOptions = typeof options.compressImages === 'object' ? options.compressImages : {
-      quality: COMPRESSION_SETTINGS.DEFAULT_QUALITY,
-      allowFormatConversion: true,
-      allowDownsampling: true,
-      maxImageSize: COMPRESSION_SETTINGS.MAX_IMAGE_SIZE,
-      compressionMethod: 'mozjpeg'
+      quality: COMPRESSION_SETTINGS.quality,
+      allowFormatConversion: COMPRESSION_SETTINGS.allowFormatConversion,
+      allowDownsampling: COMPRESSION_SETTINGS.allowDownsampling,
+      maxImageSize: COMPRESSION_SETTINGS.maxImageSize,
+      compressionMethod: COMPRESSION_SETTINGS.compressionMethod
     };
-    
-    console.log('[processMediaBatch] Using compression options:', compressionOptions);
     
     const compressedImages = await compressImagesInParallel(imagesToCompress, compressionOptions, (progress) => {
       processedCount++;
@@ -76,21 +64,40 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
       });
     });
     
-    // 更新压缩后的图片
+    // Update compressed images
     for (let i = 0; i < imagesToCompress.length; i++) {
       const { path } = imagesToCompress[i];
       const compressedData = compressedImages[i];
       
       try {
-        await processMediaFile(zip, path, async () => compressedData);
-        results.push({
-          path,
-          originalSize: imagesToCompress[i].data.byteLength,
-          compressedSize: compressedData.byteLength,
-          success: true,
-          error: null
-        });
+        if (compressedData && compressedData.data) {
+          // Ensure we're using the correct data format
+          const finalData = compressedData.data instanceof Uint8Array ? 
+            compressedData.data : 
+            new Uint8Array(compressedData.data);
+            
+          // Update the file in the zip with the compressed data
+          zip.file(path, finalData);
+          
+          results.push({
+            path,
+            originalSize: imagesToCompress[i].data.byteLength,
+            compressedSize: finalData.byteLength,
+            success: true,
+            error: null
+          });
+        } else {
+          // If compression failed, keep the original data
+          results.push({
+            path,
+            originalSize: imagesToCompress[i].data.byteLength,
+            compressedSize: imagesToCompress[i].data.byteLength,
+            success: false,
+            error: 'Compression failed - no valid data returned'
+          });
+        }
       } catch (error) {
+        console.error(`Error updating compressed image ${path}:`, error);
         results.push({
           path,
           originalSize: imagesToCompress[i].data.byteLength,
@@ -102,17 +109,20 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
     }
   }
 
-  // 处理其他文件
+  // Process other files - just record their sizes, don't modify them
   for (const { path, data } of otherFiles) {
     try {
       let fileOriginalSize = 0;
       let fileCompressedSize = 0;
       
-      await processMediaFile(zip, path, async (fileData) => {
-        fileOriginalSize = fileData.byteLength;
-        fileCompressedSize = fileOriginalSize;
-        return fileData;
-      });
+      const file = zip.file(path);
+      if (file) {
+        const fileData = await file.async('uint8array');
+        if (fileData) {
+          fileOriginalSize = fileData.byteLength;
+          fileCompressedSize = fileOriginalSize;
+        }
+      }
       
       results.push({
         path,
@@ -122,6 +132,7 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
         error: null
       });
     } catch (error) {
+      console.error(`Error processing other file ${path}:`, error);
       results.push({
         path,
         originalSize: 0,
@@ -136,14 +147,15 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
 }
 
 export async function optimizePPTX(file, options = {}) {
-  // 使用标准预设，不再提供多种预设选择
-  const preset = COMPRESSION_SETTINGS.DEFAULT_PRESET;
-  const presetOptions = COMPRESSION_PRESETS[preset];
+  // Get compression options from settings directly
+  const presetOptions = {
+    quality: COMPRESSION_SETTINGS.quality,
+    allowFormatConversion: COMPRESSION_SETTINGS.allowFormatConversion,
+    allowDownsampling: COMPRESSION_SETTINGS.allowDownsampling,
+    maxImageSize: COMPRESSION_SETTINGS.maxImageSize,
+    compressionMethod: COMPRESSION_SETTINGS.compressionMethod
+  };
   
-  console.log('[optimizePPTX] Using preset:', preset);
-  console.log('[optimizePPTX] Preset options:', presetOptions);
-  
-  // 简化选项合并
   const mergedOptions = {
     ...options,
     compressImages: options.compressImages !== false ? {
@@ -154,8 +166,6 @@ export async function optimizePPTX(file, options = {}) {
       compressionMethod: presetOptions.compressionMethod
     } : false
   };
-  
-  console.log('[optimizePPTX] Merged options:', mergedOptions);
 
   let zip;
   const { onProgress = updateProgress } = mergedOptions;
@@ -173,12 +183,11 @@ export async function optimizePPTX(file, options = {}) {
     error: null
   };
 
-  // 添加内存使用监控
+  // Add memory usage monitoring
   let memoryMonitorStop = null;
   if (typeof window !== 'undefined' && window.performance && window.performance.memory) {
     const { monitorMemory } = await import('../utils/memory.js');
     memoryMonitorStop = monitorMemory((usage) => {
-      console.warn(`[Memory Warning] High memory usage: ${usage.toFixed(2)}MB`);
       onProgress('warning', { message: `High memory usage detected (${usage.toFixed(0)}MB). Consider closing other applications.` });
     });
   }
@@ -194,42 +203,18 @@ export async function optimizePPTX(file, options = {}) {
     try {
       zip = await JSZip.loadAsync(file);
     } catch (zipError) {
-      const errorMessage = zipError.message.includes('invalid') || zipError.message.includes('end of central directory record')
-        ? 'Invalid or corrupted file format. Please upload a valid PowerPoint file.'
-        : `Failed to load file: ${zipError.message}`;
-      throw new Error(errorMessage);
-    }
-
-    if (mergedOptions.removeHiddenSlides) {
-      onProgress('init', { percentage: 5, status: 'Removing hidden slides...' });
-      try {
-        await removeHiddenSlides(zip, onProgress);
-      } catch (error) {
-        onProgress('warning', { message: `Failed to remove hidden slides: ${error.message}` });
-      }
-    }
-
-    onProgress('init', { percentage: 15, status: 'Cleaning unused resources...' });
-    try {
-      const cleanupSuccess = await cleanUnusedResources(zip, onProgress, {
-        removeUnusedLayouts: mergedOptions.removeUnusedLayouts,
-        cleanMediaInUnusedLayouts: mergedOptions.cleanMediaInUnusedLayouts,
-      });
-      if (!cleanupSuccess) {
-        onProgress('warning', { message: 'Resource cleanup encountered issues.' });
-      }
-    } catch(error) {
-      onProgress('warning', { message: `Resource cleanup failed: ${error.message}` });
-    }
-
-    if (mergedOptions.preprocessImages) {
-      onProgress('init', { percentage: 35, status: 'Preprocessing images...' });
-      await preprocessImages(zip, { /* Options */ });
+      throw new Error('Invalid or corrupted file format. Please upload a valid PowerPoint file.');
     }
 
     if (mergedOptions.compressImages !== false) {
-      const mediaFiles = findMediaFiles(zip);
-      console.log('[optimizePPTX] Found media files:', mediaFiles.length);
+      const mediaFiles = [];
+      // Find all media files in the zip
+      for (const path in zip.files) {
+        if (path.startsWith('ppt/media/') && !zip.files[path].dir) {
+          mediaFiles.push(path);
+        }
+      }
+      
       onProgress('mediaCount', { count: mediaFiles.length });
 
       let totalOriginalMediaSize = 0;
@@ -238,22 +223,17 @@ export async function optimizePPTX(file, options = {}) {
       let failedMediaCount = 0;
 
       if (mediaFiles.length > 0) {
-        // 根据文件大小动态调整批处理大小
         const batchSize = Math.min(
           mediaFiles.length,
-          mediaFiles.some(f => f.size > 10 * 1024 * 1024) ? 1 : // 如果有大于10MB的文件，一次处理一个
-          mediaFiles.some(f => f.size > 5 * 1024 * 1024) ? 2 :  // 如果有大于5MB的文件，一次处理两个
-          4  // 其他情况一次处理4个
+          mediaFiles.some(f => zip.files[f].data && zip.files[f].data.length > 10 * 1024 * 1024) ? 1 :
+          mediaFiles.some(f => zip.files[f].data && zip.files[f].data.length > 5 * 1024 * 1024) ? 2 :
+          4
         );
-        
-        console.log('[optimizePPTX] Using batch size:', batchSize);
 
         for (let i = 0; i < mediaFiles.length; i += batchSize) {
           const batch = mediaFiles.slice(i, i + batchSize);
-          console.log(`[optimizePPTX] Processing batch ${i/batchSize + 1}/${Math.ceil(mediaFiles.length/batchSize)}`);
           const batchResults = await processMediaBatch(zip, batch, mergedOptions, cpuCount, onProgress, i, mediaFiles.length);
           
-          // 处理结果...
           batchResults.forEach(result => {
             totalOriginalMediaSize += result.originalSize || 0;
             totalCompressedMediaSize += result.compressedSize || 0;
@@ -262,7 +242,6 @@ export async function optimizePPTX(file, options = {}) {
             } else {
               failedMediaCount++;
             }
-            console.log(`[optimizePPTX] File ${result.path}: ${result.originalSize} -> ${result.compressedSize} (${result.success ? 'success' : 'failed'})`);
           });
           
           const elapsed = Date.now() - startTime;
@@ -277,12 +256,6 @@ export async function optimizePPTX(file, options = {}) {
           });
         }
         
-        console.log('[optimizePPTX] Media compression summary:');
-        console.log('- Total original size:', totalOriginalMediaSize);
-        console.log('- Total compressed size:', totalCompressedMediaSize);
-        console.log('- Processed files:', processedMediaCount);
-        console.log('- Failed files:', failedMediaCount);
-        
         finalStats.originalMediaSize = totalOriginalMediaSize;
         finalStats.compressedMediaSize = totalCompressedMediaSize;
         const mediaStats = calculateSavedStats(totalOriginalMediaSize, totalCompressedMediaSize);
@@ -292,11 +265,10 @@ export async function optimizePPTX(file, options = {}) {
     }
 
     onProgress('finalize', {
-      status: `Rebuilding presentation...`,
+      status: "Rebuilding presentation...",
       stats: finalStats
     });
 
-    console.log('[optimizePPTX] Generating final ZIP with compression level:', COMPRESSION_SETTINGS.ZIP_COMPRESSION_LEVEL);
     const compressedBlob = await zip.generateAsync({
       type: 'blob',
       compression: 'DEFLATE',
@@ -310,49 +282,23 @@ export async function optimizePPTX(file, options = {}) {
     finalStats.savedPercentage = overallStats.savedPercentage;
     finalStats.processingTime = (Date.now() - startTime) / 1000;
 
-    console.log('[optimizePPTX] Final compression results:');
-    console.log('- Original size:', finalStats.originalSize);
-    console.log('- Compressed size:', finalStats.compressedSize);
-    console.log('- Saved size:', finalStats.savedSize);
-    console.log('- Saved percentage:', finalStats.savedPercentage);
-    console.log('- Processing time:', finalStats.processingTime);
-
     onProgress('complete', { stats: finalStats });
 
     return compressedBlob;
 
   } catch (error) {
     finalStats.error = error.message;
-
-    let userFriendlyMessage = 'An unexpected error occurred during optimization.';
-    
-    // 扩展错误类型识别
-    if (error.message.includes('Invalid or corrupted file format')) {
-      userFriendlyMessage = error.message;
-    } else if (error.message.includes('memory') || error.message.includes('buffer') || error instanceof RangeError) {
-      userFriendlyMessage = 'Processing failed due to memory or size constraints. Try closing other tabs or using a smaller file.';
-    } else if (error.message.includes('Invalid or unsupported image data')) {
-      userFriendlyMessage = `Unsupported image found: ${error.message}. Please check image formats.`;
-    } else if (error.message.includes('timeout') || error.message.includes('time limit')) {
-      userFriendlyMessage = 'Processing timed out. Try with a smaller file or fewer images.';
-    } else if (error.message.includes('network') || error.message.includes('connection')) {
-      userFriendlyMessage = 'Network error occurred. Please check your internet connection and try again.';
-    } else if (error instanceof TypeError || error instanceof ReferenceError) {
-      userFriendlyMessage = 'A programming error occurred. Please report this issue.';
-    }
-
     finalStats.processingTime = (Date.now() - startTime) / 1000;
     onProgress('error', {
-      message: userFriendlyMessage,
-      details: error.message,
+      message: error.message,
       stats: finalStats
     });
 
     throw error;
-  }
-  
-  // 清理内存监控
-  if (memoryMonitorStop) {
-    memoryMonitorStop();
+  } finally {
+    // Make sure we clean up memory monitoring in all cases
+    if (memoryMonitorStop) {
+      memoryMonitorStop();
+    }
   }
 }
