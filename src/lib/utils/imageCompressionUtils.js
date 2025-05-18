@@ -1,4 +1,5 @@
 // Shared image compression utility functions
+import { checkAlphaChannel } from './image';
 
 export const ImageType = {
   PHOTO: 'photo',
@@ -140,8 +141,8 @@ export async function processImage(data, quality, originalFormat) {
     ctx.drawImage(bitmap, 0, 0);
     const imageData = ctx.getImageData(0, 0, originalWidth, originalHeight);
     
-    // 使用image.js中的checkAlphaChannel函数
-    const hasAlpha = await import('./image').then(m => m.checkAlphaChannel(imageData));
+    // 使用静态导入的checkAlphaChannel函数
+    const hasAlpha = checkAlphaChannel(imageData);
     
     const dimensions = calculateOptimalDimensions(originalWidth, originalHeight);
     targetWidth = dimensions.width;

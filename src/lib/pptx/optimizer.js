@@ -1,12 +1,69 @@
 import * as JSZip from 'jszip';
-import { validateFile } from '../utils/validation';
 import { compressImagesInParallel } from '../utils/image';
 import { 
   COMPRESSION_SETTINGS, 
   SUPPORTED_IMAGE_EXTENSIONS
 } from './constants';
-import { calculateEstimatedTime, calculateSavedStats } from '../utils/progressUtils';
 import { updateProgress } from './progress';
+
+// 添加文件验证函数
+function validateFile(file) {
+  if (!file) {
+    throw new Error('No file provided');
+  }
+
+  if (!(file instanceof File || file instanceof Blob)) {
+    throw new Error('Invalid file type. Please provide a valid file.');
+  }
+
+  const fileSize = file.size;
+  if (fileSize === 0) {
+    throw new Error('File is empty');
+  }
+
+  const maxSize = 500 * 1024 * 1024; // 500MB
+  if (fileSize > maxSize) {
+    throw new Error('File is too large. Maximum size is 500MB.');
+  }
+
+  const fileName = file.name.toLowerCase();
+  if (!fileName.endsWith('.pptx')) {
+    throw new Error('Invalid file format. Please upload a PowerPoint (.pptx) file.');
+  }
+}
+
+// 添加进度计算函数
+function calculateEstimatedTime(startTime, processedFiles, totalFiles) {
+  if (processedFiles === 0) return null;
+  const elapsedTime = Date.now() - startTime;
+  const timePerFile = elapsedTime / processedFiles;
+  const remainingFiles = totalFiles - processedFiles;
+  const estimatedSeconds = Math.round(timePerFile * remainingFiles / 1000);
+  
+  console.log('[Time Estimation]', {
+    elapsedTime: `${elapsedTime}ms`,
+    processedFiles,
+    timePerFile: `${timePerFile}ms`,
+    remainingFiles,
+    estimatedSeconds: `${estimatedSeconds}s`
+  });
+  
+  return estimatedSeconds;
+}
+
+function calculateSavedStats(originalSize, compressedSize, originalMediaSize, compressedMediaSize) {
+  const savedSize = originalSize - compressedSize;
+  const savedPercentage = originalSize > 0 ? Number(((savedSize / originalSize) * 100).toFixed(1)) : 0;
+  const savedMediaSize = originalMediaSize - compressedMediaSize;
+  const savedMediaPercentage = originalMediaSize > 0 ? Number(((savedMediaSize / originalMediaSize) * 100).toFixed(1)) : 0;
+  
+  return {
+    savedSize,
+    savedPercentage,
+    savedMediaSize,
+    savedMediaPercentage
+  };
+}
 
 // Modified processMediaBatch function to use parallel compression
 async function processMediaBatch(zip, batch, options, cpuCount, onProgress, currentIndex, totalFiles) {
@@ -237,19 +294,26 @@ export async function optimizePPTX(file, options = {}) {
           
           const elapsed = Date.now() - startTime;
           const currentProcessedTotal = processedMediaCount + failedMediaCount;
-          const estimatedRemaining = calculateEstimatedTime(elapsed, currentProcessedTotal, mediaFiles.length);
+          console.log('[OptimizePPTX] Time calculation inputs:', {
+            elapsed: `${elapsed}ms`,
+            currentProcessedTotal,
+            totalFiles: mediaFiles.length,
+            processedMediaCount,
+            failedMediaCount
+          });
+          const estimatedRemaining = calculateEstimatedTime(Date.now() - elapsed, currentProcessedTotal, mediaFiles.length);
           
           onProgress('media', {
             fileIndex: Math.min(i + batchSize, mediaFiles.length),
             totalFiles: mediaFiles.length,
             processedFiles: batchResults.map(r => r.path.split('/').pop()),
-            estimatedTimeRemaining: Math.round(estimatedRemaining / 1000)
+            estimatedTimeRemaining: estimatedRemaining
           });
         }
         
         finalStats.originalMediaSize = totalOriginalMediaSize;
         finalStats.compressedMediaSize = totalCompressedMediaSize;
-        const mediaStats = calculateSavedStats(totalOriginalMediaSize, totalCompressedMediaSize);
+        const mediaStats = calculateSavedStats(totalOriginalMediaSize, totalCompressedMediaSize, 0, 0);
         finalStats.savedMediaSize = mediaStats.savedSize;
         finalStats.savedMediaPercentage = mediaStats.savedPercentage;
       }
@@ -268,7 +332,7 @@ export async function optimizePPTX(file, options = {}) {
     });
 
     finalStats.compressedSize = compressedBlob.size;
-    const overallStats = calculateSavedStats(finalStats.originalSize, compressedBlob.size);
+    const overallStats = calculateSavedStats(finalStats.originalSize, compressedBlob.size, 0, 0);
     finalStats.savedSize = overallStats.savedSize;
     finalStats.savedPercentage = overallStats.savedPercentage;
     finalStats.processingTime = (Date.now() - startTime) / 1000;

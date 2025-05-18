@@ -1,47 +1,25 @@
-let gtag;
+// Google Analytics and WeChat meta tags initialization
 
 export function initializeGoogleAnalytics() {
-    if (typeof window !== 'undefined') {
-        const script = document.createElement('script');
-        script.async = true;
-        script.src = `https://www.googletagmanager.com/gtag/js?id=G-M91P9505Z1`;
-        document.head.appendChild(script);
-
-        window.dataLayer = window.dataLayer || [];
-        window.gtag = gtag = function() {
-            window.dataLayer.push(arguments);
-        };
-        window.gtag('js', new Date());
-        window.gtag('config', 'G-M91P9505Z1');
-    }
+  if (typeof window !== 'undefined' && window.gtag) {
+    window.gtag('config', 'G-XXXXXXXXXX'); // Replace with your actual GA ID
+  }
 }
 
 export function initializeWeChatMetaTags(metadata) {
-    const wechatMetaTags = [
-        { name: 'description', content: metadata.description.zh },
-        { property: 'og:type', content: 'website' },
-        { property: 'og:title', content: metadata.title.zh },
-        { property: 'og:description', content: metadata.description.zh },
-        { property: 'og:image', content: `${metadata.url}${metadata.images.wechat}` },
-        { name: 'weixin:type', content: 'webpage' },
-        { name: 'weixin:title', content: metadata.title.zh },
-        { name: 'weixin:description', content: metadata.description.zh },
-        { name: 'weixin:image', content: `${metadata.url}${metadata.images.wechat}` }
+  if (typeof window !== 'undefined') {
+    // Add WeChat meta tags
+    const metaTags = [
+      { name: 'wechat:title', content: metadata.title.zh },
+      { name: 'wechat:description', content: metadata.description.zh },
+      { name: 'wechat:image', content: `${metadata.url}${metadata.images.og}` }
     ];
 
-    wechatMetaTags.forEach(tag => {
-        const metaTag = document.createElement('meta');
-        Object.entries(tag).forEach(([key, value]) => {
-            metaTag.setAttribute(key, value);
-        });
-        metaTag.setAttribute('data-dynamic', 'true');
-        document.head.appendChild(metaTag);
+    metaTags.forEach(tag => {
+      const meta = document.createElement('meta');
+      meta.setAttribute('name', tag.name);
+      meta.setAttribute('content', tag.content);
+      document.head.appendChild(meta);
     });
-
-    const wxScript = document.createElement('script');
-    wxScript.src = '/jweixin-1.6.0.js';
-    wxScript.async = true;
-    document.head.appendChild(wxScript);
-}
-
-export { gtag };
+  }
+} 
