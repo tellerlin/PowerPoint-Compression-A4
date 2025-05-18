@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount, beforeUpdate } from 'svelte';
   import { themeStore } from '$lib/stores/theme';
-  import { Header } from '$lib/components/layout/Header';
+  import Header from '$lib/components/layout/Header/Header.svelte';
   import { Footer } from '$lib/components/layout/Footer';
   import { Container } from '$lib/components/ui';
   import { siteMetadata } from '$lib/config/metadata';

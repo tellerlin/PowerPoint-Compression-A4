@@ -1,10 +1,8 @@
 <script>
   import { alertTypes } from './types';
-  import DismissButton from './DismissButton.svelte';
   
   export let type = 'info';
   export let title = '';
-  export let dismissible = false;
   export let class_ = '';
 
   let visible = true;
@@ -31,11 +29,6 @@
           <slot />
         </div>
       </div>
-      {#if dismissible}
-        <div class="ml-auto pl-3">
-          <DismissButton onDismiss={() => visible = false} />
-        </div>
-      {/if}
     </div>
   </div>
 {/if}
