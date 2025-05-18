@@ -25,6 +25,7 @@
     "@ffmpeg/core": "^0.12.10",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "@fontsource/noto-sans-sc": "^5.2.5",
     "@squoosh/lib": "^0.3.1",
     "@sveltejs/adapter-cloudflare": "^2.0.0",
     "fast-xml-parser": "^5.2.0",

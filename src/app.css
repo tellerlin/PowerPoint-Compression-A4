@@ -1,22 +1,25 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+/* 使用本地托管的字体文件 */
 @font-face {
   font-family: 'Noto Sans SC';
   font-style: normal;
   font-weight: 400;
-  src: url('/fonts/NotoSansSC-Regular.woff2') format('woff2');
   font-display: swap;
+  src: local('Noto Sans SC Regular'),
+       url('/fonts/NotoSansSC-Regular.woff2') format('woff2');
 }
 
 @font-face {
   font-family: 'Noto Sans SC';
   font-style: normal;
   font-weight: 700;
-  src: url('/fonts/NotoSansSC-Bold.woff2') format('woff2');
   font-display: swap;
+  src: local('Noto Sans SC Bold'),
+       url('/fonts/NotoSansSC-Bold.woff2') format('woff2');
 }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   /* Light Theme Colors */
@@ -30,7 +33,7 @@
   --color-border: 229 231 235; /* #E5E7EB */
   
   /* Font Families */
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  --font-sans: 'Noto Sans SC', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
 }
 
 .dark {

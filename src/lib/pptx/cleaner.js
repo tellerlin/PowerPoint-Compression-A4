@@ -143,18 +143,18 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
                 return;
             }
             
-            relationships.forEach(rel => {
-                if (!rel) return;
+            for (const rel of relationships) {
+                if (!rel) continue;
                 const relType = rel.getAttribute('Type');
                 const target = rel.getAttribute('Target');
                 const targetMode = rel.getAttribute('TargetMode');
                 
                 if (!relType || !target) {
                     console.debug(`[processGenericRelationshipFiles] Relationship missing Type or Target`);
-                    return;
+                    continue;
                 }
                 
-                if (targetMode === 'External') return;
+                if (targetMode === 'External') continue;
                 
                 if (relType.includes('/image') || relType.includes('/audio') || relType.includes('/video')) {
                     let mediaPath = resolvePath(relsPath, target);
@@ -181,7 +181,7 @@ async function processGenericRelationshipFiles(zip, relsFilePaths, usedMedia, co
                         console.debug(`[processGenericRelationshipFiles] Failed to resolve media path for target="${target}"`);
                     }
                 }
-            });
+            }
         } catch (error) {
             console.error(`[processGenericRelationshipFiles] Error processing ${relsPath}:`, error.message);
         }

@@ -15,7 +15,6 @@ function createThemeStore() {
   return {
     subscribe,
     update: (newTheme) => {
-      console.log('[Theme] Updating theme to:', newTheme);
       if (browser) {
         const root = document.documentElement;
         
@@ -27,18 +26,12 @@ function createThemeStore() {
         
         localStorage.setItem('theme', newTheme);
         set(newTheme);
-        console.log('[Theme] Theme updated, current class:', root.classList.contains('dark') ? 'dark' : 'light');
       }
     },
     initialize: () => {
-      console.log('[Theme] Initializing theme...');
       if (browser) {
         const root = document.documentElement;
-        // Use stored theme or default to dark
         const storedTheme = localStorage.getItem('theme') || 'dark';
-        
-        console.log('[Theme] Stored theme:', storedTheme);
-        console.log('[Theme] Selected theme:', storedTheme);
         
         if (storedTheme === 'dark') {
           root.classList.add('dark');
@@ -47,7 +40,6 @@ function createThemeStore() {
         }
         
         set(storedTheme);
-        console.log('[Theme] Theme initialized, current class:', root.classList.contains('dark') ? 'dark' : 'light');
       }
     }
   };

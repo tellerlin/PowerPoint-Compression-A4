@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { NAV_ITEMS } from './constants';
   import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+  import { fade, fly } from 'svelte/transition';
   
   $: currentPath = $page.url.pathname;
   let isMobileMenuOpen = false;
@@ -70,7 +71,11 @@
 
     <!-- Mobile Navigation -->
     {#if isMobileMenuOpen}
-      <div class="md:hidden mt-4 space-y-4">
+      <div 
+        class="md:hidden mt-4 space-y-4"
+        in:fly={{ y: -10, duration: 200 }}
+        out:fly={{ y: -10, duration: 200 }}
+      >
         {#each NAV_ITEMS as item}
           <a
             href={item.href}
@@ -86,25 +91,5 @@
 </header>
 
 <style>
-  /* .logo类未被使用，已移除 */
-
-  /* Add styles for mobile menu animation */
-  .mobile-menu-enter {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  .mobile-menu-enter-active {
-    opacity: 1;
-    transform: translateY(0);
-    transition: opacity 200ms, transform 200ms;
-  }
-  .mobile-menu-exit {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  .mobile-menu-exit-active {
-    opacity: 0;
-    transform: translateY(-10px);
-    transition: opacity 200ms, transform 200ms;
-  }
+  /* 所有动画相关的样式已移除，因为使用了 Svelte 的内置过渡效果 */
 </style>

@@ -76,11 +76,31 @@ async function getFFmpegInstance() {
     if (!window.FFmpeg) {
       throw new Error('FFmpeg not loaded');
     }
+    
+    // 检查 FFmpeg 版本
+    const version = window.FFmpeg.version;
+    console.log('[getFFmpegInstance] FFmpeg version:', version);
+    
+    // 使用更保守的配置
     ffmpegInstance = window.FFmpeg.createFFmpeg({
       log: true,
-      corePath: '/ffmpeg/ffmpeg-core.js'
+      corePath: '/ffmpeg/ffmpeg-core.js',
+      logger: ({ message }) => {
+        if (message.includes('Error') || message.includes('error')) {
+          console.error('[FFmpeg]', message);
+        } else {
+          console.log('[FFmpeg]', message);
+        }
+      }
     });
-    await ffmpegInstance.load();
+    
+    try {
+      await ffmpegInstance.load();
+      console.log('[getFFmpegInstance] FFmpeg loaded successfully');
+    } catch (error) {
+      console.error('[getFFmpegInstance] Failed to load FFmpeg:', error);
+      throw new Error('Failed to load FFmpeg: ' + error.message);
+    }
   }
   return ffmpegInstance;
 }
@@ -121,31 +141,56 @@ async function compressImageWithFFmpeg(data, quality, format) {
       
       if (format === 'png') {
         // 使用更保守的PNG压缩参数
-        args.push('-compression_level', '4'); // 从6改为4，进一步降低压缩率
+        args.push('-compression_level', '4');
         
         // 更保守的缩放策略
-        if (data.length > 1024 * 1024) { // 从512KB改为1MB
-          args.push('-vf', 'scale=iw*0.85:ih*0.85'); // 从0.8改为0.85
+        if (data.length > 1024 * 1024) {
+          args.push('-vf', 'scale=iw*0.85:ih*0.85');
         }
         
-        args.push('-pred', 'none', '-f', 'png');
+        // 修改PNG输出参数
+        args.push('-f', 'image2'); // 使用更通用的输出格式
+        args.push('-vcodec', 'png'); // 明确指定编码器
+        args.push('-pix_fmt', 'rgba');
       } else if (format === 'jpeg' || format === 'jpg') {
-        // 提高JPEG质量
         const qualityValue = data.length > 1024 * 1024 ? 
-          Math.round(quality * 75) : // 从60改为75
-          Math.round(quality * 90);  // 从80改为90
+          Math.round(quality * 75) :
+          Math.round(quality * 90);
         args.push('-q:v', qualityValue.toString());
       } else if (format === 'webp') {
-        // 提高WebP质量
-        const qualityValue = Math.round(quality * 90); // 从80改为90
+        const qualityValue = Math.min(100, Math.round(quality * 90));
         args.push('-quality', qualityValue.toString());
-        args.push('-lossless', '0', '-method', '3'); // 从4改为3，更注重质量
+        args.push('-lossless', '0', '-method', '3');
       }
       
       args.push(outputFileName);
       
       console.log(`[compressImageWithFFmpeg] Running FFmpeg for ${format} with args:`, args);
-      await ffmpeg.run(...args);
+      
+      try {
+        await ffmpeg.run(...args);
+      } catch (ffmpegError) {
+        console.warn(`[compressImageWithFFmpeg] FFmpeg compression failed, trying alternative method:`, ffmpegError);
+        
+        // 如果FFmpeg失败，尝试使用Canvas API
+        try {
+          const blob = new Blob([data], { type: `image/${format}` });
+          const bitmap = await createImageBitmap(blob);
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(bitmap, 0, 0);
+          
+          const compressedBlob = await canvas.convertToBlob({ 
+            type: `image/${format}`,
+            quality: format === 'png' ? undefined : quality
+          });
+          
+          return new Uint8Array(await compressedBlob.arrayBuffer());
+        } catch (canvasError) {
+          console.error(`[compressImageWithFFmpeg] Canvas compression also failed:`, canvasError);
+          return data;
+        }
+      }
       
       const files = ffmpeg.FS('readdir', '/');
       if (!files.includes(outputFileName)) {
@@ -161,9 +206,9 @@ async function compressImageWithFFmpeg(data, quality, format) {
 
       console.log(`[compressImageWithFFmpeg] Compression result: ${format}, ${data.length} -> ${outputData.length}`);
       
-      // 检查压缩效果，提高阈值
-      if (outputData.length >= data.length * 0.95) { // 从1.0改为0.95
-        console.log(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length * 0.95}`);
+      // 检查压缩效果，调整阈值
+      if (outputData.length >= data.length * 1.0) { // 只接受不增大的压缩
+        console.log(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length}`);
         return data;
       }
       
@@ -240,15 +285,17 @@ async function adjustQualityByContent(data, format, baseQuality) {
     
     // 根据复杂度调整质量
     const complexityRatio = complexity / (bitmap.width * bitmap.height);
+    let adjustedQuality = baseQuality;
     if (complexityRatio > 0.3) {
       // 复杂图片使用更高质量
-      return baseQuality * 1.2;
+      adjustedQuality = baseQuality * 1.2;
     } else if (complexityRatio < 0.1) {
       // 简单图片可以适当降低质量
-      return baseQuality * 0.9;
+      adjustedQuality = baseQuality * 0.9;
     }
     
-    return baseQuality;
+    // 确保质量值在合理范围内
+    return format === 'webp' ? Math.min(1.0, adjustedQuality) : adjustedQuality;
   } catch (error) {
     console.warn('[adjustQualityByContent] Error:', error);
     return baseQuality;
@@ -383,12 +430,12 @@ export async function compressImage(data, options = {}) {
         
         // 优先尝试WebP
         console.log('[compressImage] Trying WebP compression first');
-        let webpQuality = await adjustQualityByContent(data, 'webp', quality * 1.1);
+        let webpQuality = await adjustQualityByContent(data, 'webp', Math.min(1.0, quality * 1.1));
         let webpData = await compressImageWithFFmpeg(data, webpQuality, 'webp');
         results.push({ data: webpData, format: 'webp' });
         
         // 如果WebP压缩效果不理想，尝试其他格式
-        if (webpData.length > originalSize * 0.9) { // 从0.8改为0.9
+        if (webpData.length > originalSize * 1.0) { // 从0.9改为1.0，只要不增大就接受
           // 尝试PNG压缩
           console.log('[compressImage] Trying PNG compression');
           const pngQuality = await adjustQualityByContent(data, 'png', quality);
@@ -414,9 +461,9 @@ export async function compressImage(data, options = {}) {
       let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
       
       // 如果压缩效果不好，尝试额外降低质量
-      if (compressedData.length > originalSize * 0.9) { // 从0.85改为0.9
+      if (compressedData.length > originalSize * 1.0) { // 改为1.0，只要不增大就接受
         console.log('[compressImage] Poor compression, trying lower quality');
-        const lowerQuality = adjustedQuality * 0.9; // 从0.8改为0.9
+        const lowerQuality = adjustedQuality * 0.85; // 更激进地降低质量
         const recompressedData = await compressImageWithFFmpeg(data, lowerQuality, format);
         
         if (recompressedData.length < compressedData.length) {

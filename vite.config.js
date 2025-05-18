@@ -90,5 +90,6 @@ export default defineConfig({
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cross-Origin-Isolation': 'require-corp'
     }
-  }
+  },
+  assetsInclude: ['**/*.woff2', '**/*.woff', '**/*.ttf', '**/*.eot', '**/*.otf']
 });
