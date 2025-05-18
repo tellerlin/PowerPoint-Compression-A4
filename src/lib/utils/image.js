@@ -147,27 +147,27 @@ async function compressImageWithFFmpeg(data, quality, format) {
     }
     
     const ffmpeg = await getFFmpegInstance();
-
     const inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
     const outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
 
     try {
+      // 写入输入文件
       ffmpeg.FS('writeFile', inputFileName, data);
+      
+      // 准备FFmpeg参数
       const args = ['-i', inputFileName];
       
+      // 根据格式设置压缩参数
       if (format === 'png') {
-        // 使用更保守的PNG压缩参数
-        args.push('-compression_level', '4');
-        
-        // 更保守的缩放策略
+        args.push(
+          '-compression_level', '4',
+          '-f', 'image2',
+          '-vcodec', 'png',
+          '-pix_fmt', 'rgba'
+        );
         if (data.length > 1024 * 1024) {
           args.push('-vf', 'scale=iw*0.85:ih*0.85');
         }
-        
-        // 修改PNG输出参数
-        args.push('-f', 'image2'); // 使用更通用的输出格式
-        args.push('-vcodec', 'png'); // 明确指定编码器
-        args.push('-pix_fmt', 'rgba');
       } else if (format === 'jpeg' || format === 'jpg') {
         const qualityValue = data.length > 1024 * 1024 ? 
           Math.round(quality * 75) :
@@ -175,39 +175,26 @@ async function compressImageWithFFmpeg(data, quality, format) {
         args.push('-q:v', qualityValue.toString());
       } else if (format === 'webp') {
         const qualityValue = Math.min(100, Math.round(quality * 90));
-        args.push('-quality', qualityValue.toString());
-        args.push('-lossless', '0', '-method', '3');
+        args.push(
+          '-quality', qualityValue.toString(),
+          '-lossless', '0',
+          '-method', '3'
+        );
       }
       
       args.push(outputFileName);
       
       console.log(`[compressImageWithFFmpeg] Running FFmpeg for ${format} with args:`, args);
       
+      // 尝试FFmpeg压缩
       try {
         await ffmpeg.run(...args);
       } catch (ffmpegError) {
-        console.warn(`[compressImageWithFFmpeg] FFmpeg compression failed, trying alternative method:`, ffmpegError);
-        
-        // 如果FFmpeg失败，尝试使用Canvas API
-        try {
-          const blob = new Blob([data], { type: `image/${format}` });
-          const bitmap = await createImageBitmap(blob);
-          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(bitmap, 0, 0);
-          
-          const compressedBlob = await canvas.convertToBlob({ 
-            type: `image/${format}`,
-            quality: format === 'png' ? undefined : quality
-          });
-          
-          return new Uint8Array(await compressedBlob.arrayBuffer());
-        } catch (canvasError) {
-          console.error(`[compressImageWithFFmpeg] Canvas compression also failed:`, canvasError);
-          return data;
-        }
+        console.warn(`[compressImageWithFFmpeg] FFmpeg compression failed, trying Canvas API:`, ffmpegError);
+        return await compressWithCanvas(data, format, quality);
       }
       
+      // 读取并验证输出
       const files = ffmpeg.FS('readdir', '/');
       if (!files.includes(outputFileName)) {
         console.warn(`[compressImageWithFFmpeg] Output file not found: ${outputFileName}`);
@@ -222,8 +209,8 @@ async function compressImageWithFFmpeg(data, quality, format) {
 
       console.log(`[compressImageWithFFmpeg] Compression result: ${format}, ${data.length} -> ${outputData.length}`);
       
-      // 检查压缩效果，调整阈值
-      if (outputData.length >= data.length * 1.0) { // 只接受不增大的压缩
+      // 检查压缩效果
+      if (outputData.length >= data.length * 1.0) {
         console.log(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length}`);
         return data;
       }
@@ -233,6 +220,7 @@ async function compressImageWithFFmpeg(data, quality, format) {
       console.error('[compressImageWithFFmpeg] Error:', error);
       return data;
     } finally {
+      // 清理临时文件
       try {
         const files = ffmpeg.FS('readdir', '/');
         if (files.includes(inputFileName)) ffmpeg.FS('unlink', inputFileName);
@@ -242,6 +230,27 @@ async function compressImageWithFFmpeg(data, quality, format) {
       }
     }
   });
+}
+
+// 使用Canvas API进行压缩的辅助函数
+async function compressWithCanvas(data, format, quality) {
+  try {
+    const blob = new Blob([data], { type: `image/${format}` });
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    
+    const compressedBlob = await canvas.convertToBlob({ 
+      type: `image/${format}`,
+      quality: format === 'png' ? undefined : quality
+    });
+    
+    return new Uint8Array(await compressedBlob.arrayBuffer());
+  } catch (error) {
+    console.error(`[compressWithCanvas] Canvas compression failed:`, error);
+    return data;
+  }
 }
 
 // 修改为完全串行处理，解决FFmpeg只能运行一个命令的问题

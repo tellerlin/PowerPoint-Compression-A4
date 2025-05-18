@@ -441,30 +441,3 @@ async function updateMasterXmlLayoutList(zip, masterPath, validLayoutRelationshi
         console.error(`[LayoutCleaner] Error updating master XML layout list for ${masterPath}:`, error.message);
     }
 }
-
-export async function getUsedLayoutsAndMasters(zip, usedSlides) {
-    const usedLayouts = new Set();
-    const usedMasters = new Set();
-    if (!usedSlides || usedSlides.length === 0) {
-        console.log("[LayoutCleaner] No slides provided, returning empty sets.");
-        return { usedLayouts, usedMasters };
-    }
-    try {
-        console.log(`[LayoutCleaner] Analyzing ${usedSlides.length} slides...`);
-        for (const slide of usedSlides) {
-            const layoutInfo = await getSlideLayout(zip, slide);
-            if (layoutInfo?.path) {
-                usedLayouts.add(layoutInfo.path);
-                const masterInfo = await getLayoutMaster(zip, layoutInfo.path);
-                if (masterInfo?.path) {
-                    usedMasters.add(masterInfo.path);
-                }
-            }
-        }
-        console.log(`[LayoutCleaner] Analysis complete. Found ${usedLayouts.size} layouts and ${usedMasters.size} masters.`);
-        return { usedLayouts, usedMasters };
-    } catch (error) {
-        console.error('[LayoutCleaner] Error analyzing used layouts and masters:', error.message);
-        return { usedLayouts: new Set(), usedMasters: new Set() };
-    }
-}

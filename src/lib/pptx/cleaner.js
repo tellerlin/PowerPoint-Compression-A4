@@ -1,6 +1,6 @@
 import { parseXml, buildXml } from './xml/parser';
 import { PRESENTATION_PATH, MEDIA_PATH_PREFIX, SLIDE_LAYOUT_PREFIX, SLIDE_MASTER_PREFIX } from './constants';
-import { removeUnusedLayouts as performLayoutRemoval, getUsedLayoutsAndMasters as analyzeUsedLayoutsMasters, analyzeLayoutsAndMasters } from './layout-cleaner';
+import { removeUnusedLayouts as performLayoutRemoval, analyzeLayoutsAndMasters } from './layout-cleaner';
 import { findMediaFiles } from './media';
 import { resolvePath, parseXmlDOM } from './utils';
 
