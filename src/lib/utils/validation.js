@@ -31,11 +31,6 @@ export function validateFile(file) {
   return true;
 }
 
-export function validateImageData(data) {
-  if (!data || !(data instanceof Uint8Array)) throw new Error('Invalid image data');
-  return true;
-}
-
 // Add deep validation function
 export async function validatePPTXStructure(file) {
   try {

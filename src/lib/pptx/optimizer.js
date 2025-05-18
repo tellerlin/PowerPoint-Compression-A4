@@ -183,15 +183,6 @@ export async function optimizePPTX(file, options = {}) {
     error: null
   };
 
-  // Add memory usage monitoring
-  let memoryMonitorStop = null;
-  if (typeof window !== 'undefined' && window.performance && window.performance.memory) {
-    const { monitorMemory } = await import('../utils/memory.js');
-    memoryMonitorStop = monitorMemory((usage) => {
-      onProgress('warning', { message: `High memory usage detected (${usage.toFixed(0)}MB). Consider closing other applications.` });
-    });
-  }
-  
   try {
     validateFile(file);
 
@@ -295,10 +286,5 @@ export async function optimizePPTX(file, options = {}) {
     });
 
     throw error;
-  } finally {
-    // Make sure we clean up memory monitoring in all cases
-    if (memoryMonitorStop) {
-      memoryMonitorStop();
-    }
   }
 }

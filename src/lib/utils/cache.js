@@ -111,15 +111,15 @@ export class CacheManager {
   }
 }
 
-// 创建全局缓存实例
-export const globalCache = new CacheManager();
+// 创建图像缓存实例
+const imageCacheManager = new CacheManager();
 
-// 图像缓存现在使用全局缓存管理器
+// 图像缓存
 export const imageCache = {
   get(key, type = 'default') {
-    return globalCache.get('images', key, type);
+    return imageCacheManager.get('images', key, type);
   },
   set(key, value, type = 'default') {
-    return globalCache.set('images', key, value, value.data.byteLength, type);
+    return imageCacheManager.set('images', key, value, value.data.byteLength, type);
   }
 };

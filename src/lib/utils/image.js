@@ -1,7 +1,6 @@
 import { COMPRESSION_SETTINGS } from '../pptx/constants.js';
 import { imageCache } from './cache';
 import { 
-  hashCode, 
   ImageType, 
   analyzeImageType, 
   analyzeImage, 
@@ -9,6 +8,23 @@ import {
   detectFormat,
   processImage
 } from './imageCompressionUtils';
+
+// 添加hashCode函数定义
+function hashCode(data) {
+  // 优化：使用更高效的采样方法
+  let hash = 0;
+  const length = data.length;
+  // 对于大文件，采样更少的点以提高性能
+  const step = length > 1000000 ? Math.floor(length / 50) : 
+               length > 100000 ? Math.floor(length / 100) : 
+               Math.max(1, Math.floor(length / 200));
+  
+  for (let i = 0; i < length; i += step) {
+    hash = ((hash << 5) - hash) + data[i];
+    hash |= 0;  // 转换为32位整数
+  }
+  return hash.toString(16);
+}
 
 async function getImageData(canvas) {
   const ctx = canvas.getContext('2d');

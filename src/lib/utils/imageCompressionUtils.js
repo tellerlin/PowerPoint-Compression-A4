@@ -1,21 +1,5 @@
 // Shared image compression utility functions
 
-export function hashCode(data) {
-  // 优化：使用更高效的采样方法
-  let hash = 0;
-  const length = data.length;
-  // 对于大文件，采样更少的点以提高性能
-  const step = length > 1000000 ? Math.floor(length / 50) : 
-               length > 100000 ? Math.floor(length / 100) : 
-               Math.max(1, Math.floor(length / 200));
-  
-  for (let i = 0; i < length; i += step) {
-    hash = ((hash << 5) - hash) + data[i];
-    hash |= 0;  // 转换为32位整数
-  }
-  return hash.toString(16);
-}
-
 export const ImageType = {
   PHOTO: 'photo',
   DIAGRAM: 'diagram',
@@ -48,27 +32,22 @@ export function analyzeImageType(imageData) {
   return ImageType.PHOTO;
 }
 
-export function checkAlphaChannel(imageData) {
-  // 添加健壮性检查
-  if (!imageData || !imageData.data) {
-    console.warn('[checkAlphaChannel] Invalid imageData received');
-    return false; // 默认认为没有透明度通道
-  }
-  
-  try {
-    const data = imageData.data;
-    for (let i = 3; i < data.length; i += 4) {
-      if (data[i] < 255) return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('[checkAlphaChannel] Error checking alpha channel:', error);
-    return false; // 出错时安全地返回无透明通道
-  }
-}
-
 export function analyzeImage(imageData) {
-  return { hasAlpha: checkAlphaChannel(imageData), isAnimated: false };
+  const type = analyzeImageType(imageData);
+  const { width, height } = imageData;
+  const aspectRatio = width / height;
+  
+  return {
+    type,
+    width,
+    height,
+    aspectRatio,
+    isLandscape: aspectRatio > 1,
+    isPortrait: aspectRatio < 1,
+    isSquare: Math.abs(aspectRatio - 1) < 0.1,
+    isSmall: width < 128 && height < 128,
+    isLarge: width > 1920 || height > 1920
+  };
 }
 
 export function calculateOptimalDimensions(originalWidth, originalHeight, maxSize = 1920) {
@@ -161,7 +140,8 @@ export async function processImage(data, quality, originalFormat) {
     ctx.drawImage(bitmap, 0, 0);
     const imageData = ctx.getImageData(0, 0, originalWidth, originalHeight);
     
-    const hasAlpha = checkAlphaChannel(imageData);
+    // 使用image.js中的checkAlphaChannel函数
+    const hasAlpha = await import('./image').then(m => m.checkAlphaChannel(imageData));
     
     const dimensions = calculateOptimalDimensions(originalWidth, originalHeight);
     targetWidth = dimensions.width;

@@ -235,10 +235,3 @@ export function updateProgressState(store, type, payload) {
     return newState;
   });
 }
-
-// 添加时间格式化函数
-function formatRemainingTime(seconds) {
-  if (seconds < 60) return `${Math.ceil(seconds)}秒`;
-  if (seconds < 3600) return `${Math.ceil(seconds / 60)}分钟`;
-  return `${Math.floor(seconds / 3600)}小时${Math.ceil((seconds % 3600) / 60)}分钟`;
-}
