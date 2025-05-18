@@ -374,7 +374,45 @@ async function downsampleImage(data, maxSize = 1800) {
   return new Uint8Array(arrayBuffer);
 }
 
-// 修改compressImage函数以接受完整的选项对象
+// 添加检查并调整图片尺寸的函数
+async function checkAndResizeImage(data, maxWidth = 1600, maxHeight = 900) {
+  try {
+    const format = await detectFormat(data);
+    if (!['png', 'jpeg', 'jpg', 'webp'].includes(format)) return data;
+    
+    const blob = new Blob([data], { type: `image/${format}` });
+    const bitmap = await createImageBitmap(blob);
+    
+    const { width, height } = bitmap;
+    
+    // 如果图片尺寸小于限制，直接返回原数据
+    if (width <= maxWidth && height <= maxHeight) {
+      bitmap.close && bitmap.close();
+      return data;
+    }
+    
+    // 计算缩放比例
+    const scale = Math.min(maxWidth / width, maxHeight / height);
+    const targetWidth = Math.round(width * scale);
+    const targetHeight = Math.round(height * scale);
+    
+    // 使用OffscreenCanvas进行缩放
+    const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+    bitmap.close && bitmap.close();
+    
+    // 导出为Uint8Array
+    const blobOut = await canvas.convertToBlob({ type: `image/${format}` });
+    const arrayBuffer = await blobOut.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
+  } catch (error) {
+    console.warn('[checkAndResizeImage] Error:', error);
+    return data;
+  }
+}
+
+// 修改compressImage函数
 export async function compressImage(data, options = {}) {
   // 使用固定的高质量参数
   const quality = 0.95; // 固定使用95%的质量
@@ -391,16 +429,21 @@ export async function compressImage(data, options = {}) {
   let originalSize = data.byteLength;
   console.log('[compressImage] Original size:', originalSize);
   
+  // 首先检查并调整图片尺寸
+  data = await checkAndResizeImage(data);
+  originalSize = data.byteLength;
+  console.log('[compressImage] After size adjustment:', originalSize);
+  
   // 更保守的降采样策略
   if (allowDownsampling) {
     if (originalSize > 5 * 1024 * 1024) {
       console.log('[compressImage] Downsampling large image (>5MB)');
-      data = await downsampleImage(data, Math.min(maxImageSize, 1600)); // 从1400改为1600
+      data = await downsampleImage(data, Math.min(maxImageSize, 1600));
       originalSize = data.byteLength;
       console.log('[compressImage] After downsampling:', originalSize);
     } else if (originalSize > 2 * 1024 * 1024) {
       console.log('[compressImage] Downsampling medium image (>2MB)');
-      data = await downsampleImage(data, Math.min(maxImageSize, 2000)); // 从1800改为2000
+      data = await downsampleImage(data, Math.min(maxImageSize, 2000));
       originalSize = data.byteLength;
       console.log('[compressImage] After downsampling:', originalSize);
     }
