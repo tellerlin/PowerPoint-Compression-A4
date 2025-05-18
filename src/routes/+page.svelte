@@ -13,6 +13,7 @@
   let downloadUrl = null;
   let downloadLink = null;
   let isFFmpegLoaded = false;
+  let processedFileId = null;
 
   // 固定选项
   const compressionOptions = {
@@ -64,7 +65,11 @@
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  $: if (files && browser) {}
+  // 监视files变化，如果有文件被选择且在浏览器环境中，自动开始压缩
+  $: if (files && files.length > 0 && browser && !processing && files[0].name !== processedFileId) {
+    handleSubmit();
+  }
+  
   $: fileName = files?.[0]?.name;
   $: fileInfo = $compressionProgress.fileInfo;
   $: compressionComplete = $compressionProgress.percentage === 100 && !$compressionProgress.error;
@@ -96,6 +101,9 @@
     processing = true;
     resetProgressStore();
     try {
+      // 标记当前文件为已处理
+      processedFileId = file.name;
+      
       const optimizedBlob = await optimizePPTX(file, {
         compressImages: compressionOptions.compressImages.enabled,
         removeHiddenSlides: compressionOptions.removeHiddenSlides,
@@ -117,6 +125,12 @@
       updateProgress('error', { message: error.message || '压缩过程中发生错误。' });
     } finally {
       processing = false;
+      
+      // 检查是否完成压缩，如果完成则不再重新触发压缩
+      if ($compressionProgress.percentage === 100 && !$compressionProgress.error) {
+        // 不清空files以保持UI显示当前文件，但添加标记防止重新处理
+        files = [...files]; // 创建新引用，防止反应式触发
+      }
     }
   }
 
@@ -140,6 +154,7 @@
   function resetCompression() {
     files = null;
     processing = false;
+    processedFileId = null;
     if (downloadUrl) {
       cleanupDownload(downloadUrl);
       downloadUrl = null;
@@ -200,7 +215,7 @@
         <input
           type="file"
           id="file-upload"
-          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,.mp3,.wav,.ogg,.m4a,audio/*"
+          accept=".pptx"
           on:change={(e) => files = e.target.files}
           class="hidden"
         />
@@ -208,7 +223,7 @@
           <div class="flex flex-col items-center justify-center">
             <svg class="w-12 h-12 text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
             <p class="mt-2 text-base text-text font-semibold">Click or drag to select your file</p>
-            <p class="text-xs text-muted mt-1">(Supported formats: PPTX, MP3, WAV, OGG, M4A)</p>
+            <p class="text-xs text-muted mt-1">(Supported format: PPTX only)</p>
           </div>
         </label>
       </div>
@@ -216,20 +231,7 @@
       {#if files && files.length > 0}
         <div class="mt-4 p-3 bg-surface border border-border rounded-md text-text text-sm">
           <p class="font-medium truncate">Selected: {files[0].name} ({formatBytes(files[0].size)})</p>
-        </div>
-        
-        <div class="mt-6">
-          <Button
-            on:click={handleSubmit}
-            disabled={processing}
-            class="w-full"
-          >
-            {#if processing}
-              Processing...
-            {:else}
-              Start Compress
-            {/if}
-          </Button>
+          <p class="text-xs text-muted mt-1">File will be compressed automatically after upload</p>
         </div>
       {/if}
     {:else}
