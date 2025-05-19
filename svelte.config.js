@@ -7,6 +7,10 @@ const config = {
     adapter: adapter(),
     csrf: {
       checkOrigin: true
+    },
+    csp: {
+      mode: 'auto',
+      directives: {}
     }
   },
   preprocess: vitePreprocess()

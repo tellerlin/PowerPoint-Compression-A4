@@ -7,6 +7,7 @@
   import { Container } from '$lib/components/ui';
   import { browser } from '$app/environment';
   import { onDestroy, onMount } from 'svelte';
+  import { createScriptWithNonce } from '$lib/utils/csp.js';
 
   let files;
   let processing = false;
@@ -24,23 +25,26 @@
 
   onMount(async () => {
     try {
-      // Load FFmpeg
-      const script = document.createElement('script');
-      script.src = '/ffmpeg/ffmpeg.min.js';
-      script.async = true;
-      script.onload = () => {
-        if (typeof window.FFmpeg === 'undefined') {
-          console.error('[FFmpeg] FFmpeg object not found after loading');
-          updateProgress('error', { message: 'FFmpeg initialization failed. Please refresh and try again.' });
-          return;
+      // 使用工具函数创建具有正确nonce的脚本元素
+      const script = createScriptWithNonce({
+        src: '/ffmpeg/ffmpeg.min.js', 
+        async: true,
+        onload: () => {
+          if (typeof window.FFmpeg === 'undefined') {
+            console.error('[FFmpeg] FFmpeg object not found after loading');
+            updateProgress('error', { message: 'FFmpeg initialization failed. Please refresh and try again.' });
+            return;
+          }
+          isFFmpegLoaded = true;
+          console.log('[FFmpeg] Loaded successfully');
+        },
+        onerror: (error) => {
+          console.error('[FFmpeg] Failed to load:', error);
+          updateProgress('error', { message: 'Failed to load FFmpeg. Please refresh and try again.' });
         }
-        isFFmpegLoaded = true;
-        console.log('[FFmpeg] Loaded successfully');
-      };
-      script.onerror = (error) => {
-        console.error('[FFmpeg] Failed to load:', error);
-        updateProgress('error', { message: 'Failed to load FFmpeg. Please refresh and try again.' });
-      };
+      });
+      
+      // 将脚本添加到文档
       document.head.appendChild(script);
     } catch (error) {
       console.error('[FFmpeg] Error during initialization:', error);

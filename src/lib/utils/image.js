@@ -93,30 +93,32 @@ async function getFFmpegInstance() {
       throw new Error('FFmpeg not loaded');
     }
     
-    // 检查 FFmpeg 版本
-    const version = window.FFmpeg.version;
-    console.log('[getFFmpegInstance] FFmpeg version:', version);
-    
-    // 使用更保守的配置
-    ffmpegInstance = window.FFmpeg.createFFmpeg({
-      log: true,
-      corePath: '/ffmpeg/ffmpeg-core.js',
-      logger: ({ message }) => {
-        // Only log errors and progress information
-        if (message.includes('Error') || message.includes('error')) {
-          console.error('[FFmpeg]', message);
-        } else if (message.includes('time=') || message.includes('frame=')) {
-          console.log('[FFmpeg]', message);
-        }
-      }
-    });
-    
     try {
-      await ffmpegInstance.load();
-      console.log('[getFFmpegInstance] FFmpeg loaded successfully');
+      ffmpegInstance = window.FFmpeg.createFFmpeg({
+        log: true,
+        corePath: '/ffmpeg/ffmpeg-core.js',
+        logger: ({ message }) => {
+          // Only log errors and progress information
+          if (message.includes('Error') || message.includes('error')) {
+            console.error('[FFmpeg]', message);
+          } else if (message.includes('time=') || message.includes('frame=')) {
+            console.log('[FFmpeg]', message);
+          }
+        },
+        crossOrigin: 'anonymous',
+        retryCount: 3,
+        retryDelay: 1000,
+        timeout: 30000
+      });
+      
+      // 添加加载状态检查
+      if (!ffmpegInstance.isLoaded()) {
+        await ffmpegInstance.load();
+        console.log('[getFFmpegInstance] FFmpeg loaded successfully');
+      }
     } catch (error) {
-      console.error('[getFFmpegInstance] Failed to load FFmpeg:', error);
-      throw new Error('Failed to load FFmpeg: ' + error.message);
+      console.error('[getFFmpegInstance] Failed to initialize FFmpeg:', error);
+      throw new Error('Failed to initialize FFmpeg: ' + error.message);
     }
   }
   return ffmpegInstance;
@@ -140,6 +142,37 @@ async function queueFFmpegTask(task) {
   });
 }
 
+// 添加智能锐化函数
+function getSharpeningParams(dataSize, format) {
+  // 根据图片大小和格式动态调整锐化参数
+  if (dataSize > 5 * 1024 * 1024) {
+    // 大图片使用更保守的锐化
+    return 'luma_msize_x=5:luma_msize_y=5:luma_amount=0.5';
+  } else if (dataSize > 2 * 1024 * 1024) {
+    // 中等大小图片使用中等锐化
+    return 'luma_msize_x=5:luma_msize_y=5:luma_amount=0.8';
+  } else {
+    // 小图片可以使用更强的锐化
+    return 'luma_msize_x=5:luma_msize_y=5:luma_amount=1.2';
+  }
+}
+
+// 添加智能降噪函数
+function getDenoisingParams(dataSize, format) {
+  // 根据图片大小和格式动态调整降噪参数
+  if (dataSize > 5 * 1024 * 1024) {
+    // 大图片使用更强的降噪
+    return '4:3:6:4';
+  } else if (dataSize > 2 * 1024 * 1024) {
+    // 中等大小图片使用中等降噪
+    return '3:2:4:3';
+  } else {
+    // 小图片使用轻微降噪
+    return '2:1:2:1';
+  }
+}
+
+// 修改 compressImageWithFFmpeg 函数
 async function compressImageWithFFmpeg(data, quality, format) {
   return queueFFmpegTask(async () => {
     if (!data || data.length === 0) {
@@ -147,14 +180,59 @@ async function compressImageWithFFmpeg(data, quality, format) {
       return data;
     }
     
-    const ffmpeg = await getFFmpegInstance();
+    let ffmpeg;
+    try {
+      ffmpeg = await getFFmpegInstance();
+    } catch (error) {
+      console.error('[compressImageWithFFmpeg] Failed to get FFmpeg instance:', error);
+      return await compressWithCanvas(data, format, quality);
+    }
+    
     const inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
     const outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
 
     try {
-      ffmpeg.FS('writeFile', inputFileName, data);
+      // 添加文件写入重试机制
+      let writeAttempts = 0;
+      const maxWriteAttempts = 3;
+      
+      while (writeAttempts < maxWriteAttempts) {
+        try {
+          ffmpeg.FS('writeFile', inputFileName, data);
+          break;
+        } catch (error) {
+          writeAttempts++;
+          console.warn(`[compressImageWithFFmpeg] Write attempt ${writeAttempts} failed:`, error);
+          
+          if (writeAttempts === maxWriteAttempts) {
+            throw new Error(`Failed to write input file after ${maxWriteAttempts} attempts`);
+          }
+          
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
       
       const args = ['-i', inputFileName];
+      
+      // 添加智能锐化和降噪滤镜
+      const sharpeningParams = getSharpeningParams(data.length, format);
+      const denoisingParams = getDenoisingParams(data.length, format);
+      
+      // 构建滤镜链
+      let filterChain = [];
+      
+      // 对于大图片，先降噪再锐化
+      if (data.length > 2 * 1024 * 1024) {
+        filterChain.push(`hqdn3d=${denoisingParams}`);
+        filterChain.push(`unsharp=${sharpeningParams}`);
+      } else {
+        // 对于小图片，只进行轻微锐化
+        filterChain.push(`unsharp=${sharpeningParams}`);
+      }
+      
+      if (filterChain.length > 0) {
+        args.push('-vf', filterChain.join(','));
+      }
       
       if (format === 'png') {
         args.push(
@@ -210,7 +288,7 @@ async function compressImageWithFFmpeg(data, quality, format) {
       return new Uint8Array(outputData.buffer);
     } catch (error) {
       console.error('[compressImageWithFFmpeg] Error:', error);
-      return data;
+      return await compressWithCanvas(data, format, quality);
     } finally {
       try {
         const files = ffmpeg.FS('readdir', '/');

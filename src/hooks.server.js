@@ -1,5 +1,6 @@
 /** @type {import('@sveltejs/kit').Handle} */
 export async function handle({ event, resolve }) {
+  // 从 SvelteKit 获取响应
   const response = await resolve(event);
   
   // 添加必要的安全头

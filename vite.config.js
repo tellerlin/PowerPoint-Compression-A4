@@ -1,8 +1,16 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
+// 由于不再需要CSP，我们可以简化或移除此插件
+const noncePlugin = () => {
+  return {
+    name: 'vite:nonce-injection',
+    // 保留插件以避免其他代码依赖它，但不执行任何CSP相关操作
+  };
+};
+
 export default defineConfig({
-  plugins: [sveltekit()],
+  plugins: [sveltekit(), noncePlugin()],
   worker: {
     format: 'es',
     plugins: []
@@ -45,6 +53,7 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cross-Origin-Isolation': 'require-corp'
+      // CSP头已移除
     },
     proxy: {
       '/@ffmpeg': {
@@ -89,6 +98,7 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cross-Origin-Isolation': 'require-corp'
+      // CSP头已移除
     }
   },
   assetsInclude: ['**/*.woff2', '**/*.woff', '**/*.ttf', '**/*.eot', '**/*.otf']
