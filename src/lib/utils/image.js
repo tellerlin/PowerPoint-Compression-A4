@@ -89,7 +89,7 @@ let ffmpegInstance = null;
 let isFFmpegLoading = false;
 let ffmpegLoadPromise = null;
 let ffmpegLoadAttempts = 0;
-const MAX_LOAD_ATTEMPTS = 3;
+const MAX_LOAD_ATTEMPTS = 2;
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_FAILURES = 5;
 
@@ -123,7 +123,7 @@ async function getFFmpegInstance() {
         ffmpegInstance = null;
       }
 
-      // 增加内存限制
+      // Reduced memory limits
       ffmpegInstance = createFFmpegFn({
         log: false,
         corePath: '/ffmpeg/ffmpeg-core.js',
@@ -132,12 +132,12 @@ async function getFFmpegInstance() {
             console.error('[FFmpeg]', message);
           }
         },
-        memoryLimit: 256 * 1024 * 1024,  // Increase to 256MB
-        maxMemory: 512 * 1024 * 1024,    // Increase to 512MB
+        memoryLimit: 128 * 1024 * 1024,  // Reduced to 128MB
+        maxMemory: 256 * 1024 * 1024,    // Reduced to 256MB
         threads: 1,
         wasmMemory: {
-          initial: 128 * 1024 * 1024,    // Increase to 128MB
-          maximum: 256 * 1024 * 1024     // Increase to 256MB
+          initial: 64 * 1024 * 1024,    // Reduced to 64MB
+          maximum: 128 * 1024 * 1024    // Reduced to 128MB
         }
       });
 
@@ -172,61 +172,37 @@ async function resetFFmpegInstance() {
   if (!ffmpegInstance) return;
 
   try {
-    // 立即尝试处理任何正在运行的进程
-    if (ffmpegInstance.isRunning && ffmpegInstance.isRunning()) {
+    // 首先尝试清理文件系统
+    if (ffmpegInstance.FS) {
       try {
-        // 尝试强制终止
-        if (ffmpegInstance.terminate) {
-          await ffmpegInstance.terminate();
-        } else if (ffmpegInstance.exit) {
-          await ffmpegInstance.exit();
-        }
-      } catch (e) {
-        // Ignore normal exit status
-      }
-    }
-
-    // 清理内存
-    try {
-      await cleanupFFmpegMemory(ffmpegInstance);
-    } catch (cleanupError) {
-      // Ignore cleanup errors
-    }
-
-    // 尝试清理文件系统
-    try {
-      if (ffmpegInstance.FS) {
         const files = ffmpegInstance.FS('readdir', '/');
         for (const file of files) {
-          if (file.startsWith('input_') || file.startsWith('output_') || 
-              file.startsWith('probe_') || file.endsWith('.json')) {
+          if (file !== '.' && file !== '..') {
             try {
               ffmpegInstance.FS('unlink', file);
             } catch (e) {
-              // Ignore file deletion errors
+              // 忽略文件删除错误
             }
           }
         }
+      } catch (fsError) {
+        // 忽略文件系统错误
       }
-    } catch (fsError) {
-      // Ignore file system errors
     }
 
-    // 强制终止策略
-    let exitAttempted = false;
-    
-    // 尝试正常退出
-    try {
-      await ffmpegInstance.exit();
-      exitAttempted = true;
-    } catch (exitError) {
-      // 尝试强制终止
-      if (ffmpegInstance.terminate) {
-        try {
-          await ffmpegInstance.terminate();
-          exitAttempted = true;
-        } catch (terminateError) {
-          // Ignore termination errors
+    // 检查是否有正在运行的进程
+    if (ffmpegInstance.isRunning && ffmpegInstance.isRunning()) {
+      try {
+        // 尝试正常退出
+        await ffmpegInstance.exit();
+      } catch (exitError) {
+        // 如果正常退出失败，尝试强制终止
+        if (ffmpegInstance.terminate) {
+          try {
+            await ffmpegInstance.terminate();
+          } catch (terminateError) {
+            // 忽略终止错误
+          }
         }
       }
     }
@@ -243,27 +219,32 @@ async function resetFFmpegInstance() {
         try {
           tmpInstance[prop] = null;
         } catch (e) {
-          // Ignore
+          // 忽略属性删除错误
         }
       }
     }
 
-    // 强制垃圾回收
-    try {
-      if (typeof global !== 'undefined' && global.gc) {
-        global.gc();
-      }
-    } catch (e) {
-      // Ignore GC errors
-    }
-
     // 等待一段时间确保资源释放
     await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // 尝试垃圾回收
+    if (typeof global !== 'undefined' && global.gc) {
+      try {
+        global.gc();
+      } catch (e) {
+        // 忽略 GC 错误
+      }
+    }
   } catch (error) {
     // 即使发生错误也清除实例
     ffmpegInstance = null;
     isFFmpegLoading = false;
     ffmpegLoadPromise = null;
+    
+    // 只记录非 ExitStatus 错误
+    if (error.name !== 'ExitStatus' || error.status !== 1) {
+      console.warn('[resetFFmpegInstance] Non-critical error:', error);
+    }
   }
 }
 
@@ -274,6 +255,7 @@ let isCompressionActive = false;
 
 async function queueFFmpegTask(task) {
   return new Promise((resolve, reject) => {
+    const taskId = Math.random().toString(36).substring(2, 15);
     const abortController = new AbortController();
     currentFFmpegTask = abortController;
     const signal = abortController.signal;
@@ -281,6 +263,7 @@ async function queueFFmpegTask(task) {
     // 设置中断监听器
     signal.addEventListener('abort', () => {
       console.log('[queueFFmpegTask] Task aborted by signal');
+      memoryManager.removeTask(taskId);
       resetFFmpegInstance().catch(e => console.warn('[queueFFmpegTask] Reset error:', e));
     });
     
@@ -290,8 +273,8 @@ async function queueFFmpegTask(task) {
           throw new Error('Compression cancelled by user');
         }
         
+        memoryManager.addTask(taskId);
         try {
-          // 将中断信号传递给任务
           const result = await task(signal);
           if (shouldCancel || !isCompressionActive || signal.aborted) {
             throw new Error('Compression cancelled by user');
@@ -302,10 +285,13 @@ async function queueFFmpegTask(task) {
             throw new Error('Compression cancelled by user');
           }
           throw error;
+        } finally {
+          memoryManager.removeTask(taskId);
         }
       })
       .then(resolve)
       .catch(error => {
+        memoryManager.removeTask(taskId);
         if (shouldCancel || !isCompressionActive || signal.aborted) {
           console.log('[queueFFmpegTask] Task cancelled');
         }
@@ -313,7 +299,6 @@ async function queueFFmpegTask(task) {
       })
       .finally(() => {
         currentFFmpegTask = null;
-        // 清理可能的错误状态，确保队列继续执行
         if (ffmpegQueue._state === 'rejected') {
           ffmpegQueue = Promise.resolve();
         }
@@ -356,36 +341,57 @@ async function cleanupFFmpegMemory(ffmpeg) {
   if (!ffmpeg) return;
   
   try {
-    // 检查 FFmpeg 是否已加载
-    if (!ffmpeg.isLoaded?.()) {
-      return;
+    // 首先尝试清理文件系统
+    if (ffmpeg.FS) {
+      try {
+        const files = ffmpeg.FS('readdir', '/');
+        for (const file of files) {
+          if (file !== '.' && file !== '..') {
+            try {
+              ffmpeg.FS('unlink', file);
+            } catch (e) {
+              // 忽略文件删除错误
+            }
+          }
+        }
+      } catch (fsError) {
+        // 忽略文件系统错误
+      }
     }
-    
-    // 清理所有临时文件
-    const files = ffmpeg.FS('readdir', '/');
-    for (const file of files) {
-      if (file.startsWith('input_') || file.startsWith('output_')) {
-        try {
-          ffmpeg.FS('unlink', file);
-        } catch (e) {
-          // Ignore file deletion errors
+
+    // 检查 FFmpeg 是否正在运行
+    if (ffmpeg.isRunning && ffmpeg.isRunning()) {
+      try {
+        // 尝试正常退出
+        await ffmpeg.exit();
+      } catch (exitError) {
+        // 如果正常退出失败，尝试强制终止
+        if (ffmpeg.terminate) {
+          try {
+            await ffmpeg.terminate();
+          } catch (terminateError) {
+            // 忽略终止错误
+          }
         }
       }
     }
-    
-    // 强制释放内存
+
+    // 等待一段时间确保资源释放
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // 尝试垃圾回收
     if (typeof global !== 'undefined' && global.gc) {
       try {
         global.gc();
-      } catch (e) {
-        // Ignore GC errors
+      } catch (gcError) {
+        // 忽略 GC 错误
       }
     }
-    
-    // 等待一小段时间确保资源释放
-    await new Promise(resolve => setTimeout(resolve, 100));
   } catch (error) {
-    // Ignore cleanup errors
+    // 忽略所有清理错误，但记录警告
+    if (error.name !== 'ExitStatus' || error.status !== 1) {
+      console.warn('[cleanupFFmpegMemory] Non-critical error:', error);
+    }
   }
 }
 
@@ -519,7 +525,7 @@ let useFFmpegFallback = false;
 let webAssemblyWarningsCount = 0;
 let canvasProcessedCount = 0;
 const MAX_WEBASSEMBLY_WARNINGS = 3;
-const CANVAS_RECOVERY_THRESHOLD = 20; // 每处理20张图片尝试恢复FFmpeg
+const CANVAS_RECOVERY_THRESHOLD = 10; // Reduced from 20 to 10
 const MAX_RECOVERY_ATTEMPTS = 3;      // 最大恢复尝试次数
 let recoveryAttempts = 0;
 
@@ -558,11 +564,11 @@ async function checkAndRecoverFFmpeg() {
   }
 
   canvasProcessedCount++;
-  if (canvasProcessedCount >= 5) { // Reduce from 10 to 5
+  if (canvasProcessedCount >= CANVAS_RECOVERY_THRESHOLD) {
     console.log('[MemoryMonitor] Attempting to recover FFmpeg mode...');
     try {
       await memoryManager.forceCleanup();
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Increased delay to 5 seconds
       await resetFFmpegInstance();
       const testFFmpeg = await getFFmpegInstance();
       if (testFFmpeg && testFFmpeg.isLoaded()) {
@@ -578,21 +584,65 @@ async function checkAndRecoverFFmpeg() {
       console.warn('[MemoryMonitor] Failed to recover FFmpeg mode:', error);
       recoveryAttempts++;
       canvasProcessedCount = 0;
-      if (recoveryAttempts >= 5) { // Increase from 3 to 5
+      if (recoveryAttempts >= 5) { // Increased from 3 to 5
         console.log('[MemoryMonitor] Max recovery attempts reached, staying in Canvas mode');
       }
     }
   }
 }
 
-// 修改 compressImageWithFFmpeg 函数
-async function compressImageWithFFmpeg(data, quality, format) {
-  // 如果已进入降级模式，使用Canvas API并检查恢复
+// 修改图片复杂度分析函数
+async function analyzeImageComplexity(data) {
+  try {
+    const blob = new Blob([data], { type: 'image/jpeg' });
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // 计算图片复杂度（使用简单的边缘检测）
+    let complexity = 0;
+    const pixels = imageData.data;
+    const totalPixels = bitmap.width * bitmap.height;
+    
+    // 采样计算复杂度，避免处理所有像素
+    const sampleStep = Math.max(1, Math.floor(totalPixels / 10000));
+    for (let i = 0; i < pixels.length; i += 4 * sampleStep) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      if (Math.abs(r - g) > 30 || Math.abs(g - b) > 30 || Math.abs(r - b) > 30) {
+        complexity++;
+      }
+    }
+    
+    // 计算复杂度比例
+    const complexityRatio = complexity / (totalPixels / sampleStep);
+    
+    return {
+      complexity: complexityRatio,
+      size: data.length,
+      width: bitmap.width,
+      height: bitmap.height
+    };
+  } catch (error) {
+    console.warn('[analyzeImageComplexity] Error:', error);
+    // 返回默认值
+    return { 
+      complexity: 0.5, 
+      size: data.length, 
+      width: 0, 
+      height: 0 
+    };
+  }
+}
+
+// 修改 FFmpeg 压缩函数，添加快速模式
+async function compressImageWithFFmpeg(data, quality, format, fastMode = false) {
   if (useFFmpegFallback) {
     console.log('[compressImageWithFFmpeg] Using Canvas fallback due to WebAssembly issues');
-    const result = await compressWithCanvas(data, format, quality);
-    await checkAndRecoverFFmpeg();
-    return result;
+    return await compressWithCanvas(data, format, quality);
   }
   
   return queueFFmpegTask(async (signal) => {
@@ -606,205 +656,149 @@ async function compressImageWithFFmpeg(data, quality, format) {
         return data;
       }
       
-      // 检查是否已进入降级模式
-      if (useFFmpegFallback) {
-        return await compressWithCanvas(data, format, quality);
-      }
-      
-      // 获取 FFmpeg 实例
-      try {
-        ffmpeg = await getFFmpegInstance();
-      } catch (error) {
-        console.warn('[compressImageWithFFmpeg] FFmpeg initialization failed, falling back to Canvas:', error);
-        useFFmpegFallback = true;
-        return await compressWithCanvas(data, format, quality);
-      }
-      
-      // 检查取消状态
-      if (shouldCancel || !isCompressionActive || signal.aborted) {
-        throw new Error('Compression cancelled by user');
-      }
+      ffmpeg = await getFFmpegInstance();
       
       const inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
       const outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
-
-      // 确保 FFmpeg 实例已加载
-      if (!ffmpeg || !ffmpeg.isLoaded()) {
-        console.warn('[compressImageWithFFmpeg] FFmpeg not loaded, using Canvas');
-        return await compressWithCanvas(data, format, quality);
-      }
       
-      // 检查取消状态
-      if (shouldCancel || !isCompressionActive || signal.aborted) {
-        throw new Error('Compression cancelled by user');
-      }
-
-      // 写入文件
-      let writeAttempts = 0;
-      const maxWriteAttempts = 2; // 减少尝试次数
-      
-      while (writeAttempts < maxWriteAttempts) {
-        if (shouldCancel || !isCompressionActive || signal.aborted) {
-          throw new Error('Compression cancelled by user');
-        }
-        
-        try {
-          if (!ffmpeg.isLoaded()) {
-            return await compressWithCanvas(data, format, quality);
-          }
-          ffmpeg.FS('writeFile', inputFileName, data);
-          break;
-        } catch (error) {
-          writeAttempts++;
-          if (writeAttempts === maxWriteAttempts) {
-            console.warn('[compressImageWithFFmpeg] File write failed, using Canvas:', error);
-            return await compressWithCanvas(data, format, quality);
-          }
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      }
-      
-      // 检查取消状态
-      if (shouldCancel || !isCompressionActive || signal.aborted) {
-        throw new Error('Compression cancelled by user');
-      }
+      ffmpeg.FS('writeFile', inputFileName, data);
       
       const args = ['-i', inputFileName];
       
-      // 获取图像尺寸
-      let dimensions;
-      try {
-        dimensions = await getImageDimensions(data, format);
-      } catch (error) {
-        console.warn('[compressImageWithFFmpeg] Failed to get dimensions, using Canvas:', error);
-        return await compressWithCanvas(data, format, quality);
-      }
-      
-      const imageWidth = dimensions.width;
-      const imageHeight = dimensions.height;
-      
-      // 优化压缩参数
-      if (format === 'jpeg' || format === 'jpg') {
-        if (imageWidth > 1366 && imageHeight > 768) {
-          // 大图片使用降噪和锐化
-          const denoiseParams = getDenoisingParams(data.length, format);
-          const sharpenParams = getSharpeningParams(data.length, format);
+      // 根据模式选择不同的压缩参数
+      if (fastMode) {
+        // 快速模式：使用更激进的压缩参数
+        if (format === 'jpeg' || format === 'jpg') {
           args.push(
-            '-vf', `hqdn3d=${denoiseParams},unsharp=${sharpenParams},scale=iw*0.8:ih*0.8`,
-            '-q:v', Math.min(95, Math.round(quality * 90)).toString()
+            '-vf', 'scale=iw*0.9:ih*0.9',  // 从 0.8 提高到 0.9
+            '-q:v', '85',  // 从 80 提高到 85
+            '-preset', 'ultrafast'
           );
-        } else {
-          // 小图片只进行基本压缩
+        } else if (format === 'png') {
           args.push(
-            '-q:v', Math.min(95, Math.round(quality * 90)).toString()
+            '-vf', 'scale=iw*0.9:ih*0.9',  // 从 0.8 提高到 0.9
+            '-compression_level', '2',  // 从 1 提高到 2
+            '-preset', 'ultrafast'
+          );
+        } else if (format === 'webp') {
+          args.push(
+            '-vf', 'scale=iw*0.9:ih*0.9',  // 从 0.8 提高到 0.9
+            '-quality', '85',  // 从 80 提高到 85
+            '-compression_level', '2',  // 从 1 提高到 2
+            '-preset', 'ultrafast'
           );
         }
-      } else if (format === 'png') {
-        if (imageWidth > 1366 && imageHeight > 768) {
-          // 大图片使用降噪和锐化
-          const denoiseParams = getDenoisingParams(data.length, format);
-          const sharpenParams = getSharpeningParams(data.length, format);
+      } else {
+        // 高质量模式：使用更保守的压缩参数
+        if (format === 'jpeg' || format === 'jpg') {
           args.push(
-            '-vf', `hqdn3d=${denoiseParams},unsharp=${sharpenParams},scale=iw*0.8:ih*0.8`,
-            '-compression_level', '6',
-            '-f', 'image2',
-            '-vcodec', 'png'
+            '-q:v', Math.min(95, Math.round(quality * 95)).toString(),  // 从 90 提高到 95
+            '-preset', 'medium'
           );
-        } else {
-          // 小图片只进行基本压缩
+        } else if (format === 'png') {
           args.push(
-            '-compression_level', '6',
-            '-f', 'image2',
-            '-vcodec', 'png'
+            '-compression_level', '7',  // 从 6 提高到 7
+            '-preset', 'medium'
           );
-        }
-      } else if (format === 'webp') {
-        if (imageWidth > 1366 && imageHeight > 768) {
-          // 大图片使用降噪和锐化
-          const denoiseParams = getDenoisingParams(data.length, format);
-          const sharpenParams = getSharpeningParams(data.length, format);
+        } else if (format === 'webp') {
           args.push(
-            '-vf', `hqdn3d=${denoiseParams},unsharp=${sharpenParams},scale=iw*0.8:ih*0.8`,
-            '-quality', Math.min(95, Math.round(quality * 90)).toString(),
-            '-compression_level', '6'
-          );
-        } else {
-          // 小图片只进行基本压缩
-          args.push(
-            '-quality', Math.min(95, Math.round(quality * 90)).toString(),
-            '-compression_level', '6'
+            '-quality', Math.min(95, Math.round(quality * 95)).toString(),  // 从 90 提高到 95
+            '-compression_level', '7',  // 从 6 提高到 7
+            '-preset', 'medium'
           );
         }
       }
       
       args.push(outputFileName);
       
+      await ffmpeg.run(...args);
+      
+      const outputData = ffmpeg.FS('readFile', outputFileName);
+      
+      // 清理临时文件
       try {
-        await ffmpeg.run(...args);
-      } catch (ffmpegError) {
-        if (shouldCancel || !isCompressionActive || signal.aborted) {
-          throw new Error('Compression cancelled by user');
-        }
-        console.warn(`[compressImageWithFFmpeg] FFmpeg compression failed, using Canvas API:`, ffmpegError);
-        // 标记为降级模式
-        useFFmpegFallback = true;
-        canvasProcessedCount = 0;
-        return await compressWithCanvas(data, format, quality);
+        ffmpeg.FS('unlink', inputFileName);
+        ffmpeg.FS('unlink', outputFileName);
+      } catch (e) {
+        // Ignore cleanup errors
       }
       
-      const files = ffmpeg.FS('readdir', '/');
-      if (!files.includes(outputFileName)) {
-        console.warn(`[compressImageWithFFmpeg] Output file not found: ${outputFileName}`);
-        return await compressWithCanvas(data, format, quality);
-      }
-      
-      let outputData;
-      try {
-        outputData = ffmpeg.FS('readFile', outputFileName);
-      } catch (error) {
-        console.warn(`[compressImageWithFFmpeg] Failed to read output file: ${error.message}`);
-        return await compressWithCanvas(data, format, quality);
-      }
-      
-      if (!outputData || outputData.length === 0) {
-        console.warn(`[compressImageWithFFmpeg] Empty output file: ${outputFileName}`);
-        return await compressWithCanvas(data, format, quality);
-      }
-
-      console.log(`[compressImageWithFFmpeg] Compression result: ${format}, ${data.length} -> ${outputData.length}`);
-      
-      if (outputData.length >= data.length * 1.0) {
-        return data;
-      }
-      
-      const result = new Uint8Array(outputData.buffer);
-      
-      // 压缩完成后清理临时文件
-      try {
-        await cleanupFFmpegMemory(ffmpeg);
-      } catch (error) {
-        // 忽略清理错误
-      }
-      
-      return result;
+      return new Uint8Array(outputData.buffer);
     } catch (error) {
-      if (shouldCancel || !isCompressionActive || signal.aborted) {
-        throw new Error('Compression cancelled by user');
-      }
       console.warn('[compressImageWithFFmpeg] Error:', error);
-      useFFmpegFallback = true;
-      canvasProcessedCount = 0;
-      return await compressWithCanvas(data, format, quality);
-    } finally {
-      if (ffmpeg) {
-        try {
-          await cleanupFFmpegMemory(ffmpeg);
-        } catch (cleanupError) {
-          // Ignore cleanup errors
-        }
-      }
+      throw error;
     }
   });
+}
+
+// 修改主压缩函数
+export async function compressImage(data, options = {}) {
+  if (!(data instanceof Uint8Array)) {
+    throw new TypeError('compressImage: data must be a Uint8Array');
+  }
+
+  const quality = options.quality || 0.95;
+  const format = await detectFormat(data);
+  const originalSize = data.byteLength;
+
+  // 调整阈值，增加 FFmpeg 使用范围
+  if (originalSize < 200 * 1024) {  // 从 500KB 降低到 200KB
+    // 小图片直接使用 Canvas
+    console.log('[compressImage] Using Canvas for small image');
+    return await compressWithCanvas(data, format, quality);
+  }
+  
+  try {
+    // 中等大小图片使用 FFmpeg 快速模式
+    if (originalSize < 5 * 1024 * 1024) {  // 从 2MB 提高到 5MB
+      console.log('[compressImage] Using FFmpeg fast mode for medium image');
+      const compressed = await compressImageWithFFmpeg(data, quality, format, true);
+      if (compressed.length < originalSize) {
+        return {
+          data: compressed,
+          format,
+          compressionMethod: 'ffmpeg-fast',
+          originalSize,
+          compressedSize: compressed.length
+        };
+      }
+    }
+    
+    // 大图片使用高质量模式
+    console.log('[compressImage] Using FFmpeg high quality mode');
+    const compressed = await compressImageWithFFmpeg(data, quality, format, false);
+    
+    // 如果压缩后反而更大，尝试使用 Canvas
+    if (compressed.length >= originalSize) {
+      console.log('[compressImage] FFmpeg compression not effective, falling back to Canvas');
+      const canvasResult = await compressWithCanvas(data, format, quality);
+      return {
+        data: canvasResult,
+        format,
+        compressionMethod: 'canvas-fallback',
+        originalSize,
+        compressedSize: canvasResult.length
+      };
+    }
+    
+    return {
+      data: compressed,
+      format,
+      compressionMethod: 'ffmpeg-high',
+      originalSize,
+      compressedSize: compressed.length
+    };
+  } catch (error) {
+    console.warn('[compressImage] Error during compression, using Canvas:', error);
+    const canvasResult = await compressWithCanvas(data, format, quality);
+    return {
+      data: canvasResult,
+      format,
+      compressionMethod: 'canvas-error',
+      originalSize,
+      compressedSize: canvasResult.length
+    };
+  }
 }
 
 // 增强 Canvas 压缩方法
@@ -823,8 +817,8 @@ async function compressWithCanvas(data, format, quality) {
     const targetWidth = Math.round(bitmap.width * 0.8);
     const targetHeight = Math.round(bitmap.height * 0.8);
     const canvas = new OffscreenCanvas(
-      bitmap.width > 1366 && bitmap.height > 768 ? targetWidth : bitmap.width,
-      bitmap.width > 1366 && bitmap.height > 768 ? targetHeight : bitmap.height
+      bitmap.width > 1200 && bitmap.height > 800 ? targetWidth : bitmap.width,
+      bitmap.width > 1200 && bitmap.height > 800 ? targetHeight : bitmap.height
     );
 
     const ctx = canvas.getContext('2d');
@@ -840,25 +834,36 @@ async function compressWithCanvas(data, format, quality) {
     bitmap.close && bitmap.close();
 
     let compressionOptions = {};
-    if (format === 'jpeg' || format === 'jpg') {
-      compressionOptions = { type: 'image/jpeg', quality: Math.min(0.85, quality) }; // 降低初始质量
+    let targetFormat = format;
+    
+    // Check for PNG alpha channel and convert to WebP if no alpha
+    if (format === 'png') {
+      const hasAlpha = await checkAlphaChannel(data);
+      if (!hasAlpha) {
+        targetFormat = 'webp';
+        compressionOptions = { type: 'image/webp', quality: Math.min(0.8, quality) };
+      } else {
+        compressionOptions = { type: 'image/png' };
+      }
+    } else if (format === 'jpeg' || format === 'jpg') {
+      compressionOptions = { type: 'image/jpeg', quality: Math.min(0.8, quality) };
     } else if (format === 'webp') {
-      compressionOptions = { type: 'image/webp', quality: Math.min(0.85, quality) };
-    } else if (format === 'png') {
-      compressionOptions = { type: 'image/png' };
+      compressionOptions = { type: 'image/webp', quality: Math.min(0.8, quality) };
+    } else {
+      compressionOptions = { type: `image/${format}` };
     }
 
     let compressedBlob = await canvas.convertToBlob(compressionOptions);
     let compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
 
-    // 如果输出大于输入，使用更低的质量重试
-    if (compressedData.length >= data.length && (format === 'jpeg' || format === 'webp')) {
+    // If output is larger than input, try with lower quality
+    if (compressedData.length >= data.length && (targetFormat === 'jpeg' || targetFormat === 'webp')) {
       compressionOptions.quality = Math.max(0.5, compressionOptions.quality * 0.8);
       compressedBlob = await canvas.convertToBlob(compressionOptions);
       compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
     }
 
-    console.log(`[compressWithCanvas] Compression result: ${format}, ${data.length} -> ${compressedData.length}`);
+    console.log(`[compressWithCanvas] Compression result: ${targetFormat}, ${data.length} -> ${compressedData.length}`);
     return compressedData.length < data.length ? compressedData : data;
   } catch (error) {
     console.error(`[compressWithCanvas] Canvas compression failed:`, error);
@@ -866,178 +871,238 @@ async function compressWithCanvas(data, format, quality) {
   }
 }
 
-// 修改为完全串行处理，解决FFmpeg只能运行一个命令的问题
+// 添加任务状态跟踪
+const taskStatus = {
+  pending: new Set(),
+  completed: new Set(),
+  failed: new Set(),
+  timeout: new Set()
+};
+
+// 添加任务超时时间常量
+const TASK_TIMEOUT = 30000; // 30 seconds
+const RETRY_TIMEOUT = 60000; // 60 seconds for retry tasks
+
+// 修改计算最优批处理大小的函数
+function calculateOptimalChunkSize(totalImages) {
+  const cpuCores = navigator.hardwareConcurrency || 4;
+  const memoryUsage = performance.memory ? performance.memory.usedJSHeapSize / performance.memory.jsHeapSizeLimit : 0.5;
+  
+  // 根据内存使用情况调整批处理大小
+  if (memoryUsage > 0.7) {
+    return Math.max(1, Math.floor(cpuCores / 4)); // 高内存压力时使用更小的批次
+  } else if (memoryUsage > 0.5) {
+    return Math.max(2, Math.floor(cpuCores / 2)); // 中等内存压力
+  } else {
+    return Math.max(3, Math.floor(cpuCores * 0.75)); // 低内存压力时可以使用更大的批次
+  }
+}
+
+// 修改 compressImagesInParallel 函数
 export async function compressImagesInParallel(images, options, onProgress) {
   startMemoryMonitoring();
   const results = new Array(images.length);
+  const processedImages = new Set(); // 跟踪已处理的图片
   const failedImages = new Set();
-  
-  // 增加批处理大小，因为我们现在有降级策略
-  const chunkSize = Math.max(3, Math.min(5, calculateOptimalChunkSize(images.length)));
-  
-  // Create an abort controller for child tasks
-  const abortController = new AbortController();
-  const signal = abortController.signal;
-  currentFFmpegTask = abortController;
-  
-  // Set up abort listener
-  signal.addEventListener('abort', () => {
-    console.log('[compressImagesInParallel] Received abort signal, stopping all compression tasks');
-    resetFFmpegInstance().catch(e => console.warn('[compressImagesInParallel] Reset error:', e));
-  });
-  
-  // Reset state
+  let shouldRetry = true;
+  let retryCount = 0;
+  const MAX_RETRIES = 3;
+  let uniqueImages = []; // 将 uniqueImages 移到函数作用域顶部
+
+  // 重置状态
   shouldCancel = false;
   isCompressionActive = true;
   webAssemblyWarningsCount = 0;
   useFFmpegFallback = false;
   canvasProcessedCount = 0;
   recoveryAttempts = 0;
-  
-  // Ensure options is an object
-  const compressionOptions = typeof options === 'object' ? options : { quality: options };
-  
-  // Reset FFmpeg instance before starting compression
+
+  // 重置任务状态
+  taskStatus.pending.clear();
+  taskStatus.completed.clear();
+  taskStatus.failed.clear();
+  taskStatus.timeout.clear();
+
   try {
-    await resetFFmpegInstance();
-  } catch (resetError) {
-    console.warn('[compressImagesInParallel] Initial reset error:', resetError);
-  }
-  
-  try {
-    // 将图片分成多个批次并行处理
-    const totalBatches = Math.ceil(images.length / chunkSize);
-    console.log(`[compressImagesInParallel] Processing ${images.length} images in ${totalBatches} batches of ${chunkSize}`);
-    
-    for (let i = 0; i < images.length; i += chunkSize) {
-      if (shouldCancel || !isCompressionActive || signal.aborted) {
+    // 预处理：降采样大图片并去重
+    console.log('[compressImagesInParallel] Starting image preprocessing...');
+    const preprocessedImages = await Promise.all(images.map(async (image, index) => {
+      try {
+        // 检查是否已处理过相同的图片
+        const imageHash = await hashCode(image.data);
+        if (processedImages.has(imageHash)) {
+          console.log(`[compressImagesInParallel] Skipping duplicate image at index ${index}`);
+          return null;
+        }
+        processedImages.add(imageHash);
+        
+        const resizedData = await checkAndResizeImage(image.data, 1200, 800);
+        taskStatus.pending.add(index);
+        return { ...image, data: resizedData, hash: imageHash };
+      } catch (error) {
+        console.warn(`[compressImagesInParallel] Preprocessing failed for image:`, error);
+        taskStatus.failed.add(index);
+        return null;
+      }
+    }));
+
+    // 过滤掉重复的图片
+    uniqueImages = preprocessedImages.filter(img => img !== null);
+    console.log(`[compressImagesInParallel] Preprocessing completed. Unique images: ${uniqueImages.length}`);
+
+    // 确保批处理大小合理
+    const chunkSize = Math.min(
+      calculateOptimalChunkSize(uniqueImages.length),
+      uniqueImages.length
+    );
+    console.log(`[compressImagesInParallel] Using batch size: ${chunkSize} for ${uniqueImages.length} files`);
+
+    // 创建任务队列
+    const taskQueue = [];
+    for (let i = 0; i < uniqueImages.length; i += chunkSize) {
+      taskQueue.push(uniqueImages.slice(i, i + chunkSize));
+    }
+
+    // 处理任务队列
+    for (let batchIndex = 0; batchIndex < taskQueue.length; batchIndex++) {
+      if (shouldCancel || !isCompressionActive) {
+        console.log('[compressImagesInParallel] Compression cancelled, cleaning up...');
+        await cleanupCompression(uniqueImages.length);
         throw new Error('Compression cancelled by user');
       }
-      
-      const chunk = images.slice(i, i + chunkSize);
-      const batchNumber = Math.floor(i / chunkSize) + 1;
-      console.log(`[compressImagesInParallel] Processing batch ${batchNumber}/${totalBatches}`);
-      
+
+      const batch = taskQueue[batchIndex];
+      console.log(`[compressImagesInParallel] Processing batch ${batchIndex + 1}/${taskQueue.length}`);
+
       // 并行处理当前批次
-      const batchPromises = chunk.map(async (image, index) => {
-        const globalIndex = i + index;
+      const batchPromises = batch.map(async (image, index) => {
+        const globalIndex = batchIndex * chunkSize + index;
         
-        if (shouldCancel || !isCompressionActive || signal.aborted) {
+        if (shouldCancel || !isCompressionActive) {
           throw new Error('Compression cancelled by user');
         }
-        
+
         try {
-          // 检查内存压力
           if (checkMemoryPressure()) {
             console.warn('[compressImagesInParallel] High memory pressure detected, waiting...');
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
+
+          // 根据图片大小选择处理方式
+          const format = await detectFormat(image.data);
+          const originalSize = image.data.byteLength;
           
-          // 尝试使用 FFmpeg 压缩
-          const compressed = await compressImage(image.data, compressionOptions);
-          
-          if (shouldCancel || !isCompressionActive || signal.aborted) {
-            throw new Error('Compression cancelled by user');
+          let compressed;
+          if (originalSize < 200 * 1024) {
+            // 小图片直接使用 Canvas
+            compressed = await compressWithCanvas(image.data, format, options.quality);
+          } else {
+            // 尝试 FFmpeg 处理
+            try {
+              compressed = await Promise.race([
+                compressImageWithFFmpeg(image.data, options.quality, format, originalSize < 5 * 1024 * 1024),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Task timeout')), TASK_TIMEOUT))
+              ]);
+            } catch (error) {
+              console.warn(`[compressImagesInParallel] FFmpeg failed for image ${image.path}, falling back to Canvas:`, error);
+              compressed = await compressWithCanvas(image.data, format, options.quality);
+            }
           }
-          
-          results[globalIndex] = compressed;
-          
+
+          const stats = {
+            originalSize,
+            compressedSize: compressed.length,
+            ratio: compressed.length / originalSize,
+            method: originalSize < 200 * 1024 ? 'canvas' : 
+                   originalSize < 5 * 1024 * 1024 ? 'ffmpeg-fast' : 'ffmpeg-high'
+          };
+
+          results[globalIndex] = {
+            data: compressed,
+            format: await detectFormat(compressed),
+            compressionMethod: stats.method,
+            originalSize,
+            compressedSize: compressed.length,
+            stats
+          };
+
+          taskStatus.completed.add(globalIndex);
+          taskStatus.pending.delete(globalIndex);
+
           if (onProgress) {
-            onProgress((globalIndex + 1) / images.length);
+            onProgress({
+              current: globalIndex + 1,
+              total: uniqueImages.length,
+              stats
+            });
           }
         } catch (error) {
           console.warn(`[compressImagesInParallel] Failed to compress image ${image.path}:`, error);
           failedImages.add(globalIndex);
-          results[globalIndex] = { data: image.data, error: error.message };
+          
+          const stats = {
+            originalSize: image.data.length,
+            compressedSize: image.data.length,
+            ratio: 1,
+            method: 'failed'
+          };
+
+          results[globalIndex] = {
+            data: image.data,
+            error: error.message,
+            stats
+          };
+
+          taskStatus.failed.add(globalIndex);
+          taskStatus.pending.delete(globalIndex);
+
+          if (onProgress) {
+            onProgress({
+              current: globalIndex + 1,
+              total: uniqueImages.length,
+              stats
+            });
+          }
         }
       });
-      
+
       // 等待当前批次完成
       await Promise.all(batchPromises);
-      
-      // 每处理完一个批次后，检查是否需要清理
+
+      // 批次间清理
       await memoryManager.checkAndCleanup();
-      
-      // 如果已经处理了20张图片，尝试恢复 FFmpeg
-      if (canvasProcessedCount >= CANVAS_RECOVERY_THRESHOLD) {
-        await checkAndRecoverFFmpeg();
-      }
     }
-    
-    // 处理失败的图片
-    if (failedImages.size > 0) {
-      console.log(`[compressImagesInParallel] Retrying ${failedImages.size} failed images with Canvas`);
-      
-      // 切换到 Canvas 模式
-      useFFmpegFallback = true;
-      
-      // 串行处理失败的图片
-      for (const index of failedImages) {
-        if (shouldCancel || !isCompressionActive || signal.aborted) {
-          throw new Error('Compression cancelled by user');
-        }
-        
-        try {
-          const image = images[index];
-          const compressed = await compressWithCanvas(image.data, await detectFormat(image.data), compressionOptions.quality);
-          
-          if (shouldCancel || !isCompressionActive || signal.aborted) {
-            throw new Error('Compression cancelled by user');
-          }
-          
-          results[index] = {
-            data: compressed,
-            format: await detectFormat(compressed),
-            compressionMethod: 'canvas-fallback',
-            originalSize: image.data.length,
-            compressedSize: compressed.length
-          };
-          
-          if (onProgress) {
-            onProgress((index + 1) / images.length);
-          }
-        } catch (error) {
-          console.error(`[compressImagesInParallel] Failed to compress image ${images[index].path} with Canvas:`, error);
-          results[index] = { 
-            data: images[index].data, 
-            error: error.message,
-            compressionMethod: 'failed'
-          };
-        }
-      }
-    }
+
+    await cleanupCompression(uniqueImages.length);
+    return results;
   } catch (error) {
-    if (shouldCancel || !isCompressionActive || signal.aborted) {
-      await resetFFmpegInstance().catch(cleanupError => {
-        console.warn('[compressImagesInParallel] Cleanup after cancellation failed:', cleanupError);
-      });
-    }
+    console.error('[compressImagesInParallel] Error:', error);
+    await cleanupCompression(uniqueImages.length);
     throw error;
-  } finally {
-    isCompressionActive = false;
-    try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      await resetFFmpegInstance();
-      await memoryManager.forceCleanup();
-    } catch (cleanupError) {
-      console.warn('[compressImagesInParallel] Final cleanup error:', cleanupError);
-    }
-    stopMemoryMonitoring();
   }
-  
-  return results;
 }
 
-// 添加计算最优批处理大小的函数
-function calculateOptimalChunkSize(totalImages) {
-  const cpuCores = navigator.hardwareConcurrency || 4;
-  if (totalImages <= 10) {
-    return 1; // Serial processing for small sets
-  } else if (totalImages <= 50) {
-    return 1; // Single image per batch for medium sets
-  } else {
-    return 2; // Two images per batch for large sets
+// 修改清理函数
+async function cleanupCompression(totalImages) {
+  try {
+    isCompressionActive = false;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await resetFFmpegInstance();
+    await memoryManager.forceCleanup();
+  } catch (cleanupError) {
+    console.warn('[compressImagesInParallel] Final cleanup error:', cleanupError);
+  } finally {
+    stopMemoryMonitoring();
   }
+
+  // 输出任务状态统计
+  console.log('[compressImagesInParallel] Task status summary:', {
+    total: totalImages,
+    completed: taskStatus.completed.size,
+    failed: taskStatus.failed.size,
+    timeout: taskStatus.timeout.size,
+    pending: taskStatus.pending.size
+  });
 }
 
 // 添加智能质量调整函数
@@ -1186,49 +1251,42 @@ function updateMemoryUsage() {
 class MemoryManager {
   constructor() {
     this.lastCleanup = Date.now();
-    this.cleanupInterval = 3000; // Reduce to 3 seconds
-    this.memoryThreshold = 0.4;  // Lower to 40%
-    this.forceCleanupThreshold = 0.55; // Lower to 55%
+    this.cleanupInterval = 2000; // 2 seconds
+    this.memoryThreshold = 0.35; // 35%
+    this.forceCleanupThreshold = 0.50; // 50%
     this.processedImagesCount = 0;
-    this.cleanupAfterImages = 10; // Reduce to 10 images
-    this.lastFFmpegReset = Date.now();
-    this.ffmpegResetInterval = 15000; // Reduce to 15 seconds
+    this.cleanupAfterImages = 8; // 每处理8张图片清理一次
+    this.activeTasks = new Set(); // 跟踪活动任务
   }
   
   async checkAndCleanup() {
     const now = Date.now();
     this.processedImagesCount++;
     
-    if (this.processedImagesCount >= this.cleanupAfterImages) {
-      await this.forceCleanup();
-      this.processedImagesCount = 0;
-      if (useFFmpegFallback) {
-        await checkAndRecoverFFmpeg();
-      }
-      return;
-    }
-    
-    if (now - this.lastCleanup < this.cleanupInterval) {
-      return;
-    }
-    
-    this.lastCleanup = now;
-    
-    if (now - this.lastFFmpegReset >= this.ffmpegResetInterval) {
-      console.log('[MemoryManager] Performing periodic FFmpeg reset');
-      await resetFFmpegInstance();
-      this.lastFFmpegReset = now;
-    }
-    
-    if (typeof performance !== 'undefined' && performance.memory) {
-      const usedHeap = performance.memory.usedJSHeapSize;
-      const totalHeap = performance.memory.jsHeapSizeLimit;
-      const memoryUsage = usedHeap / totalHeap;
-      
-      if (memoryUsage > this.forceCleanupThreshold) {
+    // 只在没有活动任务时进行清理
+    if (this.activeTasks.size === 0) {
+      if (this.processedImagesCount >= this.cleanupAfterImages) {
         await this.forceCleanup();
-      } else if (memoryUsage > this.memoryThreshold) {
-        await this.normalCleanup();
+        this.processedImagesCount = 0;
+        return;
+      }
+      
+      if (now - this.lastCleanup < this.cleanupInterval) {
+        return;
+      }
+      
+      this.lastCleanup = now;
+      
+      if (typeof performance !== 'undefined' && performance.memory) {
+        const usedHeap = performance.memory.usedJSHeapSize;
+        const totalHeap = performance.memory.jsHeapSizeLimit;
+        const memoryUsage = usedHeap / totalHeap;
+        
+        if (memoryUsage > this.forceCleanupThreshold) {
+          await this.forceCleanup();
+        } else if (memoryUsage > this.memoryThreshold) {
+          await this.normalCleanup();
+        }
       }
     }
   }
@@ -1239,7 +1297,12 @@ class MemoryManager {
       if (imageCache && typeof imageCache.evictOldest === 'function') {
         imageCache.evictOldest();
       }
-      await resetFFmpegInstance();
+      
+      // 只在没有活动任务时清理 FFmpeg
+      if (this.activeTasks.size === 0 && ffmpegInstance) {
+        await cleanupFFmpegMemory(ffmpegInstance);
+      }
+      
       if (typeof global !== 'undefined' && global.gc) {
         try {
           global.gc();
@@ -1265,8 +1328,13 @@ class MemoryManager {
           }
         }
       }
-      await resetFFmpegInstance();
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // 只在没有活动任务时强制清理 FFmpeg
+      if (this.activeTasks.size === 0 && ffmpegInstance) {
+        await resetFFmpegInstance();
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
       if (typeof global !== 'undefined' && global.gc) {
         try {
           global.gc();
@@ -1276,10 +1344,18 @@ class MemoryManager {
       }
       this.processedImagesCount = 0;
       this.lastCleanup = Date.now();
-      this.lastFFmpegReset = Date.now();
     } catch (error) {
       console.warn('[MemoryManager] Force cleanup failed:', error);
     }
+  }
+
+  // 添加任务跟踪方法
+  addTask(taskId) {
+    this.activeTasks.add(taskId);
+  }
+
+  removeTask(taskId) {
+    this.activeTasks.delete(taskId);
   }
 }
 
@@ -1315,191 +1391,6 @@ function stopMemoryMonitoring() {
   if (memoryMonitorInterval) {
     clearInterval(memoryMonitorInterval);
     memoryMonitorInterval = null;
-  }
-}
-
-// 修改compressImage函数
-export async function compressImage(data, options = {}) {
-  if (checkMemoryPressure()) {
-    console.warn('[compressImage] High memory pressure detected, clearing cache');
-    if (imageCache) {
-      if (typeof imageCache.clear === 'function') {
-        imageCache.clear();
-      } else if (typeof imageCache.evictOldest === 'function') {
-        for (let i = 0; i < 10; i++) {
-          imageCache.evictOldest();
-        }
-      }
-    }
-    await new Promise(resolve => setTimeout(resolve, 2000));
-  }
-
-  const quality = 0.95;
-  const allowFormatConversion = true;
-  const allowDownsampling = true;
-  const maxImageSize = 1600; // Lower max size
-  
-  if (!(data instanceof Uint8Array)) {
-    throw new TypeError('compressImage: data must be a Uint8Array');
-  }
-  
-  let originalSize = data.byteLength;
-  
-  if (originalSize > 50 * 1024 * 1024) {
-    console.warn('[compressImage] Image too large, skipping compression');
-    return { 
-      data, 
-      format: 'original', 
-      compressionMethod: 'skipped-size', 
-      originalSize, 
-      compressedSize: originalSize,
-      originalDimensions: { width: 0, height: 0 },
-      finalDimensions: { width: 0, height: 0 }
-    };
-  }
-  
-  data = await checkAndResizeImage(data, 1400, 800); // Lower max dimensions
-  originalSize = data.byteLength;
-  
-  if (allowDownsampling) {
-    if (originalSize > 2 * 1024 * 1024) {
-      data = await downsampleImage(data, 1200); // Lower threshold and size
-      originalSize = data.byteLength;
-    } else if (originalSize > 1 * 1024 * 1024) {
-      data = await downsampleImage(data, 1400);
-      originalSize = data.byteLength;
-    }
-  }
-  
-  try {
-    const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
-    let cached = null;
-    try {
-      if (imageCache && typeof imageCache.get === 'function') {
-        cached = imageCache.get(cacheKey);
-        if (cached) {
-          return cached;
-        }
-      }
-    } catch (e) {
-      console.warn('[compressImage] Cache error:', e);
-    }
-    
-    if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-      return { data, format: 'original', compressionMethod: 'skipped-small', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 } };
-    }
-    
-    let format = await detectFormat(data);
-    
-    // 格式转换策略
-    if (allowFormatConversion && ['bmp', 'tiff'].includes(format)) {
-      data = await compressImageWithFFmpeg(data, 1, 'png');
-      format = 'png';
-    }
-    
-    if (format === 'unknown' || format === 'gif') {
-      return { data, format: format || 'original', compressionMethod: 'skipped-format', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 } };
-    }
-    
-    // PNG无Alpha时考虑转换格式并择优
-    let bestResult = null;
-    if (format === 'png' && allowFormatConversion) {
-      let hasAlpha = false;
-      try {
-        hasAlpha = await checkAlphaChannel(data);
-      } catch (error) {
-        console.warn('[compressImage] PNG alpha check failed, assuming alpha:', error);
-        hasAlpha = true;
-      }
-      
-      if (!hasAlpha) {
-        const results = [];
-        
-        // 优先尝试WebP
-        let webpQuality = await adjustQualityByContent(data, 'webp', Math.min(1.0, quality * 1.1));
-        let webpData = await compressImageWithFFmpeg(data, webpQuality, 'webp');
-        results.push({ data: webpData, format: 'webp' });
-        
-        // 如果WebP压缩效果不理想，尝试其他格式
-        if (webpData.length > originalSize * 1.0) {
-          // 尝试PNG压缩
-          const pngQuality = await adjustQualityByContent(data, 'png', quality);
-          const pngData = await compressImageWithFFmpeg(data, pngQuality, 'png');
-          results.push({ data: pngData, format: 'png' });
-          
-          // 尝试JPEG压缩
-          const jpegQuality = await adjustQualityByContent(data, 'jpeg', quality);
-          const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
-          results.push({ data: jpegData, format: 'jpeg' });
-        }
-        
-        bestResult = results.reduce((a, b) => (a.data.length < b.data.length ? a : b));
-        console.log(`[compressImage] Best format: ${bestResult.format}, orig=${originalSize}, comp=${bestResult.data.length}`);
-      }
-    }
-    
-    if (!bestResult) {
-      // 使用智能质量调整
-      const adjustedQuality = await adjustQualityByContent(data, format, quality);
-      let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
-      
-      // 如果压缩效果不好，尝试额外降低质量
-      if (compressedData.length > originalSize * 1.0) {
-        const lowerQuality = adjustedQuality * 0.85;
-        const recompressedData = await compressImageWithFFmpeg(data, lowerQuality, format);
-        
-        if (recompressedData.length < compressedData.length) {
-          compressedData = recompressedData;
-        }
-      }
-      
-      bestResult = { data: compressedData, format };
-    }
-    
-    const result = {
-      data: bestResult.data,
-      format: bestResult.format,
-      compressionMethod: 'ffmpeg',
-      originalSize: originalSize,
-      compressedSize: bestResult.data.length,
-      originalDimensions: { width: 0, height: 0 },
-      finalDimensions: { width: 0, height: 0 }
-    };
-    
-    try { 
-      if (imageCache && typeof imageCache.set === 'function') {
-        if (imageCache.currentSize + result.compressedSize > imageCache.maxSize * 0.9) {
-          if (typeof imageCache.evictOldest === 'function') {
-            imageCache.evictOldest();
-          }
-        }
-        imageCache.set(cacheKey, result); 
-      }
-    } catch (e) {
-      console.warn('[compressImage] Failed to cache result:', e);
-    }
-    
-    return result;
-  } catch (error) {
-    console.error('[compressImage] Error:', error);
-    return { 
-      data, 
-      format: 'original', 
-      compressionMethod: 'error', 
-      originalSize, 
-      compressedSize: originalSize,
-      originalDimensions: { width: 0, height: 0 },
-      finalDimensions: { width: 0, height: 0 },
-      error: error.message 
-    };
-  } finally {
-    if (typeof global !== 'undefined' && global.gc) {
-      try {
-        global.gc();
-      } catch (e) {
-        console.warn('[compressImage] GC failed:', e);
-      }
-    }
   }
 }
 
