@@ -28,10 +28,12 @@
     "@fontsource/noto-sans-sc": "^5.2.5",
     "@squoosh/lib": "^0.3.1",
     "@sveltejs/adapter-cloudflare": "^2.0.0",
+    "browser-image-compression": "^2.0.2",
     "fast-xml-parser": "^5.2.0",
     "jszip": "^3.10.1",
     "next-themes": "^0.4.4",
     "p-queue": "^8.0.1",
+    "sharp": "^0.34.1",
     "xml2js": "^0.6.2"
   }
 }
