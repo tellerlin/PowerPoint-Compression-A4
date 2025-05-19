@@ -102,9 +102,10 @@ async function getFFmpegInstance() {
       log: true,
       corePath: '/ffmpeg/ffmpeg-core.js',
       logger: ({ message }) => {
+        // Only log errors and progress information
         if (message.includes('Error') || message.includes('error')) {
           console.error('[FFmpeg]', message);
-        } else {
+        } else if (message.includes('time=') || message.includes('frame=')) {
           console.log('[FFmpeg]', message);
         }
       }
@@ -412,13 +413,44 @@ async function checkAndResizeImage(data, maxWidth = 1600, maxHeight = 900) {
   }
 }
 
+// 添加内存使用监控
+let memoryUsage = {
+  peak: 0,
+  current: 0,
+  lastCheck: Date.now()
+};
+
+function updateMemoryUsage() {
+  if (typeof performance !== 'undefined' && performance.memory) {
+    memoryUsage.current = performance.memory.usedJSHeapSize;
+    memoryUsage.peak = Math.max(memoryUsage.peak, memoryUsage.current);
+  }
+}
+
+// 添加内存压力检测
+function checkMemoryPressure() {
+  updateMemoryUsage();
+  if (typeof performance !== 'undefined' && performance.memory) {
+    const memoryLimit = performance.memory.jsHeapSizeLimit * 0.8; // 80% 阈值
+    return memoryUsage.current > memoryLimit;
+  }
+  return false;
+}
+
 // 修改compressImage函数
 export async function compressImage(data, options = {}) {
+  // 检查内存压力
+  if (checkMemoryPressure()) {
+    console.warn('[compressImage] High memory pressure detected, clearing cache and waiting...');
+    imageCache.clear();
+    await new Promise(resolve => setTimeout(resolve, 1000)); // 等待GC
+  }
+
   // 使用固定的高质量参数
-  const quality = 0.95; // 固定使用95%的质量
-  const allowFormatConversion = true; // 始终允许格式转换
-  const allowDownsampling = true; // 始终允许降采样
-  const maxImageSize = 2000; // 提高最大尺寸限制
+  const quality = 0.95;
+  const allowFormatConversion = true;
+  const allowDownsampling = true;
+  const maxImageSize = 2000;
   
   console.log('[compressImage] Using high quality compression settings');
   
@@ -428,6 +460,20 @@ export async function compressImage(data, options = {}) {
   
   let originalSize = data.byteLength;
   console.log('[compressImage] Original size:', originalSize);
+  
+  // 添加大小限制检查
+  if (originalSize > 50 * 1024 * 1024) { // 50MB
+    console.warn('[compressImage] Image too large, skipping compression');
+    return { 
+      data, 
+      format: 'original', 
+      compressionMethod: 'skipped-size', 
+      originalSize, 
+      compressedSize: originalSize,
+      originalDimensions: { width: 0, height: 0 },
+      finalDimensions: { width: 0, height: 0 }
+    };
+  }
   
   // 首先检查并调整图片尺寸
   data = await checkAndResizeImage(data);
@@ -458,7 +504,9 @@ export async function compressImage(data, options = {}) {
         console.log('[compressImage] Using cached result');
         return cached;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[compressImage] Cache error:', e);
+    }
     
     if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
       console.log('[compressImage] Skipping small image');
@@ -554,11 +602,39 @@ export async function compressImage(data, options = {}) {
       finalDimensions: { width: 0, height: 0 }
     };
     
-    try { imageCache.set(cacheKey, result); } catch (e) {}
+    try { 
+      // 检查缓存大小限制
+      if (imageCache.currentSize + result.compressedSize > imageCache.maxSize * 0.9) {
+        console.warn('[compressImage] Cache near limit, clearing old entries');
+        imageCache.evictOldest();
+      }
+      imageCache.set(cacheKey, result); 
+    } catch (e) {
+      console.warn('[compressImage] Failed to cache result:', e);
+    }
+    
     return result;
   } catch (error) {
     console.error('[compressImage] Error:', error);
-    return { data, format: 'original', compressionMethod: 'error', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 }, error: error.message };
+    return { 
+      data, 
+      format: 'original', 
+      compressionMethod: 'error', 
+      originalSize, 
+      compressedSize: originalSize,
+      originalDimensions: { width: 0, height: 0 },
+      finalDimensions: { width: 0, height: 0 },
+      error: error.message 
+    };
+  } finally {
+    // 清理临时资源
+    if (typeof global !== 'undefined' && global.gc) {
+      try {
+        global.gc();
+      } catch (e) {
+        console.warn('[compressImage] GC failed:', e);
+      }
+    }
   }
 }
 

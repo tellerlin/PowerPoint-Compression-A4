@@ -65,6 +65,30 @@ function calculateSavedStats(originalSize, compressedSize, originalMediaSize, co
   };
 }
 
+// 添加动态批处理大小计算
+function calculateOptimalBatchSize(mediaFiles, zip) {
+  const totalMemory = typeof performance !== 'undefined' && performance.memory ? 
+    performance.memory.jsHeapSizeLimit : 1024 * 1024 * 1024; // 默认1GB
+  
+  const averageFileSize = mediaFiles.reduce((sum, f) => {
+    const size = zip.files[f].data ? zip.files[f].data.length : 0;
+    return sum + size;
+  }, 0) / mediaFiles.length;
+  
+  // 根据文件大小和可用内存动态调整批处理大小
+  if (averageFileSize > 10 * 1024 * 1024) { // 10MB
+    return 1;
+  } else if (averageFileSize > 5 * 1024 * 1024) { // 5MB
+    return 2;
+  } else if (averageFileSize > 1 * 1024 * 1024) { // 1MB
+    return 4;
+  }
+  
+  // 根据可用内存计算最大批处理大小
+  const maxBatchSize = Math.floor(totalMemory / (averageFileSize * 3)); // 预留3倍空间
+  return Math.min(8, Math.max(1, maxBatchSize));
+}
+
 // Modified processMediaBatch function to use parallel compression
 async function processMediaBatch(zip, batch, options, cpuCount, onProgress, currentIndex, totalFiles) {
   const imagesToCompress = [];
@@ -271,12 +295,8 @@ export async function optimizePPTX(file, options = {}) {
       let failedMediaCount = 0;
 
       if (mediaFiles.length > 0) {
-        const batchSize = Math.min(
-          mediaFiles.length,
-          mediaFiles.some(f => zip.files[f].data && zip.files[f].data.length > 10 * 1024 * 1024) ? 1 :
-          mediaFiles.some(f => zip.files[f].data && zip.files[f].data.length > 5 * 1024 * 1024) ? 2 :
-          4
-        );
+        const batchSize = calculateOptimalBatchSize(mediaFiles, zip);
+        console.log(`[OptimizePPTX] Using batch size: ${batchSize} for ${mediaFiles.length} files`);
 
         for (let i = 0; i < mediaFiles.length; i += batchSize) {
           const batch = mediaFiles.slice(i, i + batchSize);
@@ -309,6 +329,15 @@ export async function optimizePPTX(file, options = {}) {
             processedFiles: batchResults.map(r => r.path.split('/').pop()),
             estimatedTimeRemaining: estimatedRemaining
           });
+
+          // 每批次处理完后清理内存
+          if (typeof global !== 'undefined' && global.gc) {
+            try {
+              global.gc();
+            } catch (e) {
+              console.warn('[OptimizePPTX] GC failed:', e);
+            }
+          }
         }
         
         finalStats.originalMediaSize = totalOriginalMediaSize;
@@ -339,6 +368,36 @@ export async function optimizePPTX(file, options = {}) {
 
     onProgress('complete', { stats: finalStats });
 
+    // 清理资源
+    try {
+      // 清理 JSZip 实例
+      if (zip) {
+        zip = null;
+      }
+      
+      // 清理图片缓存
+      if (typeof imageCache !== 'undefined' && imageCache.clear) {
+        imageCache.clear();
+      }
+      
+      // 清理 FFmpeg 实例
+      if (typeof ffmpegInstance !== 'undefined' && ffmpegInstance) {
+        ffmpegInstance = null;
+      }
+      
+      // 强制垃圾回收（如果可用）
+      if (typeof global !== 'undefined' && global.gc) {
+        global.gc();
+      }
+      
+      // 等待一小段时间确保资源释放
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      console.log('[OptimizePPTX] Resources cleaned up successfully');
+    } catch (error) {
+      console.warn('[OptimizePPTX] Error during cleanup:', error);
+    }
+
     return compressedBlob;
 
   } catch (error) {
@@ -348,6 +407,21 @@ export async function optimizePPTX(file, options = {}) {
       message: error.message,
       stats: finalStats
     });
+
+    // 发生错误时也要清理资源
+    try {
+      if (zip) {
+        zip = null;
+      }
+      if (typeof imageCache !== 'undefined' && imageCache.clear) {
+        imageCache.clear();
+      }
+      if (typeof ffmpegInstance !== 'undefined' && ffmpegInstance) {
+        ffmpegInstance = null;
+      }
+    } catch (cleanupError) {
+      console.warn('[OptimizePPTX] Error during error cleanup:', cleanupError);
+    }
 
     throw error;
   }

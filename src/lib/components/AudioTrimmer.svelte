@@ -111,7 +111,12 @@
         log: true,
         corePath: '/ffmpeg/ffmpeg-core.js',
         logger: ({ message }) => {
-          console.log('[FFmpeg]', message);
+          // Only log errors and progress information
+          if (message.includes('Error') || message.includes('error')) {
+            console.error('[FFmpeg]', message);
+          } else if (message.includes('time=') || message.includes('frame=')) {
+            console.log('[FFmpeg]', message);
+          }
         }
       });
 
