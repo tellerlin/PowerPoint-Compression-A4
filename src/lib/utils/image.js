@@ -104,20 +104,36 @@ async function queueFFmpegTask(task) {
 }
 
 async function compressImageWithFFmpeg(data, quality, format) {
+  let inputFileName = null;
+  let outputFileName = null;
+  
   return queueFFmpegTask(async () => {
     if (!data || data.length === 0) {
       console.error('[compressImageWithFFmpeg] Invalid input data');
       return data;
     }
     
-    const ffmpeg = await getFFmpegInstance();
-
-    const inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
-    const outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
-
     try {
+      const ffmpeg = await getFFmpegInstance();
+      inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
+      outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
+
       ffmpeg.FS('writeFile', inputFileName, data);
       const args = ['-i', inputFileName];
+      
+      // 添加智能降噪和锐化滤镜
+      const filterComplex = [];
+      
+      // 智能降噪 - 使用更稳定的参数
+      filterComplex.push('nlmeans=s=7:p=7:r=11');
+      
+      // 智能锐化 - 使用更保守的参数
+      filterComplex.push('unsharp=3:3:1:3:3:0.3');
+      
+      // 应用滤镜
+      if (filterComplex.length > 0) {
+        args.push('-vf', filterComplex.join(','));
+      }
       
       if (format === 'png') {
         // 使用基本的PNG压缩设置
@@ -163,13 +179,22 @@ async function compressImageWithFFmpeg(data, quality, format) {
         return data;
       }
       
+      // 检查输出文件是否存在
       const files = ffmpeg.FS('readdir', '/');
       if (!files.includes(outputFileName)) {
         console.warn(`[compressImageWithFFmpeg] Output file not found: ${outputFileName}`);
         return data;
       }
       
-      const outputData = ffmpeg.FS('readFile', outputFileName);
+      // 读取输出文件
+      let outputData;
+      try {
+        outputData = ffmpeg.FS('readFile', outputFileName);
+      } catch (error) {
+        console.warn(`[compressImageWithFFmpeg] Error reading output file: ${error.message}`);
+        return data;
+      }
+      
       if (!outputData || outputData.length === 0) {
         console.warn(`[compressImageWithFFmpeg] Empty output file: ${outputFileName}`);
         return data;
@@ -188,15 +213,101 @@ async function compressImageWithFFmpeg(data, quality, format) {
       console.error('[compressImageWithFFmpeg] Error:', error);
       return data;
     } finally {
+      // 清理文件
       try {
+        const ffmpeg = await getFFmpegInstance();
         const files = ffmpeg.FS('readdir', '/');
-        if (files.includes(inputFileName)) ffmpeg.FS('unlink', inputFileName);
-        if (files.includes(outputFileName)) ffmpeg.FS('unlink', outputFileName);
+        if (inputFileName && files.includes(inputFileName)) {
+          ffmpeg.FS('unlink', inputFileName);
+        }
+        if (outputFileName && files.includes(outputFileName)) {
+          ffmpeg.FS('unlink', outputFileName);
+        }
       } catch (e) {
         console.warn('[compressImageWithFFmpeg] Error cleaning up files:', e);
       }
     }
   });
+}
+
+// 添加智能图像处理函数
+async function enhanceImage(data, format) {
+  let inputFileName = null;
+  let outputFileName = null;
+  
+  try {
+    const ffmpeg = await getFFmpegInstance();
+    inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
+    outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
+
+    // 写入输入文件
+    ffmpeg.FS('writeFile', inputFileName, data);
+    
+    // 构建增强滤镜 - 使用更兼容的参数
+    const filterComplex = [
+      // 智能降噪 - 使用更兼容的参数
+      'nlmeans=s=5:p=5:r=10',
+      // 智能锐化 - 使用更保守的参数
+      'unsharp=3:3:1:3:3:0.5',
+      // 细节增强 - 使用更保守的参数
+      'eq=contrast=1.05:brightness=0.02:saturation=1.05'
+    ].join(',');
+
+    const args = [
+      '-i', inputFileName,
+      '-vf', filterComplex,
+      '-c:v', format === 'webp' ? 'libwebp' : format === 'png' ? 'png' : 'mjpeg',
+      '-y',
+      outputFileName
+    ];
+
+    try {
+      await ffmpeg.run(...args);
+    } catch (error) {
+      console.warn('[enhanceImage] FFmpeg processing error:', error);
+      return data; // 如果处理失败，返回原始数据
+    }
+    
+    // 检查输出文件是否存在
+    const files = ffmpeg.FS('readdir', '/');
+    if (!files.includes(outputFileName)) {
+      console.warn('[enhanceImage] Output file not found:', outputFileName);
+      return data;
+    }
+    
+    // 读取输出文件
+    let outputData;
+    try {
+      outputData = ffmpeg.FS('readFile', outputFileName);
+    } catch (error) {
+      console.warn('[enhanceImage] Error reading output file:', error);
+      return data;
+    }
+    
+    if (!outputData || outputData.length === 0) {
+      console.warn('[enhanceImage] Empty output file');
+      return data;
+    }
+    
+    return new Uint8Array(outputData.buffer);
+  } catch (error) {
+    console.error('[enhanceImage] Error:', error);
+    return data;
+  } finally {
+    // 清理文件
+    try {
+      const ffmpeg = await getFFmpegInstance();
+      const files = ffmpeg.FS('readdir', '/');
+      if (inputFileName && files.includes(inputFileName)) {
+        ffmpeg.FS('unlink', inputFileName);
+      }
+      if (outputFileName && files.includes(outputFileName)) {
+        ffmpeg.FS('unlink', outputFileName);
+      }
+    } catch (e) {
+      console.warn('[enhanceImage] Error cleaning up files:', e);
+    }
+  }
 }
 
 // 修改为完全串行处理，解决FFmpeg只能运行一个命令的问题
@@ -416,6 +527,10 @@ export async function compressImage(data, options = {}) {
     
     let format = await detectFormat(data);
     console.log('[compressImage] Detected format:', format);
+    
+    // 首先进行图像增强
+    console.log('[compressImage] Enhancing image');
+    data = await enhanceImage(data, format);
     
     // 格式转换策略
     if (allowFormatConversion && ['bmp', 'tiff'].includes(format)) {
