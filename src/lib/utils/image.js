@@ -122,17 +122,22 @@ async function compressImageWithFFmpeg(data, quality, format) {
       if (format === 'png') {
         // 使用基本的PNG压缩设置
         args.push('-c:v', 'png', '-compression_level', '4', '-threads', '1');
+        args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
       } else if (format === 'jpeg' || format === 'jpg') {
         // 使用基本的JPEG压缩设置
         const qualityValue = data.length > 1024 * 1024 ? 
           Math.round(quality * 75) : 
           Math.round(quality * 90);
         args.push('-c:v', 'mjpeg', '-q:v', qualityValue.toString(), '-threads', '1');
+        args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
       } else if (format === 'webp') {
         // 使用基本的WebP压缩设置
         const qualityValue = Math.round(quality * 90);
         args.push('-c:v', 'libwebp', '-quality', qualityValue.toString());
         args.push('-lossless', '0', '-method', '3', '-threads', '1');
+        // 添加YUV颜色空间转换选项
+        args.push('-pix_fmt', 'yuv420p');
+        args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
       }
       
       // 添加基本设置
