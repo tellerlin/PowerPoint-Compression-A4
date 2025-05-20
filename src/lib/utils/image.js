@@ -70,28 +70,79 @@ async function compressImageInWorker(data, quality, format) {
 
 // 添加FFmpeg实例缓存
 let ffmpegInstance = null;
+let ffmpegLoadPromise = null;
 
 async function getFFmpegInstance() {
-  if (!ffmpegInstance) {
-    if (!window.FFmpeg) {
-      throw new Error('FFmpeg not loaded');
-    }
-    ffmpegInstance = window.FFmpeg.createFFmpeg({
-      log: true,
-      corePath: '/ffmpeg/ffmpeg-core.js'
-    });
-    await ffmpegInstance.load();
+  if (!ffmpegLoadPromise) {
+    ffmpegLoadPromise = (async () => {
+      try {
+        if (!window.FFmpeg) {
+          throw new Error('FFmpeg not loaded');
+        }
+        ffmpegInstance = window.FFmpeg.createFFmpeg({
+          log: false,
+          corePath: '/ffmpeg/ffmpeg-core.js',
+          mainName: 'main',
+          // 添加内存限制
+          memoryLimit: 256 * 1024 * 1024, // 256MB
+          // 添加错误处理
+          onError: (err) => {
+            console.warn('[FFmpeg] Error:', err);
+            // 重置实例
+            ffmpegInstance = null;
+            ffmpegLoadPromise = null;
+          }
+        });
+        await ffmpegInstance.load();
+        return ffmpegInstance;
+      } catch (error) {
+        console.error('[FFmpeg] Failed to load:', error);
+        ffmpegInstance = null;
+        ffmpegLoadPromise = null;
+        throw error;
+      }
+    })();
   }
-  return ffmpegInstance;
+  return ffmpegLoadPromise;
 }
 
 // 添加FFmpeg队列管理
 let ffmpegQueue = Promise.resolve();
+let isProcessing = false;
 
 async function queueFFmpegTask(task) {
   return new Promise((resolve, reject) => {
+    if (isProcessing) {
+      console.warn('[FFmpeg] Task queued while another is processing');
+    }
+    
     ffmpegQueue = ffmpegQueue
-      .then(() => task())
+      .then(async () => {
+        isProcessing = true;
+        try {
+          const result = await task();
+          return result;
+        } catch (error) {
+          if (error.message.includes('OOM') || error.message.includes('Out of memory')) {
+            console.warn('[FFmpeg] Memory overflow, resetting instance');
+            // 重置FFmpeg实例
+            ffmpegInstance = null;
+            ffmpegLoadPromise = null;
+            // 等待一段时间后重试
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            try {
+              const result = await task();
+              return result;
+            } catch (retryError) {
+              console.error('[FFmpeg] Retry failed:', retryError);
+              throw retryError;
+            }
+          }
+          throw error;
+        } finally {
+          isProcessing = false;
+        }
+      })
       .then(resolve)
       .catch(reject)
       .finally(() => {
@@ -161,8 +212,6 @@ async function compressImageWithFFmpeg(data, quality, format) {
       
       args.push(outputFileName);
       
-      console.log(`[compressImageWithFFmpeg] Running FFmpeg for ${format} with args:`, args);
-      
       try {
         await ffmpeg.run(...args);
       } catch (error) {
@@ -191,11 +240,9 @@ async function compressImageWithFFmpeg(data, quality, format) {
         return data;
       }
 
-      console.log(`[compressImageWithFFmpeg] Compression result: ${format}, ${data.length} -> ${outputData.length}`);
-      
       // 检查压缩效果
       if (outputData.length >= data.length * 0.95) {
-        console.log(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length * 0.95}`);
+        console.warn(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length * 0.95}`);
         return data;
       }
       
@@ -203,20 +250,6 @@ async function compressImageWithFFmpeg(data, quality, format) {
     } catch (error) {
       console.error('[compressImageWithFFmpeg] Error:', error);
       return data;
-    } finally {
-      // 清理文件
-      try {
-        const ffmpeg = await getFFmpegInstance();
-        const files = ffmpeg.FS('readdir', '/');
-        if (inputFileName && files.includes(inputFileName)) {
-          ffmpeg.FS('unlink', inputFileName);
-        }
-        if (outputFileName && files.includes(outputFileName)) {
-          ffmpeg.FS('unlink', outputFileName);
-        }
-      } catch (e) {
-        console.warn('[compressImageWithFFmpeg] Error cleaning up files:', e);
-      }
     }
   });
 }
@@ -247,72 +280,36 @@ async function enhanceImage(data, format) {
       bitmap.close && bitmap.close();
     } catch (error) {
       console.warn('[enhanceImage] Failed to get dimensions from ImageBitmap:', error);
-      // 如果获取失败，使用默认值
       dimensions = { width: 1000, height: 1000 };
       console.warn('[enhanceImage] Using default dimensions');
     }
     
-    // 根据图片尺寸直接设置滤镜参数
+    // 根据图片尺寸决定是否跳过增强
     const totalPixels = dimensions.width * dimensions.height;
     
-    // 根据图片尺寸直接设置滤镜参数
-    let nlmeansParams, unsharpParams, colorParams;
-    
-    if (totalPixels > 4000000) { // 2000x2000
-      // 超大图片使用最小参数
-      nlmeansParams = { s: 2, p: 2, r: 3 };
-      unsharpParams = { luma: 3, chroma: 3, amount: 0.3 };
-      colorParams = {
-        contrast: 1.02,
-        brightness: 0.005,
-        saturation: 1.02,
-        balance: 0.02,
-        gamma: 1.02
-      };
-    } else if (totalPixels > 1000000) { // 1000x1000
-      // 大图片使用中等参数
-      nlmeansParams = { s: 3, p: 3, r: 5 };
-      unsharpParams = { luma: 5, chroma: 5, amount: 0.5 };
-      colorParams = {
-        contrast: 1.03,
-        brightness: 0.008,
-        saturation: 1.03,
-        balance: 0.03,
-        gamma: 1.03
-      };
-    } else {
-      // 小图片使用标准参数
-      nlmeansParams = { s: 5, p: 5, r: 9 };
-      unsharpParams = { luma: 7, chroma: 7, amount: 1.0 };
-      colorParams = {
-        contrast: 1.05,
-        brightness: 0.01,
-        saturation: 1.05,
-        balance: 0.05,
-        gamma: 1.05
-      };
+    // 如果图片太大，直接返回原始数据
+    if (totalPixels > 500000) { // 超过 707x707
+      console.log(`[enhanceImage] Skipping enhancement for large image (${dimensions.width}x${dimensions.height})`);
+      return data;
     }
     
-    // 构建滤镜链
-    const filterComplex = [
-      // 降噪
-      `nlmeans=s=${nlmeansParams.s}:p=${nlmeansParams.p}:r=${nlmeansParams.r}`,
-      // 锐化
-      `unsharp=${unsharpParams.luma}:${unsharpParams.luma}:${unsharpParams.amount}:${unsharpParams.chroma}:${unsharpParams.chroma}:${unsharpParams.amount}`,
-      // 色彩增强
-      `eq=contrast=${colorParams.contrast}:brightness=${colorParams.brightness}:saturation=${colorParams.saturation}`,
-      // 色彩平衡
-      `colorbalance=rs=${colorParams.balance}:gs=${colorParams.balance}:bs=${colorParams.balance}:rm=${colorParams.balance}:gm=${colorParams.balance}:bm=${colorParams.balance}:rh=${colorParams.balance}:gh=${colorParams.balance}:bh=${colorParams.balance}`,
-      // Gamma调整
-      `eq=gamma=${colorParams.gamma}:gamma_r=${colorParams.gamma}:gamma_g=${colorParams.gamma}:gamma_b=${colorParams.gamma}`
-    ].join(',');
+    // 根据图片尺寸设置滤镜参数
+    let filterComplex;
+    
+    if (totalPixels > 250000) { // 500x500
+      // 中等图片只使用锐化和简单的对比度调整
+      filterComplex = 'unsharp=3:3:0.4:3:3:0.4,eq=contrast=1.02:brightness=0.005';
+    } else {
+      // 小图片使用标准参数
+      filterComplex = [
+        'nlmeans=s=3:p=3:r=5',
+        'unsharp=3:3:0.5:3:3:0.5',
+        'eq=contrast=1.03:brightness=0.008:saturation=1.03'
+      ].join(',');
+    }
 
     console.log(`[enhanceImage] Processing image ${dimensions.width}x${dimensions.height}`);
-    console.log(`[enhanceImage] Using filter parameters:`, {
-      nlmeans: nlmeansParams,
-      unsharp: unsharpParams,
-      color: colorParams
-    });
+    console.log(`[enhanceImage] Using filter: ${filterComplex}`);
 
     const args = [
       '-i', inputFileName,
@@ -325,8 +322,12 @@ async function enhanceImage(data, format) {
     try {
       await ffmpeg.run(...args);
     } catch (error) {
+      if (error.message.includes('OOM') || error.message.includes('Out of memory')) {
+        console.warn('[enhanceImage] Memory overflow, skipping enhancement');
+        return data;
+      }
       console.warn('[enhanceImage] FFmpeg processing error:', error);
-      return data; // 如果处理失败，返回原始数据
+      return data;
     }
     
     // 检查输出文件是否存在
@@ -534,139 +535,246 @@ async function preprocessImageDimensions(data, maxWidth = 1600, maxHeight = 900)
 
 // 修改compressImage函数
 export async function compressImage(data, options = {}) {
-  // 使用固定的高质量参数
-  const quality = 0.95; // 固定使用95%的质量
-  const allowFormatConversion = true; // 始终允许格式转换
-  const allowDownsampling = true; // 始终允许降采样
-  const maxImageSize = 2000; // 提高最大尺寸限制
-  
-  console.log('[compressImage] Using high quality compression settings');
+  const quality = 0.98;
+  const allowFormatConversion = true;
+  const allowDownsampling = true;
+  const maxImageSize = 2000;
   
   if (!(data instanceof Uint8Array)) {
     throw new TypeError('compressImage: data must be a Uint8Array');
   }
   
   let originalSize = data.byteLength;
-  console.log('[compressImage] Original size:', originalSize);
-  
-  // 首先进行尺寸预处理
-  console.log('[compressImage] Preprocessing image dimensions');
-  data = await preprocessImageDimensions(data);
-  originalSize = data.byteLength;
-  console.log('[compressImage] After dimension preprocessing:', originalSize);
-  
-  // 更保守的降采样策略
-  if (allowDownsampling) {
-    if (originalSize > 5 * 1024 * 1024) {
-      console.log('[compressImage] Downsampling large image (>5MB)');
-      data = await downsampleImage(data, Math.min(maxImageSize, 1600));
-      originalSize = data.byteLength;
-      console.log('[compressImage] After downsampling:', originalSize);
-    } else if (originalSize > 2 * 1024 * 1024) {
-      console.log('[compressImage] Downsampling medium image (>2MB)');
-      data = await downsampleImage(data, Math.min(maxImageSize, 2000));
-      originalSize = data.byteLength;
-      console.log('[compressImage] After downsampling:', originalSize);
-    }
-  }
+  let dimensions = { width: 0, height: 0 };
+  let format = 'unknown';
   
   try {
+    try {
+      format = await detectFormat(data);
+    } catch (error) {
+      console.warn('[compressImage] Failed to detect format:', error);
+    }
+    
+    try {
+      const blob = new Blob([data], { type: `image/${format}` });
+      const bitmap = await createImageBitmap(blob);
+      dimensions = {
+        width: bitmap.width,
+        height: bitmap.height
+      };
+      bitmap.close && bitmap.close();
+    } catch (error) {
+      console.warn('[compressImage] Failed to get dimensions:', error);
+      if (originalSize > 4 * 1024 * 1024) {
+        dimensions = { width: 2000, height: 2000 };
+      } else if (originalSize > 1 * 1024 * 1024) {
+        dimensions = { width: 1500, height: 1500 };
+      } else {
+        dimensions = { width: 1000, height: 1000 };
+      }
+    }
+    
+    const totalPixels = dimensions.width * dimensions.height;
+    const shouldUseUltraConservativeStrategy = 
+      totalPixels > 2000000 || 
+      originalSize > 4 * 1024 * 1024;
+    
+    if (shouldUseUltraConservativeStrategy) {
+      try {
+        const targetSize = Math.min(1000, Math.sqrt(totalPixels) * 0.5);
+        const scale = Math.min(targetSize / dimensions.width, targetSize / dimensions.height);
+        const targetWidth = Math.max(1, Math.round(dimensions.width * scale));
+        const targetHeight = Math.max(1, Math.round(dimensions.height * scale));
+        
+        const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        const blob = new Blob([data], { type: `image/${format}` });
+        const bitmap = await createImageBitmap(blob);
+        ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+        bitmap.close && bitmap.close();
+        
+        const jpegBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+        const jpegData = new Uint8Array(await jpegBlob.arrayBuffer());
+        
+        return {
+          data: jpegData,
+          format: 'jpeg',
+          compressionMethod: 'ultra-conservative',
+          originalSize: originalSize,
+          compressedSize: jpegData.length,
+          originalDimensions: dimensions,
+          finalDimensions: { width: targetWidth, height: targetHeight }
+        };
+      } catch (error) {
+        console.warn('[compressImage] Ultra conservative strategy failed:', error);
+        try {
+          const jpegData = await compressImageWithFFmpeg(data, 0.9, 'jpeg');
+          return {
+            data: jpegData,
+            format: 'jpeg',
+            compressionMethod: 'fallback-jpeg',
+            originalSize: originalSize,
+            compressedSize: jpegData.length,
+            originalDimensions: dimensions,
+            finalDimensions: dimensions
+          };
+        } catch (jpegError) {
+          console.warn('[compressImage] JPEG conversion failed:', jpegError);
+          return {
+            data,
+            format: format || 'original',
+            compressionMethod: 'failed',
+            originalSize,
+            compressedSize: originalSize,
+            originalDimensions: dimensions,
+            finalDimensions: dimensions
+          };
+        }
+      }
+    }
+    
+    try {
+      data = await preprocessImageDimensions(data);
+      originalSize = data.byteLength;
+    } catch (error) {
+      console.warn('[compressImage] Dimension preprocessing failed:', error);
+    }
+    
+    if (allowDownsampling) {
+      try {
+        if (originalSize > 5 * 1024 * 1024) {
+          data = await downsampleImage(data, Math.min(maxImageSize, 1600));
+          originalSize = data.byteLength;
+        } else if (originalSize > 2 * 1024 * 1024) {
+          data = await downsampleImage(data, Math.min(maxImageSize, 2000));
+          originalSize = data.byteLength;
+        }
+      } catch (error) {
+        console.warn('[compressImage] Downsampling failed:', error);
+      }
+    }
+    
     const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
     let cached = null;
     try {
       cached = imageCache.get(cacheKey);
       if (cached) {
-        console.log('[compressImage] Using cached result');
         return cached;
       }
     } catch (e) {}
     
     if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-      console.log('[compressImage] Skipping small image');
-      return { data, format: 'original', compressionMethod: 'skipped-small', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 } };
+      return { data, format: 'original', compressionMethod: 'skipped-small', originalSize, compressedSize: originalSize, originalDimensions: dimensions, finalDimensions: dimensions };
     }
     
-    let format = await detectFormat(data);
-    console.log('[compressImage] Detected format:', format);
+    const shouldSkipEnhancement = 
+      totalPixels > 500000 || 
+      originalSize > 4 * 1024 * 1024 || 
+      format === 'gif' || 
+      format === 'unknown';
     
-    // 首先进行图像增强
-    console.log('[compressImage] Enhancing image');
-    data = await enhanceImage(data, format);
+    if (!shouldSkipEnhancement) {
+      try {
+        data = await enhanceImage(data, format);
+      } catch (error) {
+        console.warn('[compressImage] Enhancement failed:', error);
+      }
+    }
     
-    // 格式转换策略
     if (allowFormatConversion && ['bmp', 'tiff'].includes(format)) {
-      console.log('[compressImage] Converting format from', format, 'to png');
-      data = await compressImageWithFFmpeg(data, 1, 'png');
-      format = 'png';
+      try {
+        data = await compressImageWithFFmpeg(data, 1, 'png');
+        format = 'png';
+      } catch (error) {
+        console.warn('[compressImage] Format conversion failed:', error);
+      }
     }
     
     if (format === 'unknown' || format === 'gif') {
-      console.log('[compressImage] Skipping unsupported format:', format);
-      return { data, format: format || 'original', compressionMethod: 'skipped-format', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 } };
+      return { data, format: format || 'original', compressionMethod: 'skipped-format', originalSize, compressedSize: originalSize, originalDimensions: dimensions, finalDimensions: dimensions };
     }
     
-    // PNG无Alpha时考虑转换格式并择优
+    const shouldUseConservativeCompression = 
+      totalPixels > 1000000 || 
+      originalSize > 2 * 1024 * 1024;
+    
     let bestResult = null;
     if (format === 'png' && allowFormatConversion) {
       let hasAlpha = false;
       try {
         hasAlpha = await checkAlphaChannel(data);
-        console.log('[compressImage] PNG alpha check:', hasAlpha);
       } catch (error) {
         console.warn('[compressImage] PNG alpha check failed, assuming alpha:', error);
         hasAlpha = true;
       }
       
       if (!hasAlpha) {
-        console.log('[compressImage] PNG without alpha, trying multiple formats');
         const results = [];
         
-        // 优先尝试WebP
-        console.log('[compressImage] Trying WebP compression first');
-        let webpQuality = await adjustQualityByContent(data, 'webp', quality * 1.1);
-        let webpData = await compressImageWithFFmpeg(data, webpQuality, 'webp');
-        results.push({ data: webpData, format: 'webp' });
-        
-        // 如果WebP压缩效果不理想，尝试其他格式
-        if (webpData.length > originalSize * 0.9) { // 从0.8改为0.9
-          // 尝试PNG压缩
-          console.log('[compressImage] Trying PNG compression');
-          const pngQuality = await adjustQualityByContent(data, 'png', quality);
-          const pngData = await compressImageWithFFmpeg(data, pngQuality, 'png');
-          results.push({ data: pngData, format: 'png' });
+        try {
+          if (shouldUseConservativeCompression) {
+            const jpegQuality = 0.95;
+            const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
+            results.push({ data: jpegData, format: 'jpeg' });
+          } else {
+            let webpQuality = await adjustQualityByContent(data, 'webp', quality * 1.2);
+            let webpData = await compressImageWithFFmpeg(data, webpQuality, 'webp');
+            results.push({ data: webpData, format: 'webp' });
+            
+            if (webpData.length > originalSize * 0.95) {
+              try {
+                const pngQuality = await adjustQualityByContent(data, 'png', quality);
+                const pngData = await compressImageWithFFmpeg(data, pngQuality, 'png');
+                results.push({ data: pngData, format: 'png' });
+              } catch (error) {
+                console.warn('[compressImage] PNG compression failed:', error);
+              }
+              
+              try {
+                const jpegQuality = await adjustQualityByContent(data, 'jpeg', quality);
+                const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
+                results.push({ data: jpegData, format: 'jpeg' });
+              } catch (error) {
+                console.warn('[compressImage] JPEG compression failed:', error);
+              }
+            }
+          }
           
-          // 尝试JPEG压缩
-          console.log('[compressImage] Trying JPEG compression');
-          const jpegQuality = await adjustQualityByContent(data, 'jpeg', quality);
-          const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
-          results.push({ data: jpegData, format: 'jpeg' });
+          if (results.length > 0) {
+            bestResult = results.reduce((a, b) => (a.data.length < b.data.length ? a : b));
+            console.log(`[compressImage] ${bestResult.format}: ${originalSize} -> ${bestResult.data.length} bytes`);
+          }
+        } catch (error) {
+          console.warn('[compressImage] Format optimization failed:', error);
         }
-        
-        bestResult = results.reduce((a, b) => (a.data.length < b.data.length ? a : b));
-        console.log(`[compressImage] Best format: ${bestResult.format}, orig=${originalSize}, comp=${bestResult.data.length}`);
       }
     }
     
     if (!bestResult) {
-      console.log(`[compressImage] Compressing as ${format}`);
-      // 使用智能质量调整
-      const adjustedQuality = await adjustQualityByContent(data, format, quality);
-      let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
-      
-      // 如果压缩效果不好，尝试额外降低质量
-      if (compressedData.length > originalSize * 0.9) { // 从0.85改为0.9
-        console.log('[compressImage] Poor compression, trying lower quality');
-        const lowerQuality = adjustedQuality * 0.9; // 从0.8改为0.9
-        const recompressedData = await compressImageWithFFmpeg(data, lowerQuality, format);
+      try {
+        const adjustedQuality = shouldUseConservativeCompression ? 0.95 : await adjustQualityByContent(data, format, quality);
+        let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
         
-        if (recompressedData.length < compressedData.length) {
-          console.log('[compressImage] Lower quality compression successful');
-          compressedData = recompressedData;
+        if (compressedData.length > originalSize * 0.95) {
+          try {
+            const higherQuality = Math.min(1, adjustedQuality * 1.1);
+            const recompressedData = await compressImageWithFFmpeg(data, higherQuality, format);
+            
+            if (recompressedData.length < compressedData.length) {
+              compressedData = recompressedData;
+            }
+          } catch (error) {
+            console.warn('[compressImage] Recompression failed:', error);
+          }
         }
+        
+        bestResult = { data: compressedData, format };
+        console.log(`[compressImage] ${format}: ${originalSize} -> ${compressedData.length} bytes`);
+      } catch (error) {
+        console.warn('[compressImage] Compression failed:', error);
+        bestResult = { data, format };
       }
-      
-      bestResult = { data: compressedData, format };
-      console.log(`[compressImage] Final compression: ${format}, orig=${originalSize}, comp=${compressedData.length}`);
     }
     
     const result = {
@@ -675,15 +783,24 @@ export async function compressImage(data, options = {}) {
       compressionMethod: 'ffmpeg',
       originalSize: originalSize,
       compressedSize: bestResult.data.length,
-      originalDimensions: { width: 0, height: 0 },
-      finalDimensions: { width: 0, height: 0 }
+      originalDimensions: dimensions,
+      finalDimensions: dimensions
     };
     
     try { imageCache.set(cacheKey, result); } catch (e) {}
     return result;
   } catch (error) {
     console.error('[compressImage] Error:', error);
-    return { data, format: 'original', compressionMethod: 'error', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 }, error: error.message };
+    return { 
+      data, 
+      format: format || 'original', 
+      compressionMethod: 'error', 
+      originalSize, 
+      compressedSize: originalSize, 
+      originalDimensions: dimensions, 
+      finalDimensions: dimensions, 
+      error: error.message 
+    };
   }
 }
 

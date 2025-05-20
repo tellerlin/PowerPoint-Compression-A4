@@ -94,32 +94,12 @@
       const createFFmpegFn = window.createFFmpeg || window.FFmpeg?.createFFmpeg;
       console.log('[AudioCompressor] Creating FFmpeg instance');
       ffmpeg = createFFmpegFn({
-        log: true,
+        log: false,
         corePath: '/ffmpeg/ffmpeg-core.js',
         logger: ({ message }) => {
           // Only log errors and progress information
           if (message.includes('Error') || message.includes('error')) {
             console.error('[FFmpeg]', message);
-          } else if (message.includes('time=') || message.includes('frame=')) {
-            console.log('[FFmpeg]', message);
-            // Update progress based on FFmpeg output
-            if (message.includes('time=')) {
-              const timeMatch = message.match(/time=(\d+):(\d+):(\d+\.\d+)/);
-              if (timeMatch) {
-                const hours = parseInt(timeMatch[1]);
-                const minutes = parseInt(timeMatch[2]);
-                const seconds = parseFloat(timeMatch[3]);
-                const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-                
-                // Assuming 1 hour 12 minutes (4320 seconds) as total duration
-                const totalDuration = 4320;
-                // Scale progress from 1% to 98% to avoid overlap with initial and final states
-                const progress = 1 + (totalSeconds / totalDuration) * 97;
-                
-                compressionProgress.percentage = progress;
-                compressionProgress.status = `Processing: ${Math.round(progress)}%`;
-              }
-            }
           }
         }
       });
