@@ -245,15 +245,18 @@ async function adjustQualityByContent(data, format, baseQuality) {
     
     // 根据复杂度调整质量
     const complexityRatio = complexity / (bitmap.width * bitmap.height);
+    let adjustedQuality = baseQuality;
+    
     if (complexityRatio > 0.3) {
-      // 复杂图片使用更高质量
-      return baseQuality * 1.2;
+      // 复杂图片使用更高质量，但不超过100
+      adjustedQuality = Math.min(baseQuality * 1.2, 1.0);
     } else if (complexityRatio < 0.1) {
       // 简单图片可以适当降低质量
-      return baseQuality * 0.9;
+      adjustedQuality = baseQuality * 0.9;
     }
     
-    return baseQuality;
+    // 确保quality值在0-100范围内
+    return Math.min(Math.max(adjustedQuality, 0), 1.0);
   } catch (error) {
     console.warn('[adjustQualityByContent] Error:', error);
     return baseQuality;
