@@ -121,37 +121,28 @@ async function compressImageWithFFmpeg(data, quality, format) {
       ffmpeg.FS('writeFile', inputFileName, data);
       const args = ['-i', inputFileName];
       
-      // 添加智能降噪和锐化滤镜
-      const filterComplex = [];
+      // 使用固定的滤镜参数
+      const filterComplex = [
+        'nlmeans=s=3:p=3:r=5',
+        'unsharp=3:3:0.5:3:3:0.5',
+        'eq=contrast=1.05:brightness=0.01:saturation=1.05'
+      ].join(',');
       
-      // 智能降噪 - 使用更稳定的参数
-      filterComplex.push('nlmeans=s=7:p=7:r=11');
-      
-      // 智能锐化 - 使用更保守的参数
-      filterComplex.push('unsharp=3:3:1:3:3:0.3');
-      
-      // 应用滤镜
-      if (filterComplex.length > 0) {
-        args.push('-vf', filterComplex.join(','));
-      }
+      args.push('-vf', filterComplex);
       
       if (format === 'png') {
-        // 使用基本的PNG压缩设置
-        args.push('-c:v', 'png', '-compression_level', '4', '-threads', '1');
+        // 使用更激进的PNG压缩设置
+        args.push('-c:v', 'png', '-compression_level', '9', '-threads', '1');
+        args.push('-pred', 'mixed'); // 使用混合预测器
         args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
       } else if (format === 'jpeg' || format === 'jpg') {
-        // 使用基本的JPEG压缩设置
-        const qualityValue = data.length > 1024 * 1024 ? 
-          Math.round(quality * 75) : 
-          Math.round(quality * 90);
-        args.push('-c:v', 'mjpeg', '-q:v', qualityValue.toString(), '-threads', '1');
+        // 使用固定的JPEG质量
+        args.push('-c:v', 'mjpeg', '-q:v', quality.toString(), '-threads', '1');
         args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
       } else if (format === 'webp') {
-        // 使用基本的WebP压缩设置
-        const qualityValue = Math.round(quality * 90);
-        args.push('-c:v', 'libwebp', '-quality', qualityValue.toString());
-        args.push('-lossless', '0', '-method', '3', '-threads', '1');
-        // 添加YUV颜色空间转换选项
+        // 使用固定的WebP压缩设置
+        args.push('-c:v', 'libwebp', '-quality', quality.toString());
+        args.push('-lossless', '0', '-method', '4', '-threads', '1');
         args.push('-pix_fmt', 'yuv420p');
         args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
       }
@@ -202,8 +193,8 @@ async function compressImageWithFFmpeg(data, quality, format) {
 
       console.log(`[compressImageWithFFmpeg] Compression result: ${format}, ${data.length} -> ${outputData.length}`);
       
-      // 检查压缩效果，提高阈值
-      if (outputData.length >= data.length * 0.95) { // 从1.0改为0.95
+      // 检查压缩效果
+      if (outputData.length >= data.length * 0.95) {
         console.log(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length * 0.95}`);
         return data;
       }
@@ -243,15 +234,85 @@ async function enhanceImage(data, format) {
     // 写入输入文件
     ffmpeg.FS('writeFile', inputFileName, data);
     
-    // 构建增强滤镜 - 使用更兼容的参数
+    // 直接使用 ImageBitmap 获取图片尺寸
+    let dimensions = { width: 0, height: 0 };
+    try {
+      const blob = new Blob([data], { type: `image/${format}` });
+      const bitmap = await createImageBitmap(blob);
+      dimensions = {
+        width: bitmap.width,
+        height: bitmap.height
+      };
+      console.log(`[enhanceImage] Got dimensions from ImageBitmap: ${dimensions.width}x${dimensions.height}`);
+      bitmap.close && bitmap.close();
+    } catch (error) {
+      console.warn('[enhanceImage] Failed to get dimensions from ImageBitmap:', error);
+      // 如果获取失败，使用默认值
+      dimensions = { width: 1000, height: 1000 };
+      console.warn('[enhanceImage] Using default dimensions');
+    }
+    
+    // 根据图片尺寸直接设置滤镜参数
+    const totalPixels = dimensions.width * dimensions.height;
+    
+    // 根据图片尺寸直接设置滤镜参数
+    let nlmeansParams, unsharpParams, colorParams;
+    
+    if (totalPixels > 4000000) { // 2000x2000
+      // 超大图片使用最小参数
+      nlmeansParams = { s: 2, p: 2, r: 3 };
+      unsharpParams = { luma: 3, chroma: 3, amount: 0.3 };
+      colorParams = {
+        contrast: 1.02,
+        brightness: 0.005,
+        saturation: 1.02,
+        balance: 0.02,
+        gamma: 1.02
+      };
+    } else if (totalPixels > 1000000) { // 1000x1000
+      // 大图片使用中等参数
+      nlmeansParams = { s: 3, p: 3, r: 5 };
+      unsharpParams = { luma: 5, chroma: 5, amount: 0.5 };
+      colorParams = {
+        contrast: 1.03,
+        brightness: 0.008,
+        saturation: 1.03,
+        balance: 0.03,
+        gamma: 1.03
+      };
+    } else {
+      // 小图片使用标准参数
+      nlmeansParams = { s: 5, p: 5, r: 9 };
+      unsharpParams = { luma: 7, chroma: 7, amount: 1.0 };
+      colorParams = {
+        contrast: 1.05,
+        brightness: 0.01,
+        saturation: 1.05,
+        balance: 0.05,
+        gamma: 1.05
+      };
+    }
+    
+    // 构建滤镜链
     const filterComplex = [
-      // 智能降噪 - 使用更兼容的参数
-      'nlmeans=s=5:p=5:r=10',
-      // 智能锐化 - 使用更保守的参数
-      'unsharp=3:3:1:3:3:0.5',
-      // 细节增强 - 使用更保守的参数
-      'eq=contrast=1.05:brightness=0.02:saturation=1.05'
+      // 降噪
+      `nlmeans=s=${nlmeansParams.s}:p=${nlmeansParams.p}:r=${nlmeansParams.r}`,
+      // 锐化
+      `unsharp=${unsharpParams.luma}:${unsharpParams.luma}:${unsharpParams.amount}:${unsharpParams.chroma}:${unsharpParams.chroma}:${unsharpParams.amount}`,
+      // 色彩增强
+      `eq=contrast=${colorParams.contrast}:brightness=${colorParams.brightness}:saturation=${colorParams.saturation}`,
+      // 色彩平衡
+      `colorbalance=rs=${colorParams.balance}:gs=${colorParams.balance}:bs=${colorParams.balance}:rm=${colorParams.balance}:gm=${colorParams.balance}:bm=${colorParams.balance}:rh=${colorParams.balance}:gh=${colorParams.balance}:bh=${colorParams.balance}`,
+      // Gamma调整
+      `eq=gamma=${colorParams.gamma}:gamma_r=${colorParams.gamma}:gamma_g=${colorParams.gamma}:gamma_b=${colorParams.gamma}`
     ].join(',');
+
+    console.log(`[enhanceImage] Processing image ${dimensions.width}x${dimensions.height}`);
+    console.log(`[enhanceImage] Using filter parameters:`, {
+      nlmeans: nlmeansParams,
+      unsharp: unsharpParams,
+      color: colorParams
+    });
 
     const args = [
       '-i', inputFileName,
