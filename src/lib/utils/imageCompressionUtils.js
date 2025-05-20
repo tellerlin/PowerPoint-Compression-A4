@@ -1,6 +1,17 @@
 // Shared image compression utility functions
 import { checkAlphaChannel } from './image';
 
+// 添加 hashCode 函数
+export function hashCode(data) {
+  let hash = 0;
+  for (let i = 0; i < data.length; i++) {
+    const char = data[i];
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(16);
+}
+
 export const ImageType = {
   PHOTO: 'photo',
   DIAGRAM: 'diagram',

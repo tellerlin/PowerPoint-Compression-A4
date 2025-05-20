@@ -46,46 +46,13 @@ export default defineConfig({
   server: {
     fs: {
       strict: false,
-      allow: ['src']
+      allow: ['src', 'static']
     },
     headers: {
       'Cross-Origin-Embedder-Policy': 'require-corp',
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cross-Origin-Isolation': 'require-corp'
-      // CSP头已移除
-    },
-    proxy: {
-      '/@ffmpeg': {
-        target: 'https://unpkg.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/@ffmpeg/, '/@ffmpeg'),
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
-            proxyReq.setHeader('Origin', 'https://unpkg.com');
-          });
-        }
-      },
-      '/wx': {
-        target: 'https://res.wx.qq.com',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/wx/, ''),
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
-            proxyReq.setHeader('Origin', 'https://res.wx.qq.com');
-            proxyReq.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-          });
-        },
-        onProxyRes: (proxyRes, req, res) => {
-          proxyRes.headers['cross-origin-resource-policy'] = 'cross-origin';
-          proxyRes.headers['access-control-allow-origin'] = '*';
-          proxyRes.headers['access-control-allow-methods'] = 'GET, OPTIONS';
-          proxyRes.headers['access-control-allow-headers'] = 'Content-Type';
-          proxyRes.headers['cross-origin-embedder-policy'] = 'require-corp';
-          proxyRes.headers['cross-origin-opener-policy'] = 'same-origin';
-          proxyRes.headers['cross-origin-isolation'] = 'require-corp';
-        }
-      }
     }
   },
   ssr: {
@@ -98,8 +65,7 @@ export default defineConfig({
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Resource-Policy': 'cross-origin',
       'Cross-Origin-Isolation': 'require-corp'
-      // CSP头已移除
     }
   },
-  assetsInclude: ['**/*.woff2', '**/*.woff', '**/*.ttf', '**/*.eot', '**/*.otf']
+  assetsInclude: ['**/*.woff2', '**/*.woff', '**/*.ttf', '**/*.eot', '**/*.otf', '**/*.wasm']
 });
