@@ -121,18 +121,18 @@ async function compressImageWithFFmpeg(data, quality, format) {
       
       if (format === 'png') {
         // 使用基本的PNG压缩设置
-        args.push('-c:v', 'png', '-compression_level', '4');
+        args.push('-c:v', 'png', '-compression_level', '4', '-threads', '1');
       } else if (format === 'jpeg' || format === 'jpg') {
         // 使用基本的JPEG压缩设置
         const qualityValue = data.length > 1024 * 1024 ? 
           Math.round(quality * 75) : 
           Math.round(quality * 90);
-        args.push('-c:v', 'mjpeg', '-q:v', qualityValue.toString());
+        args.push('-c:v', 'mjpeg', '-q:v', qualityValue.toString(), '-threads', '1');
       } else if (format === 'webp') {
         // 使用基本的WebP压缩设置
         const qualityValue = Math.round(quality * 90);
         args.push('-c:v', 'libwebp', '-quality', qualityValue.toString());
-        args.push('-lossless', '0', '-method', '3');
+        args.push('-lossless', '0', '-method', '3', '-threads', '1');
       }
       
       // 添加基本设置
@@ -150,7 +150,13 @@ async function compressImageWithFFmpeg(data, quality, format) {
       args.push(outputFileName);
       
       console.log(`[compressImageWithFFmpeg] Running FFmpeg for ${format} with args:`, args);
-      await ffmpeg.run(...args);
+      
+      try {
+        await ffmpeg.run(...args);
+      } catch (error) {
+        console.warn(`[compressImageWithFFmpeg] FFmpeg error: ${error.message}`);
+        return data;
+      }
       
       const files = ffmpeg.FS('readdir', '/');
       if (!files.includes(outputFileName)) {
