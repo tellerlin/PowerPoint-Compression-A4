@@ -1,6 +1,32 @@
+# robots.txt for byteslim.com
 User-agent: *
 Allow: /
+Allow: /editor
+Allow: /features
+Allow: /docs
+Allow: /examples
+Allow: /blog
+Allow: /pricing
+Allow: /contact
+
+# Disallow technical and private pages
 Disallow: /api/
 Disallow: /admin/
+Disallow: /private/
+Disallow: /_/
+Disallow: /.svelte-kit/
+Disallow: /.vite/
+Disallow: /node_modules/
 
+# AI Crawler Rules
+User-agent: GPTBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+# Host
+Host: byteslim.com
+
+# Sitemap
 Sitemap: https://byteslim.com/sitemap.xml
