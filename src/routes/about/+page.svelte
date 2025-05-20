@@ -112,7 +112,7 @@
           </p>
 
           <div style="text-align: center;">
-            <a href="https://buymeacoffee.com/byteslim" target="_blank" style="color: lightblue; text-decoration: underline;">https://buymeacoffee.com/byteslim</a>
+            <a href="https://buymeacoffee.com/byteslim" target="_blank" class="text-primary hover:underline">https://buymeacoffee.com/byteslim</a>
           </div>
 
           <div class="flex justify-center space-x-24 items-start">

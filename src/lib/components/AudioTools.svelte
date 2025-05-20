@@ -28,20 +28,20 @@
 
 <Container size="lg" class_="py-8">
   <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-gray-100">Byte Slim</h1>
-    <p class="text-gray-400">Choose a tool to get started</p>
+    <h1 class="text-3xl font-bold mb-2 text-text">Byte Slim</h1>
+    <p class="text-muted">Choose a tool to get started</p>
   </div>
 
   <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
     {#each tools as tool}
       <a
         href={tool.path}
-        class="block p-6 bg-gray-800 rounded-lg hover:bg-gray-700 transition-colors"
+        class="block p-6 bg-surface rounded-lg hover:bg-surface-hover transition-colors"
       >
         <div class="flex items-start space-x-4">
           <div class="flex-shrink-0">
             <svg
-              class="w-8 h-8 text-blue-500"
+              class="w-8 h-8 text-primary"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -56,8 +56,8 @@
             </svg>
           </div>
           <div>
-            <h3 class="text-xl font-semibold text-gray-100 mb-2">{tool.name}</h3>
-            <p class="text-gray-400">{tool.description}</p>
+            <h3 class="text-xl font-semibold text-text mb-2">{tool.name}</h3>
+            <p class="text-muted">{tool.description}</p>
           </div>
         </div>
       </a>

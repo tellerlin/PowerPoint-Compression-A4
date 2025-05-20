@@ -68,8 +68,8 @@
     padding: 20px;
   }
   .sitemap-item {
-    background: #333; /* Deep gray color */
-    border: 1px solid #ddd;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
     padding: 15px;
     text-align: center;

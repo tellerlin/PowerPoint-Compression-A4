@@ -356,11 +356,6 @@
 </script>
 
 <Container size="lg" class_="py-8">
-  <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-text">Audio Trimmer</h1>
-    <p class="text-muted">Trim your audio files with precision</p>
-  </div>
-
   <div class="rounded-lg shadow-md p-6 mb-6 bg-surface">
     {#if !audioFile}
       <!-- File Upload Area -->
@@ -477,115 +472,85 @@
             </div>
           </div>
 
-          <!-- Time Input Fields -->
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label for="start-time-input" class="block text-sm text-muted mb-1">Start Time (seconds)</label>
-              <input
-                id="start-time-input"
-                type="number"
-                bind:value={trimSettings.startTime}
-                min="0"
-                max={trimSettings.endTime - 1}
-                step="0.1"
-                class="w-full px-3 py-2 bg-surface/80 text-text rounded-md border border-border"
-                on:input={(e) => handleTimeChange('start', parseFloat(e.target.value))}
-              />
-            </div>
-            <div>
-              <label for="end-time-input" class="block text-sm text-muted mb-1">End Time (seconds)</label>
-              <input
-                id="end-time-input"
-                type="number"
-                bind:value={trimSettings.endTime}
-                min={trimSettings.startTime + 1}
-                max={audioDuration}
-                step="0.1"
-                class="w-full px-3 py-2 bg-surface/80 text-text rounded-md border border-border"
-                on:input={(e) => handleTimeChange('end', parseFloat(e.target.value))}
-              />
-            </div>
+          <!-- Action Buttons -->
+          <div class="flex justify-center space-x-4">
+            <Button
+              on:click={processAudio}
+              disabled={isProcessing}
+              size="lg"
+              class="bg-blue-500 hover:bg-blue-600"
+            >
+              {isProcessing ? 'Processing...' : 'Trim Audio'}
+            </Button>
+            <Button
+              on:click={resetState}
+              variant="outline"
+              size="lg"
+            >
+              Reset
+            </Button>
           </div>
-        </div>
 
-        <!-- Action Buttons -->
-        <div class="flex justify-center space-x-4">
-          <Button
-            on:click={processAudio}
-            disabled={isProcessing}
-            size="lg"
-            class="bg-blue-500 hover:bg-blue-600"
-          >
-            {isProcessing ? 'Processing...' : 'Trim Audio'}
-          </Button>
-          <Button
-            on:click={resetState}
-            variant="outline"
-            size="lg"
-          >
-            Reset
-          </Button>
+          <!-- Progress/Error Display -->
+          {#if isProcessing || processingProgress.error || processingProgress.percentage === 100}
+            <div class="mt-4">
+              {#if processingProgress.error}
+                <Alert variant="destructive" title="Error">
+                  {processingProgress.error}
+                </Alert>
+              {:else if processingProgress.percentage === 100}
+                <!-- Completion interface -->
+                <div class="bg-surface/70 p-4 border border-primary/50 rounded-md animate-fade-in">
+                  <h3 class="font-bold text-lg text-primary mb-3 text-center">Audio Processing Complete!</h3>
+                  <div class="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 text-sm">
+                    <div>
+                      <p class="text-muted">Original Size:</p>
+                      <p class="font-medium text-text">{formatFileSize(processingProgress.stats.originalSize)}</p>
+                    </div>
+                    <div>
+                      <p class="text-muted">Processed Size:</p>
+                      <p class="font-medium text-text">{formatFileSize(processingProgress.stats.trimmedSize)}</p>
+                    </div>
+                    <div>
+                      <p class="text-muted">Space Saved:</p>
+                      <p class="font-medium text-primary">{formatFileSize(processingProgress.stats.savedSize)}</p>
+                    </div>
+                    <div>
+                      <p class="text-muted">Reduction:</p>
+                      <p class="font-medium text-primary">{processingProgress.stats.savedPercentage}%</p>
+                    </div>
+                  </div>
+                  <div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
+                    <a
+                      href={downloadUrl}
+                      download={downloadFileName}
+                      class="bg-primary text-white px-4 py-2 rounded hover:bg-primary/90 text-center flex items-center justify-center"
+                    >
+                      Download Processed File
+                    </a>
+                    <Button on:click={resetState} variant="outline" size="lg" classList="w-full sm:w-auto">
+                      Process Another File
+                    </Button>
+                  </div>
+                </div>
+              {:else}
+                <!-- 进度条 -->
+                <div class="bg-surface/70 p-4 rounded-lg">
+                  <div class="flex justify-between items-center mb-2">
+                    <span class="text-text">{processingProgress.status}</span>
+                    <span class="text-muted">{processingProgress.percentage}%</span>
+                  </div>
+                  <div class="w-full bg-border/50 rounded-full h-2">
+                    <div
+                      class="bg-primary h-2 rounded-full transition-all duration-300"
+                      style="width: {processingProgress.percentage}%"
+                    ></div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
         </div>
-
-        <!-- Progress/Error Display -->
-        {#if isProcessing || processingProgress.error || processingProgress.percentage === 100}
-          <div class="mt-4">
-            {#if processingProgress.error}
-              <Alert variant="destructive" title="Error">
-                {processingProgress.error}
-              </Alert>
-            {:else if processingProgress.percentage === 100}
-              <!-- Completion interface -->
-              <div class="bg-gray-700 p-4 border border-green-600 rounded-md animate-fade-in">
-                <h3 class="font-bold text-lg text-green-400 mb-3 text-center">Audio Processing Complete!</h3>
-                <div class="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 text-sm">
-                  <div>
-                    <p class="text-gray-400">Original Size:</p>
-                    <p class="font-medium text-gray-100">{formatFileSize(processingProgress.stats.originalSize)}</p>
-                  </div>
-                  <div>
-                    <p class="text-gray-400">Processed Size:</p>
-                    <p class="font-medium text-gray-100">{formatFileSize(processingProgress.stats.trimmedSize)}</p>
-                  </div>
-                  <div>
-                    <p class="text-gray-400">Space Saved:</p>
-                    <p class="font-medium text-green-400">{formatFileSize(processingProgress.stats.savedSize)}</p>
-                  </div>
-                  <div>
-                    <p class="text-gray-400">Reduction:</p>
-                    <p class="font-medium text-green-400">{processingProgress.stats.savedPercentage}%</p>
-                  </div>
-                </div>
-                <div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
-                  <a
-                    href={downloadUrl}
-                    download={downloadFileName}
-                    class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 text-center flex items-center justify-center"
-                  >
-                    Download Processed File
-                  </a>
-                  <Button on:click={resetState} variant="outline" size="lg" classList="w-full sm:w-auto">
-                    Process Another File
-                  </Button>
-                </div>
-              </div>
-            {:else}
-              <!-- 进度条 -->
-              <div class="bg-gray-700 p-4 rounded-lg">
-                <div class="flex justify-between items-center mb-2">
-                  <span class="text-gray-200">{processingProgress.status}</span>
-                  <span class="text-gray-400">{processingProgress.percentage}%</span>
-                </div>
-                <div class="w-full bg-gray-600 rounded-full h-2">
-                  <div
-                    class="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                    style="width: {processingProgress.percentage}%"
-                  ></div>
-                </div>
-              </div>
-            {/if}
-          </div>
-        {/if}
       </div>
     {/if}
   </div>

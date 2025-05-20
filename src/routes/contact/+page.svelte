@@ -23,7 +23,7 @@
               </svg>
               <a 
                   href="mailto:info@byteslim.com" 
-                  class="text-2xl text-white hover:text-blue-800 hover:underline"
+                  class="text-2xl text-text hover:text-primary hover:underline"
               >
                   info@byteslim.com
               </a>

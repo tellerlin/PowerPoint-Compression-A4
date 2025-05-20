@@ -31,11 +31,7 @@
   let loadStarted = false;
   let shouldCancel = false;
   let currentFFmpegProcess = null;
-  let trimSettings = {
-    startTime: 0,
-    endTime: 0,
-    isEnabled: false
-  };
+  let audioFile = null;
   let compressionProgress = {
     percentage: 0,
     status: '',
@@ -94,10 +90,27 @@
       const createFFmpegFn = window.createFFmpeg || window.FFmpeg?.createFFmpeg;
       console.log('[AudioCompressor] Creating FFmpeg instance');
       ffmpeg = createFFmpegFn({
-        log: false,
+        log: true,
         corePath: '/ffmpeg/ffmpeg-core.js',
         logger: ({ message }) => {
-          // Only log errors and progress information
+          // Monitor progress information
+          if (message.includes('time=')) {
+            const timeMatch = message.match(/time=(\d+):(\d+):(\d+.\d+)/);
+            if (timeMatch) {
+              const hours = parseInt(timeMatch[1]);
+              const minutes = parseInt(timeMatch[2]);
+              const seconds = parseFloat(timeMatch[3]);
+              const currentTime = hours * 3600 + minutes * 60 + seconds;
+              
+              // Calculate progress percentage
+              if (audioDuration > 0) {
+                const progress = Math.min(95, Math.max(5, (currentTime / audioDuration) * 90));
+                compressionProgress.percentage = Math.round(progress * 10) / 10;
+                compressionProgress.status = `Compressing... ${Math.round(progress)}%`;
+              }
+            }
+          }
+          // Log error messages
           if (message.includes('Error') || message.includes('error')) {
             console.error('[FFmpeg]', message);
           }
@@ -165,11 +178,6 @@
       size: f.size
     })));
     
-    // Reset trim settings
-    trimSettings.startTime = 0;
-    trimSettings.endTime = 0;
-    audioDuration = 0;
-    
     // Create new file objects with additional properties
     const processedFiles = selectedFiles.map(file => {
       const url = URL.createObjectURL(file);
@@ -185,6 +193,7 @@
     });
     
     files = [...files, ...processedFiles];
+    audioFile = processedFiles[0];
     
     // Set initial time
     if (files.length > 0) {
@@ -195,10 +204,6 @@
       audio.addEventListener('loadedmetadata', () => {
         console.log('[AudioCompressor] Audio metadata loaded, duration:', audio.duration);
         audioDuration = audio.duration;
-        
-        // Set end time to audio duration
-        trimSettings.endTime = audio.duration;
-        console.log('[AudioCompressor] Set trimSettings.endTime =', trimSettings.endTime);
       });
       
       // Ensure loading starts
@@ -215,7 +220,8 @@
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    const ms = Math.round((seconds % 1) * 10) / 10; // 保留1位小数
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().split('.')[1] || '0'}`;
   }
 
   // 将秒数转换为FFmpeg兼容的时间字符串
@@ -225,7 +231,7 @@
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 1000);
+    const ms = Math.round((seconds % 1) * 1000); // 转换为毫秒
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   }
 
@@ -245,19 +251,6 @@
     if (newFiles.length === 0) {
       console.log('[AudioCompressor] No files to process');
       return;
-    }
-    
-    // Check if trim settings are valid
-    if (trimSettings.isEnabled) {
-      if (isNaN(trimSettings.startTime) || isNaN(trimSettings.endTime)) {
-        console.error('[AudioCompressor] Invalid trim settings, disabling trimming');
-        alert('Invalid trim settings. Please check the start and end times.');
-        trimSettings.isEnabled = false;
-      } else if (trimSettings.startTime >= trimSettings.endTime) {
-        console.error('[AudioCompressor] Start time must be less than end time');
-        alert('Start time must be less than end time.');
-        return;
-      }
     }
     
     isProcessing = true;
@@ -301,26 +294,6 @@
           if (shouldCancel) break;
           console.log('[AudioCompressor] Executing FFmpeg command');
           let args = ['-i', inFileName];
-          
-          // Add trim settings
-          if (trimSettings.isEnabled && 
-              !isNaN(trimSettings.startTime) && 
-              !isNaN(trimSettings.endTime) && 
-              trimSettings.endTime > trimSettings.startTime) {
-            
-            const startTimeStr = formatFFmpegTime(trimSettings.startTime);
-            const endTimeStr = formatFFmpegTime(trimSettings.endTime);
-            
-            console.log('[AudioCompressor] Adding trim settings:', {
-              startTime: trimSettings.startTime,
-              endTime: trimSettings.endTime,
-              startTimeStr,
-              endTimeStr
-            });
-            
-            args.push('-ss', startTimeStr);
-            args.push('-to', endTimeStr);
-          }
           
           // Add compression settings
           args.push('-b:a', '40k', outFileName);
@@ -485,6 +458,7 @@
     
     // Reset state
     files = [];
+    audioFile = null;
     isProcessing = false;
     compressionProgress = {
       percentage: 0,
@@ -507,141 +481,115 @@
 </script>
 
 <Container size="lg" class_="py-8">
-  <div class="text-center mb-8">
-    <h1 class="text-3xl font-bold mb-2 text-text">Audio Compressor</h1>
-    <p class="text-muted">Compress your audio files for smaller file sizes</p>
-  </div>
-
   <div class="rounded-lg shadow-md p-6 mb-6 bg-surface">
-    <!-- File Upload Area -->
-    <div class="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
-      <input
-        type="file"
-        id="audio-file-upload"
-        accept="audio/*"
-        class="hidden"
-        on:change={handleFileSelect}
-      />
-      <label for="audio-file-upload" class="cursor-pointer">
-        <div class="flex flex-col items-center justify-center">
-          <svg class="w-12 h-12 text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
-          </svg>
-          <p class="mt-2 text-base text-text font-semibold">Click or drag audio file here</p>
-          <p class="text-xs text-muted mt-1">Supports MP3, WAV, OGG formats</p>
-        </div>
-      </label>
-    </div>
-    
-    {#if showLoadingMessage}
-      <div class="mt-8 text-text">
-        <p class="text-center">
-          Loading audio compression tool...
-        </p>
-        <p class="text-center mt-4 text-muted">
-          If the tool doesn't load within a few seconds, please try refreshing the page.
-        </p>
-      </div>
-    {/if}
-
-    {#if files.length > 0}
-      <div class="mt-8 space-y-4">
-        {#if compressionProgress.error}
-          <Alert variant="destructive" title="Compression Error">
-            {compressionProgress.error}
-            <div class="mt-4">
-              <Button on:click={resetCompression} variant="outline" class="w-full sm:w-auto">Try Again</Button>
-            </div>
-          </Alert>
-        {:else}
-          <!-- Progress Bar -->
-          <div class="mb-2">
-            <div class="flex justify-between items-center mb-1">
-              <p class="font-medium text-sm text-text">{compressionProgress.status || 'Processing...'}</p>
-              {#if compressionProgress.percentage > 0 && compressionProgress.percentage < 100}
-                <p class="text-xs text-muted">Progress: {Math.round(compressionProgress.percentage)}%</p>
-              {/if}
-            </div>
-            <div class="w-full bg-border/50 rounded-full h-2.5 overflow-hidden">
-              <div
-                class="bg-gradient-to-r from-primary to-secondary h-2.5 rounded-full transition-all duration-300 ease-out"
-                style="width: {compressionProgress.percentage || 0}%"
-              ></div>
-            </div>
+    {#if !audioFile}
+      <!-- File Upload Area -->
+      <div class="border-2 border-dashed border-border rounded-lg p-8 text-center hover:border-primary transition-colors">
+        <input
+          type="file"
+          id="file-upload"
+          accept="audio/*"
+          on:change={handleFileSelect}
+          class="hidden"
+        />
+        <label for="file-upload" class="cursor-pointer">
+          <div class="flex flex-col items-center justify-center">
+            <svg class="w-12 h-12 text-muted mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+            </svg>
+            <p class="mt-2 text-base text-text font-semibold">Click or drag audio file here</p>
+            <p class="text-xs text-muted mt-1">Supports MP3, WAV, OGG formats</p>
           </div>
+        </label>
+      </div>
+    {:else}
+      <!-- Audio Player and Controls -->
+      <div class="space-y-6">
+        <!-- Audio Player -->
+        <div class="bg-surface/70 border border-border p-4 rounded-lg">
+          <audio
+            controls
+            class="w-full"
+            src={audioFile.originalUrl}
+            bind:this={audioPlayer}
+            on:timeupdate={() => {
+              currentTime = audioPlayer.currentTime;
+            }}
+          ></audio>
+        </div>
 
-          <!-- File List -->
-          <div class="space-y-4">
-            {#each files as file, index}
-              <div class="flex items-center justify-between p-4 bg-surface/50 rounded-lg">
-                <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium text-text truncate">{file.name || 'Unknown file'}</p>
-                  {#if file.compressed}
-                    <div class="mt-2 space-y-1">
-                      <div class="flex items-center justify-between">
-                        <span class="text-sm text-muted">Original size:</span>
-                        <span class="text-sm font-medium">{formatFileSize(file.originalSize)}</span>
-                      </div>
-                      <div class="flex items-center justify-between">
-                        <span class="text-sm text-muted">Compressed size:</span>
-                        <span class="text-sm font-medium text-green-400">{formatFileSize(file.compressedSize)}</span>
-                      </div>
-                      <div class="flex items-center justify-between">
-                        <span class="text-sm text-muted">Space saved:</span>
-                        <span class="text-sm font-medium text-green-400">
-                          {formatFileSize(file.originalSize - file.compressedSize)} 
-                          ({((file.originalSize - file.compressedSize) / file.originalSize * 100).toFixed(1)}%)
-                        </span>
-                      </div>
-                    </div>
-                  {:else}
-                    <p class="text-xs text-muted mt-1">
-                      Original size: {formatFileSize(file.originalSize || file.size)}
-                    </p>
-                  {/if}
+        <!-- Progress Bar -->
+        {#if isProcessing || compressionProgress.percentage > 0}
+          <div class="bg-surface/70 border border-border p-4 rounded-lg">
+            <div class="mb-2">
+              <div class="flex justify-between items-center mb-1">
+                <p class="font-medium text-sm text-text">{compressionProgress.status || 'Processing...'}</p>
+                {#if compressionProgress.percentage > 0 && compressionProgress.percentage < 100}
+                  <p class="text-xs text-muted">{compressionProgress.percentage}%</p>
+                {/if}
+              </div>
+              <div class="w-full bg-border/50 rounded-full h-2.5 overflow-hidden">
+                <div
+                  class="bg-gradient-to-r from-primary to-secondary h-2.5 rounded-full transition-all duration-300 ease-out"
+                  style="width: {compressionProgress.percentage}%"
+                ></div>
+              </div>
+            </div>
+
+            {#if compressionProgress.error}
+              <Alert variant="destructive" title="Error">
+                {compressionProgress.error}
+              </Alert>
+            {/if}
+
+            {#if compressionProgress.percentage === 100 && !compressionProgress.error}
+              <div class="mt-4 p-4 bg-surface/70 border border-primary/50 rounded-md animate-fade-in">
+                <h3 class="font-bold text-lg text-primary mb-3 text-center">Compression Complete!</h3>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-2 mb-4 text-sm">
+                  <div>
+                    <p class="text-muted">Original Size:</p>
+                    <p class="font-medium text-text">{formatFileSize(compressionProgress.stats.originalSize)}</p>
+                  </div>
+                  <div>
+                    <p class="text-muted">Compressed Size:</p>
+                    <p class="font-medium text-text">{formatFileSize(compressionProgress.stats.compressedSize)}</p>
+                  </div>
+                  <div>
+                    <p class="text-muted">Space Saved:</p>
+                    <p class="font-medium text-primary">{formatFileSize(compressionProgress.stats.savedSize)}</p>
+                  </div>
+                  <div>
+                    <p class="text-muted">Reduction:</p>
+                    <p class="font-medium text-primary">{compressionProgress.stats.savedPercentage}%</p>
+                  </div>
                 </div>
-                <div class="flex items-center space-x-2 ml-4">
-                  {#if file.compressed}
-                    <Button
-                      variant="default"
-                      class="px-6"
-                      on:click={() => {
+                <div class="flex flex-col sm:flex-row gap-3 justify-center mt-4">
+                  <Button 
+                    on:click={() => {
+                      const fileIndex = files.findIndex(f => f.compressed);
+                      if (fileIndex !== -1 && files[fileIndex].compressedUrl) {
                         const link = document.createElement('a');
-                        link.href = file.compressedUrl;
-                        link.download = file.compressedName;
+                        link.href = files[fileIndex].compressedUrl;
+                        link.download = files[fileIndex].compressedName;
+                        document.body.appendChild(link);
                         link.click();
-                      }}
-                    >
-                      Download Compressed File
-                    </Button>
-                  {:else if isProcessing}
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      on:click={resetCompression}
-                    >
-                      Cancel
-                    </Button>
-                  {:else}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      on:click={() => removeFile(index)}
-                    >
-                      Remove
-                    </Button>
-                  {/if}
+                        document.body.removeChild(link);
+                      } else {
+                        console.error('[AudioCompressor] No compressed file available for download');
+                        compressionProgress.error = 'No compressed file available for download';
+                      }
+                    }} 
+                    variant="default" 
+                    size="lg" 
+                    classList="w-full sm:w-auto"
+                  >
+                    Download Compressed File
+                  </Button>
+                  <Button on:click={resetCompression} variant="outline" size="lg" classList="w-full sm:w-auto">Compress Another File</Button>
                 </div>
               </div>
-            {/each}
+            {/if}
           </div>
-
-          <!-- Remove the duplicate cancel button -->
-          {#if isProcessing}
-            <div class="mt-4">
-              <p class="text-center text-muted">Processing...</p>
-            </div>
-          {/if}
         {/if}
       </div>
     {/if}
