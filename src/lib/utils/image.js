@@ -165,6 +165,29 @@ async function compressImageWithFFmpeg(data, quality, format) {
     }
     
     try {
+      // 如果是PNG格式，先检查透明度
+      if (format === 'png') {
+        try {
+          const blob = new Blob([data], { type: 'image/png' });
+          const bitmap = await createImageBitmap(blob);
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(bitmap, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          bitmap.close && bitmap.close();
+          
+          // 检查是否有透明度
+          for (let i = 3; i < imageData.data.length; i += 4) {
+            if (imageData.data[i] < 255) {
+              console.log('[compressImageWithFFmpeg] Skipping compression for PNG with transparency');
+              return data; // 直接返回原始数据
+            }
+          }
+        } catch (error) {
+          console.warn('[compressImageWithFFmpeg] Failed to check PNG transparency, assuming no transparency:', error);
+        }
+      }
+
       const ffmpeg = await getFFmpegInstance();
       inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
       outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
@@ -172,20 +195,11 @@ async function compressImageWithFFmpeg(data, quality, format) {
       ffmpeg.FS('writeFile', inputFileName, data);
       const args = ['-i', inputFileName];
       
-      // 使用固定的滤镜参数
-      const filterComplex = [
-        'nlmeans=s=3:p=3:r=5',
-        'unsharp=3:3:0.5:3:3:0.5',
-        'eq=contrast=1.05:brightness=0.01:saturation=1.05'
-      ].join(',');
-      
-      args.push('-vf', filterComplex);
-      
       if (format === 'png') {
-        // 使用更激进的PNG压缩设置
+        // 使用更保守的PNG压缩设置
         args.push('-c:v', 'png', '-compression_level', '9', '-threads', '1');
         args.push('-pred', 'mixed'); // 使用混合预测器
-        args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
+        args.push('-vf', 'format=rgb24'); // 确保使用RGB24格式
       } else if (format === 'jpeg' || format === 'jpg') {
         // 使用固定的JPEG质量
         args.push('-c:v', 'mjpeg', '-q:v', quality.toString(), '-threads', '1');
@@ -260,6 +274,29 @@ async function enhanceImage(data, format) {
   let outputFileName = null;
   
   try {
+    // 如果是PNG格式，先检查透明度
+    if (format === 'png') {
+      try {
+        const blob = new Blob([data], { type: 'image/png' });
+        const bitmap = await createImageBitmap(blob);
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        bitmap.close && bitmap.close();
+        
+        // 检查是否有透明度
+        for (let i = 3; i < imageData.data.length; i += 4) {
+          if (imageData.data[i] < 255) {
+            console.log('[enhanceImage] Skipping enhancement for PNG with transparency');
+            return data; // 直接返回原始数据
+          }
+        }
+      } catch (error) {
+        console.warn('[enhanceImage] Failed to check PNG transparency, assuming no transparency:', error);
+      }
+    }
+
     const ffmpeg = await getFFmpegInstance();
     inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
     outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
@@ -553,6 +590,37 @@ export async function compressImage(data, options = {}) {
       format = await detectFormat(data);
     } catch (error) {
       console.warn('[compressImage] Failed to detect format:', error);
+    }
+    
+    // 如果是PNG格式，先检查透明度
+    if (format === 'png') {
+      try {
+        const blob = new Blob([data], { type: 'image/png' });
+        const bitmap = await createImageBitmap(blob);
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        bitmap.close && bitmap.close();
+        
+        // 检查是否有透明度
+        for (let i = 3; i < imageData.data.length; i += 4) {
+          if (imageData.data[i] < 255) {
+            console.log('[compressImage] Skipping all processing for PNG with transparency');
+            return {
+              data,
+              format: 'png',
+              compressionMethod: 'skipped-transparency',
+              originalSize,
+              compressedSize: originalSize,
+              originalDimensions: { width: bitmap.width, height: bitmap.height },
+              finalDimensions: { width: bitmap.width, height: bitmap.height }
+            };
+          }
+        }
+      } catch (error) {
+        console.warn('[compressImage] Failed to check PNG transparency, assuming no transparency:', error);
+      }
     }
     
     try {
