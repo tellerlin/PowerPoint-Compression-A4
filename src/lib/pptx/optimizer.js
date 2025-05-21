@@ -1,5 +1,5 @@
 import * as JSZip from 'jszip';
-import { compressImagesInParallel } from '../utils/image';
+import { compressImagesInParallel, cleanupTransparentPNGs } from '../utils/image';
 import { 
   COMPRESSION_SETTINGS, 
   SUPPORTED_IMAGE_EXTENSIONS
@@ -91,6 +91,7 @@ function calculateOptimalBatchSize(mediaFiles, zip) {
 
 // Modified processMediaBatch function to use parallel compression
 async function processMediaBatch(zip, batch, options, cpuCount, onProgress, currentIndex, totalFiles) {
+  const results = [];
   const imagesToCompress = [];
   const otherFiles = [];
 
@@ -119,7 +120,6 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
     }
   }
 
-  const results = [];
   let processedCount = 0;
   const totalBatchFiles = imagesToCompress.length + otherFiles.length;
 
@@ -144,6 +144,29 @@ async function processMediaBatch(zip, batch, options, cpuCount, onProgress, curr
         batchProgress: batchProgress
       });
     });
+    
+    // 处理剩余的透明PNG
+    const remainingResults = await cleanupTransparentPNGs();
+    if (remainingResults.length > 0) {
+      console.log(`[processMediaBatch] Processed ${remainingResults.length} remaining transparent PNGs`);
+      // 更新压缩结果
+      for (const result of remainingResults) {
+        const index = imagesToCompress.findIndex(img => 
+          `${img.data.byteLength}-${hashCode(img.data)}` === result.key
+        );
+        if (index !== -1) {
+          compressedImages[index] = {
+            data: result.data,
+            format: 'png',
+            compressionMethod: 'batch-transparent',
+            originalSize: result.originalSize,
+            compressedSize: result.compressedSize,
+            originalDimensions: result.dimensions,
+            finalDimensions: result.dimensions
+          };
+        }
+      }
+    }
     
     // Update compressed images
     for (let i = 0; i < imagesToCompress.length; i++) {
@@ -345,6 +368,12 @@ export async function optimizePPTX(file, options = {}) {
         const mediaStats = calculateSavedStats(totalOriginalMediaSize, totalCompressedMediaSize, 0, 0);
         finalStats.savedMediaSize = mediaStats.savedSize;
         finalStats.savedMediaPercentage = mediaStats.savedPercentage;
+      }
+      
+      // 确保所有透明PNG都被处理
+      const finalResults = await cleanupTransparentPNGs();
+      if (finalResults.length > 0) {
+        console.log(`[OptimizePPTX] Processed ${finalResults.length} final transparent PNGs`);
       }
     }
 

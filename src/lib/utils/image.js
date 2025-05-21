@@ -9,6 +9,7 @@ import {
   detectFormat,
   processImage
 } from './imageCompressionUtils';
+import imageCompression from 'browser-image-compression';
 
 async function getImageData(canvas) {
   const ctx = canvas.getContext('2d');
@@ -195,21 +196,27 @@ async function compressImageWithFFmpeg(data, quality, format) {
       ffmpeg.FS('writeFile', inputFileName, data);
       const args = ['-i', inputFileName];
       
-      if (format === 'png') {
-        // 使用更保守的PNG压缩设置
-        args.push('-c:v', 'png', '-compression_level', '9', '-threads', '1');
-        args.push('-pred', 'mixed'); // 使用混合预测器
-        args.push('-vf', 'format=rgb24'); // 确保使用RGB24格式
-      } else if (format === 'jpeg' || format === 'jpg') {
-        // 使用固定的JPEG质量
-        args.push('-c:v', 'mjpeg', '-q:v', quality.toString(), '-threads', '1');
-        args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
-      } else if (format === 'webp') {
-        // 使用固定的WebP压缩设置
-        args.push('-c:v', 'libwebp', '-quality', quality.toString());
-        args.push('-lossless', '0', '-method', '4', '-threads', '1');
-        args.push('-pix_fmt', 'yuv420p');
-        args.push('-color_range', 'jpeg', '-colorspace', 'bt709');
+      // 扩展格式特定的压缩参数
+      const formatSpecificArgs = {
+        'png': ['-c:v', 'png', '-compression_level', '9', '-threads', '1', '-pred', 'mixed', '-vf', 'format=rgb24'],
+        'jpeg': ['-c:v', 'mjpeg', '-q:v', quality.toString(), '-threads', '1', '-color_range', 'jpeg', '-colorspace', 'bt709'],
+        'webp': ['-c:v', 'libwebp', '-quality', quality.toString(), '-lossless', '0', '-method', '4', '-threads', '1', '-pix_fmt', 'yuv420p', '-color_range', 'jpeg', '-colorspace', 'bt709'],
+        'tiff': ['-c:v', 'tiff', '-compression_algo', 'lzw', '-threads', '1'],
+        'tga': ['-c:v', 'targa', '-threads', '1'],
+        'pcx': ['-c:v', 'pcx', '-threads', '1'],
+        'ppm': ['-c:v', 'ppm', '-threads', '1'],
+        'pgm': ['-c:v', 'pgm', '-threads', '1'],
+        'pbm': ['-c:v', 'pbm', '-threads', '1'],
+        'sgi': ['-c:v', 'sgi', '-threads', '1'],
+        'sun': ['-c:v', 'sunrast', '-threads', '1']
+      };
+      
+      // 添加格式特定的参数
+      if (formatSpecificArgs[format]) {
+        args.push(...formatSpecificArgs[format]);
+      } else {
+        // 默认使用 PNG 压缩参数
+        args.push(...formatSpecificArgs['png']);
       }
       
       // 添加基本设置
@@ -437,6 +444,29 @@ export async function compressImagesInParallel(images, options, onProgress) {
     results.push(...chunkResults);
   }
   
+  // 处理当前批次中的透明PNG
+  const remainingResults = await cleanupTransparentPNGs();
+  if (remainingResults.length > 0) {
+    console.log(`[compressImagesInParallel] Processed ${remainingResults.length} remaining transparent PNGs`);
+    // 更新压缩结果
+    for (const result of remainingResults) {
+      const index = images.findIndex(img => 
+        `${img.data.byteLength}-${hashCode(img.data)}` === result.key
+      );
+      if (index !== -1) {
+        results[index] = {
+          data: result.data,
+          format: 'png',
+          compressionMethod: 'batch-transparent',
+          originalSize: result.originalSize,
+          compressedSize: result.compressedSize,
+          originalDimensions: result.dimensions,
+          finalDimensions: result.dimensions
+        };
+      }
+    }
+  }
+  
   return results;
 }
 
@@ -570,7 +600,128 @@ async function preprocessImageDimensions(data, maxWidth = 1600, maxHeight = 900)
   }
 }
 
-// 修改compressImage函数
+// 添加透明PNG收集器
+const transparentPNGs = new Map();
+
+// 添加批量处理透明PNG的函数
+async function processTransparentPNGs() {
+  if (transparentPNGs.size === 0) return;
+  
+  console.log(`[processTransparentPNGs] Processing ${transparentPNGs.size} transparent PNGs`);
+  
+  const results = await Promise.all(
+    Array.from(transparentPNGs.entries()).map(async ([key, { data, dimensions }]) => {
+      try {
+        // 创建 Blob
+        const blob = new Blob([data], { type: 'image/png' });
+        
+        // 获取实际尺寸
+        let actualDimensions = dimensions;
+        if (!dimensions || !dimensions.width || !dimensions.height || dimensions.width === 0 || dimensions.height === 0) {
+          try {
+            const bitmap = await createImageBitmap(blob);
+            actualDimensions = {
+              width: bitmap.width,
+              height: bitmap.height
+            };
+            bitmap.close && bitmap.close();
+            console.log(`[processTransparentPNGs] Retrieved dimensions for ${key}: ${actualDimensions.width}x${actualDimensions.height}`);
+          } catch (error) {
+            console.warn(`[processTransparentPNGs] Failed to get dimensions for ${key}:`, error);
+            return {
+              key,
+              data,
+              originalSize: data.length,
+              compressedSize: data.length,
+              dimensions: { width: 0, height: 0 }
+            };
+          }
+        }
+
+        // 验证尺寸
+        if (!actualDimensions || !actualDimensions.width || !actualDimensions.height || 
+            actualDimensions.width <= 0 || actualDimensions.height <= 0) {
+          console.warn(`[processTransparentPNGs] Invalid dimensions for ${key}:`, actualDimensions);
+          return {
+            key,
+            data,
+            originalSize: data.length,
+            compressedSize: data.length,
+            dimensions: actualDimensions || { width: 0, height: 0 }
+          };
+        }
+        
+        // 设置压缩选项
+        const options = {
+          maxSizeMB: 1,
+          maxWidthOrHeight: Math.max(actualDimensions.width, actualDimensions.height),
+          useWebWorker: true,
+          fileType: 'image/png',
+          preserveHeaders: true,
+          initialQuality: 0.9,
+          alwaysKeepResolution: true
+        };
+
+        // 使用 browser-image-compression 压缩
+        let compressedBlob;
+        try {
+          compressedBlob = await imageCompression(blob, options);
+        } catch (error) {
+          console.warn(`[processTransparentPNGs] Compression failed for ${key}:`, error);
+          return {
+            key,
+            data,
+            originalSize: data.length,
+            compressedSize: data.length,
+            dimensions: actualDimensions
+          };
+        }
+
+        // 转换为 Uint8Array
+        const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
+        
+        // 检查压缩效果
+        const compressionRatio = compressedData.length / data.length;
+        console.log(`[processTransparentPNGs] ${key}: ${data.length} -> ${compressedData.length} bytes (${compressionRatio.toFixed(2)})`);
+        
+        // 如果压缩效果显著（小于原大小的90%），则使用压缩后的数据
+        if (compressionRatio < 0.9) {
+          return {
+            key,
+            data: compressedData,
+            originalSize: data.length,
+            compressedSize: compressedData.length,
+            dimensions: actualDimensions
+          };
+        }
+        
+        return {
+          key,
+          data,
+          originalSize: data.length,
+          compressedSize: data.length,
+          dimensions: actualDimensions
+        };
+      } catch (error) {
+        console.warn(`[processTransparentPNGs] Failed to process ${key}:`, error);
+        return {
+          key,
+          data,
+          originalSize: data.length,
+          compressedSize: data.length,
+          dimensions: dimensions || { width: 0, height: 0 }
+        };
+      }
+    })
+  );
+  
+  // 清空收集器
+  transparentPNGs.clear();
+  
+  return results;
+}
+
+// 修改 compressImage 函数
 export async function compressImage(data, options = {}) {
   const quality = 0.98;
   const allowFormatConversion = true;
@@ -592,7 +743,7 @@ export async function compressImage(data, options = {}) {
       console.warn('[compressImage] Failed to detect format:', error);
     }
     
-    // 如果是PNG格式，先检查透明度
+    // 如果是PNG格式，检查透明度
     if (format === 'png') {
       try {
         const blob = new Blob([data], { type: 'image/png' });
@@ -604,19 +755,50 @@ export async function compressImage(data, options = {}) {
         bitmap.close && bitmap.close();
         
         // 检查是否有透明度
+        let hasTransparency = false;
         for (let i = 3; i < imageData.data.length; i += 4) {
           if (imageData.data[i] < 255) {
-            console.log('[compressImage] Skipping all processing for PNG with transparency');
-            return {
-              data,
-              format: 'png',
-              compressionMethod: 'skipped-transparency',
-              originalSize,
-              compressedSize: originalSize,
-              originalDimensions: { width: bitmap.width, height: bitmap.height },
-              finalDimensions: { width: bitmap.width, height: bitmap.height }
-            };
+            hasTransparency = true;
+            break;
           }
+        }
+        
+        if (hasTransparency) {
+          // 生成唯一键
+          const key = `${originalSize}-${hashCode(data)}`;
+          // 收集透明PNG
+          transparentPNGs.set(key, {
+            data,
+            dimensions: { width: bitmap.width, height: bitmap.height }
+          });
+          
+          // 如果收集了足够多的PNG，进行批量处理
+          if (transparentPNGs.size >= 5) {
+            const results = await processTransparentPNGs();
+            const result = results.find(r => r.key === key);
+            if (result) {
+              return {
+                data: result.data,
+                format: 'png',
+                compressionMethod: 'batch-transparent',
+                originalSize: result.originalSize,
+                compressedSize: result.compressedSize,
+                originalDimensions: result.dimensions,
+                finalDimensions: result.dimensions
+              };
+            }
+          }
+          
+          // 如果没有进行批量处理，返回原始数据
+          return {
+            data,
+            format: 'png',
+            compressionMethod: 'skipped-transparency',
+            originalSize,
+            compressedSize: originalSize,
+            originalDimensions: { width: bitmap.width, height: bitmap.height },
+            finalDimensions: { width: bitmap.width, height: bitmap.height }
+          };
         }
       } catch (error) {
         console.warn('[compressImage] Failed to check PNG transparency, assuming no transparency:', error);
@@ -750,12 +932,20 @@ export async function compressImage(data, options = {}) {
       }
     }
     
-    if (allowFormatConversion && ['bmp', 'tiff'].includes(format)) {
+    if (allowFormatConversion && ['bmp', 'tiff', 'tga', 'pcx', 'ppm', 'pgm', 'pbm', 'sgi', 'sun'].includes(format)) {
       try {
+        // 对于这些格式，优先转换为 PNG
         data = await compressImageWithFFmpeg(data, 1, 'png');
         format = 'png';
       } catch (error) {
         console.warn('[compressImage] Format conversion failed:', error);
+        try {
+          // 如果 PNG 转换失败，尝试转换为 JPEG
+          data = await compressImageWithFFmpeg(data, 0.95, 'jpeg');
+          format = 'jpeg';
+        } catch (jpegError) {
+          console.warn('[compressImage] JPEG conversion failed:', jpegError);
+        }
       }
     }
     
@@ -920,11 +1110,22 @@ async function checkAlphaChannel(data) {
   }
 }
 
+// 添加清理函数
+export async function cleanupTransparentPNGs() {
+  if (transparentPNGs.size > 0) {
+    console.log(`[cleanupTransparentPNGs] Processing remaining ${transparentPNGs.size} transparent PNGs`);
+    const results = await processTransparentPNGs();
+    return results;
+  }
+  return [];
+}
+
 export { 
   ImageType, 
   analyzeImageType, 
   checkAlphaChannel, 
   analyzeImage, 
   calculateOptimalDimensions, 
-  detectFormat
+  detectFormat,
+  getFFmpegInstance
 };
