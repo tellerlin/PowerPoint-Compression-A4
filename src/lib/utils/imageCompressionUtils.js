@@ -99,6 +99,8 @@ export function getExtensionFromPath(path) {
 }
 
 export async function detectFormat(data) {
+  console.log('[detectFormat] Starting format detection');
+  
   if (!data || data.length < 4) {
     console.warn('[detectFormat] Invalid image data');
     return 'unknown';
@@ -107,6 +109,7 @@ export async function detectFormat(data) {
   // 检查文件头
   const header = new Uint8Array(data.slice(0, 16));
   const headerHex = Array.from(header).map(b => b.toString(16).padStart(2, '0')).join('');
+  console.log('[detectFormat] File header:', headerHex);
 
   // 扩展支持的格式列表，针对 PowerPoint 中常见的格式
   const formatSignatures = {
@@ -154,7 +157,7 @@ export async function detectFormat(data) {
     '59A66A95': 'sun',  // Sun Raster
   };
 
-  // 检查所有可能的格式签名
+  // 优先检查文件头
   for (const [signature, format] of Object.entries(formatSignatures)) {
     if (headerHex.startsWith(signature)) {
       console.log(`[detectFormat] Detected format ${format} from signature`);
@@ -162,7 +165,7 @@ export async function detectFormat(data) {
     }
   }
 
-  // 如果文件有路径，尝试从扩展名获取格式（优先于其他方法）
+  // 如果文件有路径，尝试从扩展名获取格式（作为第二优先级）
   if (data.path) {
     const extension = getExtensionFromPath(data.path);
     if (extension && ['png', 'jpeg', 'jpg', 'gif', 'bmp', 'webp', 'tiff', 'tga', 'pcx', 'ppm', 'pgm', 'pbm', 'sgi', 'sun'].includes(extension)) {
@@ -171,7 +174,7 @@ export async function detectFormat(data) {
     }
   }
 
-  // 尝试使用 MIME 类型
+  // 尝试使用 MIME 类型（作为第三优先级）
   try {
     const blob = new Blob([data]);
     const mimeType = blob.type;
@@ -186,32 +189,9 @@ export async function detectFormat(data) {
     console.warn('[detectFormat] Failed to detect format from MIME type:', error);
   }
 
-  // 尝试使用 FFmpeg 检测
+  // 如果以上方法都失败，尝试使用 Canvas API（作为最后手段）
   try {
-    const ffmpeg = await getFFmpegInstance();
-    const inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.bin`;
-    ffmpeg.FS('writeFile', inputFileName, data);
-    
-    try {
-      await ffmpeg.run('-i', inputFileName, '-f', 'null', '-');
-      const probeData = ffmpeg.FS('readFile', inputFileName);
-      const format = probeData.toString().match(/Input #0, ([^,]+)/)?.[1];
-      if (format) {
-        const detectedFormat = format.toLowerCase();
-        console.log(`[detectFormat] Detected format ${detectedFormat} from FFmpeg`);
-        return detectedFormat;
-      }
-    } catch (error) {
-      console.warn('[detectFormat] FFmpeg format detection failed:', error);
-    } finally {
-      ffmpeg.FS('unlink', inputFileName);
-    }
-  } catch (error) {
-    console.warn('[detectFormat] FFmpeg instance creation failed:', error);
-  }
-
-  // 如果所有方法都失败，尝试使用 Canvas API
-  try {
+    console.log('[detectFormat] Attempting Canvas format detection');
     const blob = new Blob([data]);
     const img = new Image();
     const canvas = new OffscreenCanvas(1, 1);
@@ -231,13 +211,16 @@ export async function detectFormat(data) {
     const hasAlpha = imageData.data[3] < 255;
     
     // 根据数据特征和大小推测格式
+    let format;
     if (data.length > 1000000) { // 大于1MB
-      return hasAlpha ? 'png' : 'jpeg';
+      format = hasAlpha ? 'png' : 'jpeg';
     } else if (data.length > 100000) { // 大于100KB
-      return hasAlpha ? 'png' : 'jpeg';
+      format = hasAlpha ? 'png' : 'jpeg';
     } else {
-      return hasAlpha ? 'png' : 'jpeg';
+      format = hasAlpha ? 'png' : 'jpeg';
     }
+    console.log(`[detectFormat] Detected format ${format} from Canvas (hasAlpha: ${hasAlpha})`);
+    return format;
   } catch (error) {
     console.warn('[detectFormat] Canvas detection failed:', error);
   }

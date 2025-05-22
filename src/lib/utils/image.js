@@ -9,7 +9,6 @@ import {
   detectFormat,
   processImage
 } from './imageCompressionUtils';
-import imageCompression from 'browser-image-compression';
 
 async function getImageData(canvas) {
   const ctx = canvas.getContext('2d');
@@ -71,79 +70,28 @@ async function compressImageInWorker(data, quality, format) {
 
 // 添加FFmpeg实例缓存
 let ffmpegInstance = null;
-let ffmpegLoadPromise = null;
 
 async function getFFmpegInstance() {
-  if (!ffmpegLoadPromise) {
-    ffmpegLoadPromise = (async () => {
-      try {
-        if (!window.FFmpeg) {
-          throw new Error('FFmpeg not loaded');
-        }
-        ffmpegInstance = window.FFmpeg.createFFmpeg({
-          log: false,
-          corePath: '/ffmpeg/ffmpeg-core.js',
-          mainName: 'main',
-          // 添加内存限制
-          memoryLimit: 256 * 1024 * 1024, // 256MB
-          // 添加错误处理
-          onError: (err) => {
-            console.warn('[FFmpeg] Error:', err);
-            // 重置实例
-            ffmpegInstance = null;
-            ffmpegLoadPromise = null;
-          }
-        });
-        await ffmpegInstance.load();
-        return ffmpegInstance;
-      } catch (error) {
-        console.error('[FFmpeg] Failed to load:', error);
-        ffmpegInstance = null;
-        ffmpegLoadPromise = null;
-        throw error;
-      }
-    })();
+  if (!ffmpegInstance) {
+    if (!window.FFmpeg) {
+      throw new Error('FFmpeg not loaded');
+    }
+    ffmpegInstance = window.FFmpeg.createFFmpeg({
+      log: true,
+      corePath: '/ffmpeg/ffmpeg-core.js'
+    });
+    await ffmpegInstance.load();
   }
-  return ffmpegLoadPromise;
+  return ffmpegInstance;
 }
 
 // 添加FFmpeg队列管理
 let ffmpegQueue = Promise.resolve();
-let isProcessing = false;
 
 async function queueFFmpegTask(task) {
   return new Promise((resolve, reject) => {
-    if (isProcessing) {
-      console.warn('[FFmpeg] Task queued while another is processing');
-    }
-    
     ffmpegQueue = ffmpegQueue
-      .then(async () => {
-        isProcessing = true;
-        try {
-          const result = await task();
-          return result;
-        } catch (error) {
-          if (error.message.includes('OOM') || error.message.includes('Out of memory')) {
-            console.warn('[FFmpeg] Memory overflow, resetting instance');
-            // 重置FFmpeg实例
-            ffmpegInstance = null;
-            ffmpegLoadPromise = null;
-            // 等待一段时间后重试
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            try {
-              const result = await task();
-              return result;
-            } catch (retryError) {
-              console.error('[FFmpeg] Retry failed:', retryError);
-              throw retryError;
-            }
-          }
-          throw error;
-        } finally {
-          isProcessing = false;
-        }
-      })
+      .then(() => task())
       .then(resolve)
       .catch(reject)
       .finally(() => {
@@ -156,264 +104,124 @@ async function queueFFmpegTask(task) {
 }
 
 async function compressImageWithFFmpeg(data, quality, format) {
-  let inputFileName = null;
-  let outputFileName = null;
-  
+  if (format && format.toLowerCase() === 'png') {
+    let hasAlpha = false;
+    try {
+      hasAlpha = await checkAlphaChannel(data);
+    } catch (e) {
+      hasAlpha = true;
+    }
+    if (hasAlpha) {
+      const blob = new Blob([data], { type: 'image/png' });
+      const bitmap = await createImageBitmap(blob);
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0);
+      if (bitmap.close) bitmap.close();
+      const outBlob = await canvas.convertToBlob({ type: 'image/png' });
+      const outData = new Uint8Array(await outBlob.arrayBuffer());
+      return outData;
+    }
+  }
   return queueFFmpegTask(async () => {
     if (!data || data.length === 0) {
       console.error('[compressImageWithFFmpeg] Invalid input data');
       return data;
     }
-    
+    const blob = new Blob([data], { type: `image/${format}` });
+    const bitmap = await createImageBitmap(blob);
+    const { width, height } = bitmap;
+    if (bitmap.close) bitmap.close();
+    if (width * height < 100) {
+      console.log('[compressImageWithFFmpeg] Image too small, skipping compression');
+      return data;
+    }
+    const ffmpeg = await getFFmpegInstance();
+    const timestamp = Date.now();
+    const inputFileName = `input_${timestamp}.${format}`;
+    const outputFileName = `output_${timestamp}.${format}`;
     try {
-      // 如果是PNG格式，先检查透明度
-      if (format === 'png') {
-        try {
-          const blob = new Blob([data], { type: 'image/png' });
-          const bitmap = await createImageBitmap(blob);
-          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(bitmap, 0, 0);
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          bitmap.close && bitmap.close();
-          
-          // 检查是否有透明度
-          for (let i = 3; i < imageData.data.length; i += 4) {
-            if (imageData.data[i] < 255) {
-              console.log('[compressImageWithFFmpeg] Skipping compression for PNG with transparency');
-              return data; // 直接返回原始数据
-            }
-          }
-        } catch (error) {
-          console.warn('[compressImageWithFFmpeg] Failed to check PNG transparency, assuming no transparency:', error);
+      let preScaledData = data;
+      if (width >= 1600 || height >= 900) {
+        console.log('[compressImageWithFFmpeg] Pre-scaling image');
+        let targetWidth = width;
+        let targetHeight = height;
+        if (width >= 1600) {
+          const scale = 1600 / width;
+          targetWidth = 1600;
+          targetHeight = Math.round(height * scale);
+        } else if (height >= 900) {
+          const scale = 900 / height;
+          targetWidth = Math.round(width * scale);
+          targetHeight = 900;
         }
+        const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(await createImageBitmap(blob), 0, 0, targetWidth, targetHeight);
+        const preScaledBlob = await canvas.convertToBlob({ type: `image/${format}` });
+        preScaledData = new Uint8Array(await preScaledBlob.arrayBuffer());
       }
-
-      const ffmpeg = await getFFmpegInstance();
-      inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
-      outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
-
-      ffmpeg.FS('writeFile', inputFileName, data);
+      const memoryLimit = Math.max(64, Math.min(256, Math.floor(data.length / 1024 / 1024 * 2)));
+      console.log(`[compressImageWithFFmpeg] Using memory limit: ${memoryLimit}MB`);
+      ffmpeg.FS('writeFile', inputFileName, preScaledData);
       const args = ['-i', inputFileName];
-      
-      // 扩展格式特定的压缩参数
-      const formatSpecificArgs = {
-        'png': ['-c:v', 'png', '-compression_level', '9', '-threads', '1', '-pred', 'mixed', '-vf', 'format=rgb24'],
-        'jpeg': ['-c:v', 'mjpeg', '-q:v', quality.toString(), '-threads', '1', '-color_range', 'jpeg', '-colorspace', 'bt709'],
-        'webp': ['-c:v', 'libwebp', '-quality', quality.toString(), '-lossless', '0', '-method', '4', '-threads', '1', '-pix_fmt', 'yuv420p', '-color_range', 'jpeg', '-colorspace', 'bt709'],
-        'tiff': ['-c:v', 'tiff', '-compression_algo', 'lzw', '-threads', '1'],
-        'tga': ['-c:v', 'targa', '-threads', '1'],
-        'pcx': ['-c:v', 'pcx', '-threads', '1'],
-        'ppm': ['-c:v', 'ppm', '-threads', '1'],
-        'pgm': ['-c:v', 'pgm', '-threads', '1'],
-        'pbm': ['-c:v', 'pbm', '-threads', '1'],
-        'sgi': ['-c:v', 'sgi', '-threads', '1'],
-        'sun': ['-c:v', 'sunrast', '-threads', '1']
-      };
-      
-      // 添加格式特定的参数
-      if (formatSpecificArgs[format]) {
-        args.push(...formatSpecificArgs[format]);
-      } else {
-        // 默认使用 PNG 压缩参数
-        args.push(...formatSpecificArgs['png']);
+      args.push('-threads', '1');
+      args.push('-max_muxing_queue_size', '1024');
+      const maxAllocBytes = memoryLimit * 1024 * 1024;
+      args.push('-max_alloc', maxAllocBytes.toString());
+      switch (format.toLowerCase()) {
+        case 'jpeg':
+        case 'jpg': {
+          const jpegQuality = Math.max(2, Math.min(31, Math.round(31 - (quality * 29))));
+          args.push('-qmin', jpegQuality.toString());
+          args.push('-qmax', jpegQuality.toString());
+          args.push('-f', 'mjpeg');
+          break;
+        }
+        case 'bmp':
+          args.push('-f', 'bmp');
+          break;
+        case 'webp':
+          args.push('-q:v', Math.round(quality * 100).toString());
+          args.push('-f', 'webp');
+          break;
+        case 'png':
+          args.push('-compression_level', Math.round((1 - quality) * 9).toString());
+          args.push('-f', 'png');
+          break;
+        default:
+          args.push('-f', format);
+          break;
       }
-      
-      // 添加基本设置
-      args.push('-y'); // 覆盖输出文件
-      
-      // 根据格式设置输出格式
-      if (format === 'jpeg' || format === 'jpg') {
-        args.push('-f', 'image2');
-      } else if (format === 'png') {
-        args.push('-f', 'image2');
-      } else if (format === 'webp') {
-        args.push('-f', 'image2');
-      }
-      
       args.push(outputFileName);
-      
+      console.log(`[compressImageWithFFmpeg] Running FFmpeg for ${format} with args:`, args);
+      await ffmpeg.run(...args);
+      let out;
       try {
-        await ffmpeg.run(...args);
-      } catch (error) {
-        console.warn(`[compressImageWithFFmpeg] FFmpeg error: ${error.message}`);
+        out = ffmpeg.FS('readFile', outputFileName);
+      } catch (e) {
+        console.error(`[compressImageWithFFmpeg] Output file not found: ${outputFileName}`);
         return data;
       }
-      
-      // 检查输出文件是否存在
-      const files = ffmpeg.FS('readdir', '/');
-      if (!files.includes(outputFileName)) {
-        console.warn(`[compressImageWithFFmpeg] Output file not found: ${outputFileName}`);
-        return data;
-      }
-      
-      // 读取输出文件
-      let outputData;
       try {
-        outputData = ffmpeg.FS('readFile', outputFileName);
-      } catch (error) {
-        console.warn(`[compressImageWithFFmpeg] Error reading output file: ${error.message}`);
+        ffmpeg.FS('unlink', inputFileName);
+      } catch (e) {}
+      try {
+        ffmpeg.FS('unlink', outputFileName);
+      } catch (e) {}
+      if (out && out.length > 0 && out.length < data.length) {
+        return out;
+      } else {
+        console.log('[compressImageWithFFmpeg] Compression not effective, returning original');
         return data;
       }
-      
-      if (!outputData || outputData.length === 0) {
-        console.warn(`[compressImageWithFFmpeg] Empty output file: ${outputFileName}`);
-        return data;
-      }
-
-      // 检查压缩效果
-      if (outputData.length >= data.length * 0.95) {
-        console.warn(`[compressImageWithFFmpeg] Poor compression: ${outputData.length} >= ${data.length * 0.95}`);
-        return data;
-      }
-      
-      return new Uint8Array(outputData.buffer);
-    } catch (error) {
-      console.error('[compressImageWithFFmpeg] Error:', error);
+    } catch (err) {
+      console.error(`[compressImageWithFFmpeg] FFmpeg error: ${err.message}`);
+      try { ffmpeg.FS('unlink', inputFileName); } catch (e) {}
+      try { ffmpeg.FS('unlink', outputFileName); } catch (e) {}
       return data;
     }
   });
-}
-
-// 添加智能图像处理函数
-async function enhanceImage(data, format) {
-  let inputFileName = null;
-  let outputFileName = null;
-  
-  try {
-    // 如果是PNG格式，先检查透明度
-    if (format === 'png') {
-      try {
-        const blob = new Blob([data], { type: 'image/png' });
-        const bitmap = await createImageBitmap(blob);
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(bitmap, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        bitmap.close && bitmap.close();
-        
-        // 检查是否有透明度
-        for (let i = 3; i < imageData.data.length; i += 4) {
-          if (imageData.data[i] < 255) {
-            console.log('[enhanceImage] Skipping enhancement for PNG with transparency');
-            return data; // 直接返回原始数据
-          }
-        }
-      } catch (error) {
-        console.warn('[enhanceImage] Failed to check PNG transparency, assuming no transparency:', error);
-      }
-    }
-
-    const ffmpeg = await getFFmpegInstance();
-    inputFileName = `input_${Math.random().toString(36).substring(2, 15)}.${format}`;
-    outputFileName = `output_${Math.random().toString(36).substring(2, 15)}.${format}`;
-
-    // 写入输入文件
-    ffmpeg.FS('writeFile', inputFileName, data);
-    
-    // 直接使用 ImageBitmap 获取图片尺寸
-    let dimensions = { width: 0, height: 0 };
-    try {
-      const blob = new Blob([data], { type: `image/${format}` });
-      const bitmap = await createImageBitmap(blob);
-      dimensions = {
-        width: bitmap.width,
-        height: bitmap.height
-      };
-      console.log(`[enhanceImage] Got dimensions from ImageBitmap: ${dimensions.width}x${dimensions.height}`);
-      bitmap.close && bitmap.close();
-    } catch (error) {
-      console.warn('[enhanceImage] Failed to get dimensions from ImageBitmap:', error);
-      dimensions = { width: 1000, height: 1000 };
-      console.warn('[enhanceImage] Using default dimensions');
-    }
-    
-    // 根据图片尺寸决定是否跳过增强
-    const totalPixels = dimensions.width * dimensions.height;
-    
-    // 如果图片太大，直接返回原始数据
-    if (totalPixels > 500000) { // 超过 707x707
-      console.log(`[enhanceImage] Skipping enhancement for large image (${dimensions.width}x${dimensions.height})`);
-      return data;
-    }
-    
-    // 根据图片尺寸设置滤镜参数
-    let filterComplex;
-    
-    if (totalPixels > 250000) { // 500x500
-      // 中等图片只使用锐化和简单的对比度调整
-      filterComplex = 'unsharp=3:3:0.4:3:3:0.4,eq=contrast=1.02:brightness=0.005';
-    } else {
-      // 小图片使用标准参数
-      filterComplex = [
-        'nlmeans=s=3:p=3:r=5',
-        'unsharp=3:3:0.5:3:3:0.5',
-        'eq=contrast=1.03:brightness=0.008:saturation=1.03'
-      ].join(',');
-    }
-
-    console.log(`[enhanceImage] Processing image ${dimensions.width}x${dimensions.height}`);
-    console.log(`[enhanceImage] Using filter: ${filterComplex}`);
-
-    const args = [
-      '-i', inputFileName,
-      '-vf', filterComplex,
-      '-c:v', format === 'webp' ? 'libwebp' : format === 'png' ? 'png' : 'mjpeg',
-      '-y',
-      outputFileName
-    ];
-
-    try {
-      await ffmpeg.run(...args);
-    } catch (error) {
-      if (error.message.includes('OOM') || error.message.includes('Out of memory')) {
-        console.warn('[enhanceImage] Memory overflow, skipping enhancement');
-        return data;
-      }
-      console.warn('[enhanceImage] FFmpeg processing error:', error);
-      return data;
-    }
-    
-    // 检查输出文件是否存在
-    const files = ffmpeg.FS('readdir', '/');
-    if (!files.includes(outputFileName)) {
-      console.warn('[enhanceImage] Output file not found:', outputFileName);
-      return data;
-    }
-    
-    // 读取输出文件
-    let outputData;
-    try {
-      outputData = ffmpeg.FS('readFile', outputFileName);
-    } catch (error) {
-      console.warn('[enhanceImage] Error reading output file:', error);
-      return data;
-    }
-    
-    if (!outputData || outputData.length === 0) {
-      console.warn('[enhanceImage] Empty output file');
-      return data;
-    }
-    
-    return new Uint8Array(outputData.buffer);
-  } catch (error) {
-    console.error('[enhanceImage] Error:', error);
-    return data;
-  } finally {
-    // 清理文件
-    try {
-      const ffmpeg = await getFFmpegInstance();
-      const files = ffmpeg.FS('readdir', '/');
-      if (inputFileName && files.includes(inputFileName)) {
-        ffmpeg.FS('unlink', inputFileName);
-      }
-      if (outputFileName && files.includes(outputFileName)) {
-        ffmpeg.FS('unlink', outputFileName);
-      }
-    } catch (e) {
-      console.warn('[enhanceImage] Error cleaning up files:', e);
-    }
-  }
 }
 
 // 修改为完全串行处理，解决FFmpeg只能运行一个命令的问题
@@ -442,29 +250,6 @@ export async function compressImagesInParallel(images, options, onProgress) {
     
     const chunkResults = await Promise.all(chunkPromises);
     results.push(...chunkResults);
-  }
-  
-  // 处理当前批次中的透明PNG
-  const remainingResults = await cleanupTransparentPNGs();
-  if (remainingResults.length > 0) {
-    console.log(`[compressImagesInParallel] Processed ${remainingResults.length} remaining transparent PNGs`);
-    // 更新压缩结果
-    for (const result of remainingResults) {
-      const index = images.findIndex(img => 
-        `${img.data.byteLength}-${hashCode(img.data)}` === result.key
-      );
-      if (index !== -1) {
-        results[index] = {
-          data: result.data,
-          format: 'png',
-          compressionMethod: 'batch-transparent',
-          originalSize: result.originalSize,
-          compressedSize: result.compressedSize,
-          originalDimensions: result.dimensions,
-          finalDimensions: result.dimensions
-        };
-      }
-    }
   }
   
   return results;
@@ -496,18 +281,15 @@ async function adjustQualityByContent(data, format, baseQuality) {
     
     // 根据复杂度调整质量
     const complexityRatio = complexity / (bitmap.width * bitmap.height);
-    let adjustedQuality = baseQuality;
-    
     if (complexityRatio > 0.3) {
-      // 复杂图片使用更高质量，但不超过100
-      adjustedQuality = Math.min(baseQuality * 1.2, 1.0);
+      // 复杂图片使用更高质量
+      return baseQuality * 1.2;
     } else if (complexityRatio < 0.1) {
       // 简单图片可以适当降低质量
-      adjustedQuality = baseQuality * 0.9;
+      return baseQuality * 0.9;
     }
     
-    // 确保quality值在0-100范围内
-    return Math.min(Math.max(adjustedQuality, 0), 1.0);
+    return baseQuality;
   } catch (error) {
     console.warn('[adjustQualityByContent] Error:', error);
     return baseQuality;
@@ -561,477 +343,175 @@ async function downsampleImage(data, maxSize = 1800) {
   return new Uint8Array(arrayBuffer);
 }
 
-// 添加预处理图片尺寸的函数
-async function preprocessImageDimensions(data, maxWidth = 1600, maxHeight = 900) {
-  try {
-    const format = await detectFormat(data);
-    if (!['png', 'jpeg', 'jpg', 'webp'].includes(format)) return data;
-    
-    const blob = new Blob([data], { type: `image/${format}` });
-    const bitmap = await createImageBitmap(blob);
-    
-    const { width, height } = bitmap;
-    
-    // 如果图片尺寸已经小于目标尺寸，直接返回
-    if (width <= maxWidth && height <= maxHeight) {
-      bitmap.close && bitmap.close();
-      return data;
-    }
-    
-    // 计算等比例缩放后的尺寸
-    const scale = Math.min(maxWidth / width, maxHeight / height);
-    const targetWidth = Math.round(width * scale);
-    const targetHeight = Math.round(height * scale);
-    
-    // 使用OffscreenCanvas进行缩放
-    const canvas = new OffscreenCanvas(targetWidth, targetHeight);
-    const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-    bitmap.close && bitmap.close();
-    
-    // 导出为Uint8Array
-    const blobOut = await canvas.convertToBlob({ type: `image/${format}` });
-    const arrayBuffer = await blobOut.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
-  } catch (error) {
-    console.warn('[preprocessImageDimensions] Error:', error);
-    return data;
-  }
-}
-
-// 添加透明PNG收集器
-const transparentPNGs = new Map();
-
-// 添加批量处理透明PNG的函数
-async function processTransparentPNGs() {
-  if (transparentPNGs.size === 0) return;
-  
-  console.log(`[processTransparentPNGs] Processing ${transparentPNGs.size} transparent PNGs`);
-  
-  const results = await Promise.all(
-    Array.from(transparentPNGs.entries()).map(async ([key, { data, dimensions }]) => {
-      try {
-        // 创建 Blob
-        const blob = new Blob([data], { type: 'image/png' });
-        
-        // 获取实际尺寸
-        let actualDimensions = dimensions;
-        if (!dimensions || !dimensions.width || !dimensions.height || dimensions.width === 0 || dimensions.height === 0) {
-          try {
-            const bitmap = await createImageBitmap(blob);
-            actualDimensions = {
-              width: bitmap.width,
-              height: bitmap.height
-            };
-            bitmap.close && bitmap.close();
-            console.log(`[processTransparentPNGs] Retrieved dimensions for ${key}: ${actualDimensions.width}x${actualDimensions.height}`);
-          } catch (error) {
-            console.warn(`[processTransparentPNGs] Failed to get dimensions for ${key}:`, error);
-            return {
-              key,
-              data,
-              originalSize: data.length,
-              compressedSize: data.length,
-              dimensions: { width: 0, height: 0 }
-            };
-          }
-        }
-
-        // 验证尺寸
-        if (!actualDimensions || !actualDimensions.width || !actualDimensions.height || 
-            actualDimensions.width <= 0 || actualDimensions.height <= 0) {
-          console.warn(`[processTransparentPNGs] Invalid dimensions for ${key}:`, actualDimensions);
-          return {
-            key,
-            data,
-            originalSize: data.length,
-            compressedSize: data.length,
-            dimensions: actualDimensions || { width: 0, height: 0 }
-          };
-        }
-        
-        // 设置压缩选项
-        const options = {
-          maxSizeMB: 1,
-          maxWidthOrHeight: Math.max(actualDimensions.width, actualDimensions.height),
-          useWebWorker: true,
-          fileType: 'image/png',
-          preserveHeaders: true,
-          initialQuality: 0.9,
-          alwaysKeepResolution: true
-        };
-
-        // 使用 browser-image-compression 压缩
-        let compressedBlob;
-        try {
-          compressedBlob = await imageCompression(blob, options);
-        } catch (error) {
-          console.warn(`[processTransparentPNGs] Compression failed for ${key}:`, error);
-          return {
-            key,
-            data,
-            originalSize: data.length,
-            compressedSize: data.length,
-            dimensions: actualDimensions
-          };
-        }
-
-        // 转换为 Uint8Array
-        const compressedData = new Uint8Array(await compressedBlob.arrayBuffer());
-        
-        // 检查压缩效果
-        const compressionRatio = compressedData.length / data.length;
-        console.log(`[processTransparentPNGs] ${key}: ${data.length} -> ${compressedData.length} bytes (${compressionRatio.toFixed(2)})`);
-        
-        // 如果压缩效果显著（小于原大小的90%），则使用压缩后的数据
-        if (compressionRatio < 0.9) {
-          return {
-            key,
-            data: compressedData,
-            originalSize: data.length,
-            compressedSize: compressedData.length,
-            dimensions: actualDimensions
-          };
-        }
-        
-        return {
-          key,
-          data,
-          originalSize: data.length,
-          compressedSize: data.length,
-          dimensions: actualDimensions
-        };
-      } catch (error) {
-        console.warn(`[processTransparentPNGs] Failed to process ${key}:`, error);
-        return {
-          key,
-          data,
-          originalSize: data.length,
-          compressedSize: data.length,
-          dimensions: dimensions || { width: 0, height: 0 }
-        };
-      }
-    })
-  );
-  
-  // 清空收集器
-  transparentPNGs.clear();
-  
-  return results;
-}
-
-// 修改 compressImage 函数
+// 修改compressImage函数以接受完整的选项对象
 export async function compressImage(data, options = {}) {
-  const quality = 0.98;
-  const allowFormatConversion = true;
-  const allowDownsampling = true;
-  const maxImageSize = 2000;
+  console.log('[compressImage] Starting compression with options:', options);
+  
+  // 使用固定的高质量参数
+  const quality = 0.95; // 固定使用95%的质量
+  const allowFormatConversion = true; // 始终允许格式转换
+  const allowDownsampling = true; // 始终允许降采样
+  const maxImageSize = 2000; // 提高最大尺寸限制
+  
+  console.log('[compressImage] Using high quality compression settings');
   
   if (!(data instanceof Uint8Array)) {
+    console.error('[compressImage] Invalid input data type:', typeof data);
     throw new TypeError('compressImage: data must be a Uint8Array');
   }
   
   let originalSize = data.byteLength;
-  let dimensions = { width: 0, height: 0 };
-  let format = 'unknown';
+  console.log('[compressImage] Original size:', originalSize);
+  
+  // 更保守的降采样策略
+  if (allowDownsampling) {
+    if (originalSize > 5 * 1024 * 1024) {
+      console.log('[compressImage] Downsampling large image (>5MB)');
+      data = await downsampleImage(data, Math.min(maxImageSize, 1600));
+      originalSize = data.byteLength;
+      console.log('[compressImage] After downsampling:', originalSize);
+    } else if (originalSize > 2 * 1024 * 1024) {
+      console.log('[compressImage] Downsampling medium image (>2MB)');
+      data = await downsampleImage(data, Math.min(maxImageSize, 2000));
+      originalSize = data.byteLength;
+      console.log('[compressImage] After downsampling:', originalSize);
+    }
+  }
   
   try {
-    try {
-      format = await detectFormat(data);
-    } catch (error) {
-      console.warn('[compressImage] Failed to detect format:', error);
-    }
-    
-    // 如果是PNG格式，检查透明度
-    if (format === 'png') {
-      try {
-        const blob = new Blob([data], { type: 'image/png' });
-        const bitmap = await createImageBitmap(blob);
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(bitmap, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        bitmap.close && bitmap.close();
-        
-        // 检查是否有透明度
-        let hasTransparency = false;
-        for (let i = 3; i < imageData.data.length; i += 4) {
-          if (imageData.data[i] < 255) {
-            hasTransparency = true;
-            break;
-          }
-        }
-        
-        if (hasTransparency) {
-          // 生成唯一键
-          const key = `${originalSize}-${hashCode(data)}`;
-          // 收集透明PNG
-          transparentPNGs.set(key, {
-            data,
-            dimensions: { width: bitmap.width, height: bitmap.height }
-          });
-          
-          // 如果收集了足够多的PNG，进行批量处理
-          if (transparentPNGs.size >= 5) {
-            const results = await processTransparentPNGs();
-            const result = results.find(r => r.key === key);
-            if (result) {
-              return {
-                data: result.data,
-                format: 'png',
-                compressionMethod: 'batch-transparent',
-                originalSize: result.originalSize,
-                compressedSize: result.compressedSize,
-                originalDimensions: result.dimensions,
-                finalDimensions: result.dimensions
-              };
-            }
-          }
-          
-          // 如果没有进行批量处理，返回原始数据
-          return {
-            data,
-            format: 'png',
-            compressionMethod: 'skipped-transparency',
-            originalSize,
-            compressedSize: originalSize,
-            originalDimensions: { width: bitmap.width, height: bitmap.height },
-            finalDimensions: { width: bitmap.width, height: bitmap.height }
-          };
-        }
-      } catch (error) {
-        console.warn('[compressImage] Failed to check PNG transparency, assuming no transparency:', error);
-      }
-    }
-    
-    try {
-      const blob = new Blob([data], { type: `image/${format}` });
-      const bitmap = await createImageBitmap(blob);
-      dimensions = {
-        width: bitmap.width,
-        height: bitmap.height
-      };
-      bitmap.close && bitmap.close();
-    } catch (error) {
-      console.warn('[compressImage] Failed to get dimensions:', error);
-      if (originalSize > 4 * 1024 * 1024) {
-        dimensions = { width: 2000, height: 2000 };
-      } else if (originalSize > 1 * 1024 * 1024) {
-        dimensions = { width: 1500, height: 1500 };
-      } else {
-        dimensions = { width: 1000, height: 1000 };
-      }
-    }
-    
-    const totalPixels = dimensions.width * dimensions.height;
-    const shouldUseUltraConservativeStrategy = 
-      totalPixels > 2000000 || 
-      originalSize > 4 * 1024 * 1024;
-    
-    if (shouldUseUltraConservativeStrategy) {
-      try {
-        const targetSize = Math.min(1000, Math.sqrt(totalPixels) * 0.5);
-        const scale = Math.min(targetSize / dimensions.width, targetSize / dimensions.height);
-        const targetWidth = Math.max(1, Math.round(dimensions.width * scale));
-        const targetHeight = Math.max(1, Math.round(dimensions.height * scale));
-        
-        const canvas = new OffscreenCanvas(targetWidth, targetHeight);
-        const ctx = canvas.getContext('2d');
-        ctx.imageSmoothingQuality = 'high';
-        const blob = new Blob([data], { type: `image/${format}` });
-        const bitmap = await createImageBitmap(blob);
-        ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-        bitmap.close && bitmap.close();
-        
-        const jpegBlob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
-        const jpegData = new Uint8Array(await jpegBlob.arrayBuffer());
-        
-        return {
-          data: jpegData,
-          format: 'jpeg',
-          compressionMethod: 'ultra-conservative',
-          originalSize: originalSize,
-          compressedSize: jpegData.length,
-          originalDimensions: dimensions,
-          finalDimensions: { width: targetWidth, height: targetHeight }
-        };
-      } catch (error) {
-        console.warn('[compressImage] Ultra conservative strategy failed:', error);
-        try {
-          const jpegData = await compressImageWithFFmpeg(data, 0.9, 'jpeg');
-          return {
-            data: jpegData,
-            format: 'jpeg',
-            compressionMethod: 'fallback-jpeg',
-            originalSize: originalSize,
-            compressedSize: jpegData.length,
-            originalDimensions: dimensions,
-            finalDimensions: dimensions
-          };
-        } catch (jpegError) {
-          console.warn('[compressImage] JPEG conversion failed:', jpegError);
-          return {
-            data,
-            format: format || 'original',
-            compressionMethod: 'failed',
-            originalSize,
-            compressedSize: originalSize,
-            originalDimensions: dimensions,
-            finalDimensions: dimensions
-          };
-        }
-      }
-    }
-    
-    try {
-      data = await preprocessImageDimensions(data);
-      originalSize = data.byteLength;
-    } catch (error) {
-      console.warn('[compressImage] Dimension preprocessing failed:', error);
-    }
-    
-    if (allowDownsampling) {
-      try {
-        if (originalSize > 5 * 1024 * 1024) {
-          data = await downsampleImage(data, Math.min(maxImageSize, 1600));
-          originalSize = data.byteLength;
-        } else if (originalSize > 2 * 1024 * 1024) {
-          data = await downsampleImage(data, Math.min(maxImageSize, 2000));
-          originalSize = data.byteLength;
-        }
-      } catch (error) {
-        console.warn('[compressImage] Downsampling failed:', error);
-      }
-    }
-    
     const cacheKey = `${originalSize}-${quality}-${hashCode(data)}`;
     let cached = null;
     try {
       cached = imageCache.get(cacheKey);
       if (cached) {
+        console.log('[compressImage] Using cached result');
         return cached;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn('[compressImage] Cache access failed:', e.message);
+    }
     
     if (originalSize <= COMPRESSION_SETTINGS.MIN_COMPRESSION_SIZE_BYTES) {
-      return { data, format: 'original', compressionMethod: 'skipped-small', originalSize, compressedSize: originalSize, originalDimensions: dimensions, finalDimensions: dimensions };
+      console.log('[compressImage] Skipping small image');
+      return { data, format: 'original', compressionMethod: 'skipped-small', originalSize, compressedSize: originalSize, originalDimensions: { width: 0, height: 0 }, finalDimensions: { width: 0, height: 0 } };
     }
     
-    const shouldSkipEnhancement = 
-      totalPixels > 500000 || 
-      originalSize > 4 * 1024 * 1024 || 
-      format === 'gif' || 
-      format === 'unknown';
-    
-    if (!shouldSkipEnhancement) {
-      try {
-        data = await enhanceImage(data, format);
-      } catch (error) {
-        console.warn('[compressImage] Enhancement failed:', error);
+    console.log('[compressImage] Detecting image format');
+    let format;
+    try {
+      format = await detectFormat(data);
+      console.log('[compressImage] Detected format:', format);
+      if (!format) {
+        console.error('[compressImage] Format detection returned null/undefined');
+        throw new Error('Format detection failed: returned null/undefined');
       }
+    } catch (error) {
+      console.error('[compressImage] Format detection failed:', error.message);
+      throw new Error(`Format detection failed: ${error.message}`);
     }
-    
-    if (allowFormatConversion && ['bmp', 'tiff', 'tga', 'pcx', 'ppm', 'pgm', 'pbm', 'sgi', 'sun'].includes(format)) {
-      try {
-        // 对于这些格式，优先转换为 PNG
-        data = await compressImageWithFFmpeg(data, 1, 'png');
-        format = 'png';
-      } catch (error) {
-        console.warn('[compressImage] Format conversion failed:', error);
-        try {
-          // 如果 PNG 转换失败，尝试转换为 JPEG
-          data = await compressImageWithFFmpeg(data, 0.95, 'jpeg');
-          format = 'jpeg';
-        } catch (jpegError) {
-          console.warn('[compressImage] JPEG conversion failed:', jpegError);
-        }
-      }
-    }
-    
-    if (format === 'unknown' || format === 'gif') {
-      return { data, format: format || 'original', compressionMethod: 'skipped-format', originalSize, compressedSize: originalSize, originalDimensions: dimensions, finalDimensions: dimensions };
-    }
-    
-    const shouldUseConservativeCompression = 
-      totalPixels > 1000000 || 
-      originalSize > 2 * 1024 * 1024;
     
     let bestResult = null;
-    if (format === 'png' && allowFormatConversion) {
+    
+    // 透明通道拦截：任何带透明通道的图片都禁止进入ffmpeg
+    if (format === 'png' || format === 'webp' || format === 'tiff' || format === 'tif' || format === 'gif' || format === 'ico' || format === 'heif' || format === 'heic' || format === 'avif') {
+      console.log('[compressImage] Potential transparent image format detected:', format);
       let hasAlpha = false;
       try {
+        console.log('[compressImage] Starting alpha channel check');
         hasAlpha = await checkAlphaChannel(data);
-      } catch (error) {
-        console.warn('[compressImage] PNG alpha check failed, assuming alpha:', error);
-        hasAlpha = true;
+        console.log('[compressImage] Alpha channel check result:', hasAlpha);
+      } catch (e) {
+        console.error('[compressImage] Alpha channel check failed:', e.message);
+        console.error('[compressImage] Error stack:', e.stack);
+        hasAlpha = true; // 出错时保守地认为有透明通道
       }
       
-      if (!hasAlpha) {
-        const results = [];
-        
+      if (hasAlpha) {
+        console.log('[compressImage] Detected alpha channel, using Canvas processing');
         try {
-          if (shouldUseConservativeCompression) {
-            const jpegQuality = 0.95;
-            const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
-            results.push({ data: jpegData, format: 'jpeg' });
-          } else {
-            let webpQuality = await adjustQualityByContent(data, 'webp', quality * 1.2);
-            let webpData = await compressImageWithFFmpeg(data, webpQuality, 'webp');
-            results.push({ data: webpData, format: 'webp' });
-            
-            if (webpData.length > originalSize * 0.95) {
-              try {
-                const pngQuality = await adjustQualityByContent(data, 'png', quality);
-                const pngData = await compressImageWithFFmpeg(data, pngQuality, 'png');
-                results.push({ data: pngData, format: 'png' });
-              } catch (error) {
-                console.warn('[compressImage] PNG compression failed:', error);
-              }
-              
-              try {
-                const jpegQuality = await adjustQualityByContent(data, 'jpeg', quality);
-                const jpegData = await compressImageWithFFmpeg(data, jpegQuality, 'jpeg');
-                results.push({ data: jpegData, format: 'jpeg' });
-              } catch (error) {
-                console.warn('[compressImage] JPEG compression failed:', error);
-              }
-            }
+          const blob = new Blob([data], { type: `image/${format}` });
+          console.log('[compressImage] Created blob for Canvas processing, size:', blob.size);
+          
+          console.log('[compressImage] Creating bitmap');
+          const bitmap = await createImageBitmap(blob);
+          console.log('[compressImage] Bitmap created, dimensions:', bitmap.width, 'x', bitmap.height);
+          
+          console.log('[compressImage] Creating OffscreenCanvas');
+          const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            throw new Error('Failed to get 2D context for Canvas processing');
           }
           
-          if (results.length > 0) {
-            bestResult = results.reduce((a, b) => (a.data.length < b.data.length ? a : b));
-            console.log(`[compressImage] ${bestResult.format}: ${originalSize} -> ${bestResult.data.length} bytes`);
-          }
+          console.log('[compressImage] Drawing image to canvas');
+          ctx.drawImage(bitmap, 0, 0);
+          bitmap.close && bitmap.close();
+          
+          console.log('[compressImage] Converting to blob');
+          const outBlob = await canvas.convertToBlob({ type: `image/${format}` });
+          console.log('[compressImage] Blob created, size:', outBlob.size);
+          
+          console.log('[compressImage] Converting to Uint8Array');
+          const outData = new Uint8Array(await outBlob.arrayBuffer());
+          console.log('[compressImage] Final data size:', outData.length);
+          
+          return { 
+            data: outData, 
+            format, 
+            compressionMethod: 'canvas-alpha', 
+            originalSize, 
+            compressedSize: outData.length, 
+            originalDimensions: { width: bitmap.width, height: bitmap.height }, 
+            finalDimensions: { width: bitmap.width, height: bitmap.height } 
+          };
         } catch (error) {
-          console.warn('[compressImage] Format optimization failed:', error);
+          console.error('[compressImage] Canvas processing failed:', error.message);
+          console.error('[compressImage] Error stack:', error.stack);
+          // 如果Canvas处理失败，返回原始数据
+          return { 
+            data, 
+            format: 'original', 
+            compressionMethod: 'canvas-failed', 
+            originalSize, 
+            compressedSize: originalSize, 
+            originalDimensions: { width: 0, height: 0 }, 
+            finalDimensions: { width: 0, height: 0 },
+            error: error.message 
+          };
         }
+      } else {
+        console.log('[compressImage] No alpha channel detected, proceeding with FFmpeg');
       }
     }
     
     if (!bestResult) {
+      console.log(`[compressImage] Compressing as ${format}`);
       try {
-        const adjustedQuality = shouldUseConservativeCompression ? 0.95 : await adjustQualityByContent(data, format, quality);
-        let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
+        // 使用智能质量调整
+        const adjustedQuality = await adjustQualityByContent(data, format, quality);
+        console.log('[compressImage] Adjusted quality:', adjustedQuality);
         
-        if (compressedData.length > originalSize * 0.95) {
-          try {
-            const higherQuality = Math.min(1, adjustedQuality * 1.1);
-            const recompressedData = await compressImageWithFFmpeg(data, higherQuality, format);
-            
-            if (recompressedData.length < compressedData.length) {
-              compressedData = recompressedData;
-            }
-          } catch (error) {
-            console.warn('[compressImage] Recompression failed:', error);
+        let compressedData = await compressImageWithFFmpeg(data, adjustedQuality, format);
+        console.log('[compressImage] Initial compression result size:', compressedData.length);
+        
+        // 如果压缩效果不好，尝试额外降低质量
+        if (compressedData.length > originalSize * 0.9) {
+          console.log('[compressImage] Poor compression, trying lower quality');
+          const lowerQuality = adjustedQuality * 0.9;
+          const recompressedData = await compressImageWithFFmpeg(data, lowerQuality, format);
+          
+          if (recompressedData.length < compressedData.length) {
+            console.log('[compressImage] Lower quality compression successful');
+            compressedData = recompressedData;
           }
         }
         
         bestResult = { data: compressedData, format };
-        console.log(`[compressImage] ${format}: ${originalSize} -> ${compressedData.length} bytes`);
+        console.log(`[compressImage] Final compression: ${format}, orig=${originalSize}, comp=${compressedData.length}`);
       } catch (error) {
-        console.warn('[compressImage] Compression failed:', error);
-        bestResult = { data, format };
+        console.error('[compressImage] FFmpeg compression failed:', error.message);
+        console.error('[compressImage] Error stack:', error.stack);
+        throw error;
       }
     }
     
@@ -1041,22 +521,29 @@ export async function compressImage(data, options = {}) {
       compressionMethod: 'ffmpeg',
       originalSize: originalSize,
       compressedSize: bestResult.data.length,
-      originalDimensions: dimensions,
-      finalDimensions: dimensions
+      originalDimensions: { width: 0, height: 0 },
+      finalDimensions: { width: 0, height: 0 }
     };
     
-    try { imageCache.set(cacheKey, result); } catch (e) {}
+    try { 
+      imageCache.set(cacheKey, result);
+      console.log('[compressImage] Result cached successfully');
+    } catch (e) {
+      console.warn('[compressImage] Failed to cache result:', e.message);
+    }
+    
     return result;
   } catch (error) {
-    console.error('[compressImage] Error:', error);
+    console.error('[compressImage] Compression failed:', error.message);
+    console.error('[compressImage] Error stack:', error.stack);
     return { 
       data, 
-      format: format || 'original', 
+      format: 'original', 
       compressionMethod: 'error', 
       originalSize, 
       compressedSize: originalSize, 
-      originalDimensions: dimensions, 
-      finalDimensions: dimensions, 
+      originalDimensions: { width: 0, height: 0 }, 
+      finalDimensions: { width: 0, height: 0 }, 
       error: error.message 
     };
   }
@@ -1065,59 +552,73 @@ export async function compressImage(data, options = {}) {
 // 修改PNG透明度检查方法，增加错误处理
 async function checkAlphaChannel(data) {
   try {
+    console.log('[checkAlphaChannel] Starting alpha channel check');
     const format = await detectFormat(data);
-    if (format !== 'png') return false;
+    console.log('[checkAlphaChannel] Detected format:', format);
+    if (format !== 'png') {
+      console.log('[checkAlphaChannel] Not a PNG file, skipping check');
+      return false;
+    }
     
     // 使用Canvas API解析图像
     const blob = new Blob([data], { type: 'image/png' });
+    console.log('[checkAlphaChannel] Created blob, size:', blob.size);
     let bitmap;
     try {
+      console.log('[checkAlphaChannel] Attempting to create bitmap');
       bitmap = await createImageBitmap(blob);
+      console.log('[checkAlphaChannel] Bitmap created successfully, dimensions:', bitmap.width, 'x', bitmap.height);
     } catch (err) {
-      console.warn('[checkAlphaChannel] Failed to create bitmap:', err.message);
+      console.error('[checkAlphaChannel] Failed to create bitmap:', err.message);
+      console.error('[checkAlphaChannel] Error stack:', err.stack);
       return true; // 解析失败时，保守地认为有透明度
     }
     
     // 绘制到canvas上并获取像素数据
+    console.log('[checkAlphaChannel] Creating OffscreenCanvas');
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      console.warn('[checkAlphaChannel] Failed to get 2D context');
+      console.error('[checkAlphaChannel] Failed to get 2D context');
       bitmap.close && bitmap.close();
       return true;
     }
     
+    console.log('[checkAlphaChannel] Drawing image to canvas');
     ctx.drawImage(bitmap, 0, 0);
     bitmap.close && bitmap.close();
     
     let imageData;
     try {
+      console.log('[checkAlphaChannel] Getting image data');
       imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      console.log('[checkAlphaChannel] Image data retrieved, size:', imageData.data.length);
     } catch (err) {
-      console.warn('[checkAlphaChannel] Failed to get image data:', err.message);
+      console.error('[checkAlphaChannel] Failed to get image data:', err.message);
+      console.error('[checkAlphaChannel] Error stack:', err.stack);
       return true;
     }
     
     // 检查透明度通道
+    console.log('[checkAlphaChannel] Checking alpha channel values');
+    let alphaCount = 0;
     for (let i = 3; i < imageData.data.length; i += 4) {
-      if (imageData.data[i] < 255) return true;
+      if (imageData.data[i] < 255) {
+        alphaCount++;
+        if (alphaCount > 0) {
+          console.log('[checkAlphaChannel] Found transparent pixel at index:', i);
+          return true;
+        }
+      }
     }
     
+    console.log('[checkAlphaChannel] No transparent pixels found');
     return false;
   } catch (error) {
-    console.error('[checkAlphaChannel] Error:', error);
+    console.error('[checkAlphaChannel] Unexpected error:', error.message);
+    console.error('[checkAlphaChannel] Error stack:', error.stack);
     return true; // 出错时安全地返回有透明通道
   }
-}
-
-// 添加清理函数
-export async function cleanupTransparentPNGs() {
-  if (transparentPNGs.size > 0) {
-    console.log(`[cleanupTransparentPNGs] Processing remaining ${transparentPNGs.size} transparent PNGs`);
-    const results = await processTransparentPNGs();
-    return results;
-  }
-  return [];
 }
 
 export { 
